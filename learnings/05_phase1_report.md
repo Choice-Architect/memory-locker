@@ -9,7 +9,8 @@ This document summarizes the key accomplishments and decisions made during Phase
 1.  **Infrastructure Setup:**
     *   Supabase project created.
     *   `pgvector` extension enabled in Supabase.
-    *   Netlify site created and linked to the project's GitHub repository.
+    *   Local Git repository initialized.
+    *   GitHub repository (`Choice-Architect/memory-locker`) created and initial project files pushed.
     *   Local development environment prepared (directory structure, config files).
 
 2.  **Database Schema Finalized:**
@@ -24,11 +25,17 @@ This document summarizes the key accomplishments and decisions made during Phase
 
 4.  **Netlify Function Environment:**
     *   Directory structure `netlify/functions/memory-action/` created.
-    *   `package.json` and `tsconfig.json` created with initial dependencies and TypeScript configuration.
+    *   `package.json` created and initialized with `npm init -y`.
+    *   Dependencies (`@supabase/supabase-js`, `typescript`, `@types/node`, `@netlify/functions`) installed.
+    *   `tsconfig.json` created with appropriate settings for Netlify Functions.
+    *   Placeholder `memory-action.ts` file created with basic imports and handler structure.
+    *   Status: **Completed**.
 
-5.  **Environment Variables:**
-    *   Standard names agreed upon: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ACTION_SECRET_KEY`.
-    *   *(Note: `ACTION_SECRET_KEY` value needs to be generated securely before deployment).* 
+5.  **Environment Variables & Secrets:**
+    *   Standard names agreed upon: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ACTION_SECRET_KEY`, `OPENAI_API_KEY`.
+    *   Secure `ACTION_SECRET_KEY` generated.
+    *   Local `.env` file created with placeholders for Supabase/OpenAI keys and the generated `ACTION_SECRET_KEY`.
+    *   `.gitignore` file created and configured to exclude `.env`.
 
 ## Key Decisions & Strategies Confirmed:
 
@@ -47,5 +54,10 @@ This document summarizes the key accomplishments and decisions made during Phase
 *   `learnings/03_required_decisions.md`
 *   `learnings/04_questions_to_answer.md`
 *   `sql/README.md`
+*   `learnings/05_phase1_report.md` (this file)
 
-**Next Step:** Proceed to Phase 2: Core Action Development (Netlify Function), starting with API Endpoint Design.
+**Next Steps (Start of Phase 2 Setup):**
+
+1.  Create a new Netlify site and import the `Choice-Architect/memory-locker` GitHub repository.
+2.  Configure Netlify environment variables (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ACTION_SECRET_KEY`, `OPENAI_API_KEY`).
+3.  Proceed to Phase 2: Core Action Development (Netlify Function), starting with API Endpoint Design.
