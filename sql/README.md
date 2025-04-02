@@ -63,11 +63,12 @@ To use the vector embeddings functionality:
 2. When generating embeddings (e.g., within the Netlify function), use the **`text-embedding-3-small`** model.
 3. Store the resulting **1536-dimension** vectors in the `transcript_embeddings.embedding` column.
 4. Perform similarity searches using the `<=>` operator (cosine distance).
-5. **Create an HNSW index manually after setting up the table:**
+5. **Create an HNSW index manually after setting up the table:** Ensure only *one* HNSW index exists on the `embedding` column for optimal performance.
    ```sql
    -- Example using cosine distance, recommended for OpenAI embeddings
    CREATE INDEX ON transcript_embeddings USING hnsw (embedding vector_cosine_ops);
    ```
+   *(You might need to drop automatically generated or duplicate indexes on this column if they exist)*.
 
 ## Notes
 
