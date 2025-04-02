@@ -1,0 +1,26 @@
+{
+  "name": "cursor-project-gpt",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Choice-Architect/memory-locker.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Choice-Architect/memory-locker/issues"
+  },
+  "homepage": "https://github.com/Choice-Architect/memory-locker#readme",
+  "dependencies": {
+    "@netlify/functions": "^3.0.4",
+    "@supabase/supabase-js": "^2.49.4",
+    "openai": "^4.91.1"
+  }
+}
