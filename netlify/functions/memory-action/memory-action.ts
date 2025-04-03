@@ -230,7 +230,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
                         return {
                             file_id: fileId,
-                            chunk_text: chunk,
+                            content_chunk: chunk,
                             embedding: embedding, // Store the vector
                             metadata: chunkMetadata, // Store chunk-level metadata
                         };
@@ -313,7 +313,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
                     // c. Format results into ContextObject[]
                     retrieved_context = vectorResults.map((row: any) => ({
-                        chunk: row.chunk_text,
+                        chunk: row.content_chunk,
                         // Assuming metadata contains timestamp, adjust if schema differs
                         timestamp: row.metadata?.created_at || new Date(0).toISOString(),
                         // Add file-level entities here? Requires fetching from files table or joining in RPC.

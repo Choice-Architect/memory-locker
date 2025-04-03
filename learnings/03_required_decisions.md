@@ -30,6 +30,9 @@ This document outlines the key information and decisions needed from you before 
 
 ## Phase 3: Custom GPT Configuration & Action Schema
 
+*   **API Contract Definition:**
+    *   **DECIDED:** The API contract for the single `memory-action` Netlify function has been defined, specifying input/output JSON structures, including detailed `retrieved_context` with chunk-level metadata. (See Phase 2 in `01_new_gpt_roadmap.md`).
+    *   *Why:* Defines the exact communication protocol between the GPT Action and the backend function, based on decisions about query logic and metadata.
 *   **GPT Persona & Tone:**
     *   How should the Memory Locker GPT behave? (e.g., Formal assistant? Casual friend? Empathetic listener?)
     *   What tone should it use in its responses?

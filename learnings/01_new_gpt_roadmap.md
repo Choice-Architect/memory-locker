@@ -55,11 +55,13 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
 
 1.  **API Endpoint Design:**
     *   Task: Define the request/response structure for the Netlify function (e.g., endpoint path `/api/memory-action`).
-    *   Task: Define expected input JSON (e.g., `{ query: string, extracted_entities: object, file_metadata?: object, mode: 'store' | 'query' | 'combined' }`).
-    *   Task: Define output JSON (e.g., `{ retrieved_context: string[], storage_status: string, error?: string }`).
-    *   Deliverable: API contract specification.
+    *   Task: Define expected input JSON (e.g., `{ query_text: string, extracted_entities: object, user_id?: string, mode: 'store' | 'query' | 'combined' }`).
+    *   Task: Define output JSON (e.g., success: `{ retrieved_context: [{chunk: string, timestamp: string, entities_in_chunk: object}], storage_status: string, query_source: string, message_for_gpt?: string, error: null }`, error: `{ error: string }`).
+    *   **Decision:** A single action (`memory-action`) will handle different operations via the `mode` parameter, rather than creating multiple separate actions.
+    *   **Status:** **Completed**. Final API contract defined.
+    *   Deliverable: API contract specification (documented within this roadmap and potentially a separate spec file if needed).
 2.  **Supabase Integration:**
-    *   Task: Implement Supabase client initialization within the function.
+    *   Task: Implement Supabase client initialization within the function using environment variables.
     *   Task: Implement secure handling of Supabase credentials.
     *   Deliverable: Function capable of connecting to Supabase.
 3.  **Database Logic Implementation:**

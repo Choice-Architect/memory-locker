@@ -27,3 +27,7 @@ Here are the key questions regarding the **Custom GPT + Actions** workflow and t
     *   Question: How to handle indexing for `transcript_embeddings.embedding`?
     *   **Resolution:** An Approximate Nearest Neighbor (ANN) index (e.g., HNSW) **is required** for efficient vector search performance with 1536 dimensions. It will be created manually using a separate SQL command (e.g., `CREATE INDEX ON transcript_embeddings USING hnsw (embedding vector_cosine_ops);`) after the initial schema setup and enabling `pgvector`.
 
+7.  **Action Granularity & API Contract:**
+    *   Question: Should we use one action or multiple? What should the API contract look like?
+    *   **Resolution:** A **single `memory-action`** will be used, pointing to one Netlify function. The function will handle different operations (`store`, `query`, `combined`) based on a `mode` parameter in the request. The API contract is defined (see `01_new_gpt_roadmap.md`, Phase 2.1) with specific input JSON and output JSON, including a detailed `retrieved_context` object containing chunk text, timestamp, and chunk-level entities. A string-based `message_for_gpt` field will provide optional hints to the GPT.
+

@@ -1,6 +1,6 @@
 # Phase 2: Core Action Development (Netlify Function) - Progress Report
 
-**Status:** Tasks 2.1-2.4 Completed. Task 2.5 Pending.
+**Status:** Tasks 2.1-2.4 Completed. Task 2.5 In Progress.
 
 This document tracks the progress and decisions made during Phase 2 of the Memory Locker Custom GPT project.
 
@@ -22,6 +22,7 @@ This document tracks the progress and decisions made during Phase 2 of the Memor
         *   Implemented storage logic (`store`/`combined` modes): Chunks text, creates `files` record, generates OpenAI embeddings (`text-embedding-3-small`), and stores chunks/embeddings/metadata in `transcript_embeddings`.
         *   Implemented query logic (`query`/`combined` modes): Generates query embedding, calls `search_memory_chunks` Supabase RPC function for vector search, and formats results.
         *   Created `search_memory_chunks` SQL function in Supabase database to handle efficient vector search.
+        *   Corrected definition of `search_memory_chunks` after initial syntax error.
 
 4.  **Error Handling & Logging (Task 2.4):**
     *   Status: **Completed (Initial Pass)**
@@ -29,8 +30,16 @@ This document tracks the progress and decisions made during Phase 2 of the Memor
     *   Details: Basic `console.log`/`console.error` added. Main `catch` block refined to return more specific HTTP status codes (400, 401, 405, 500) based on error types.
 
 5.  **Initial Deployment & Testing (Task 2.5):**
-    *   Status: **Pending**
+    *   Status: **In Progress**
     *   Objective: Deploy the function and test the endpoint directly.
+    *   Progress:
+        *   Initial deployment failed due to missing root `package.json`.
+        *   Added root `package.json` and installed dependencies (`@supabase/supabase-js`, `openai`, `@netlify/functions`). Build succeeded.
+        *   Cleaned up redundant nested `package.json` and `package-lock.json` from function directory.
+        *   Resolved Supabase performance advisor warning by dropping duplicate HNSW index `transcript_embeddings_embedding_idx`.
+        *   Testing `'store'` mode via `curl` initially failed due to incorrect `SUPABASE_SERVICE_ROLE_KEY` and `ACTION_SECRET_KEY` environment variables in Netlify.
+        *   Corrected environment variables in Netlify and redeployed.
+        *   Subsequent `curl` test failed with `{"error":"Failed to store file record: permission denied for schema public"}`.
 
 ## Key Decisions Made During Phase 2:
 
@@ -38,8 +47,41 @@ This document tracks the progress and decisions made during Phase 2 of the Memor
 *   Finalized the API contract (input/output JSON structure) for the `memory-action` function.
 *   Confirmed use of Supabase RPC (`search_memory_chunks`) for efficient vector search.
 
-## Next Steps:
+## Next Steps / Pause Point (Apr 2nd Evening):
 
-*   Proceed with **Task 2.5: Initial Deployment & Testing**.
-    *   Commit and push code changes (`netlify/functions/memory-action/memory-action.ts`) to trigger Netlify deployment.
-    *   Test the deployed function endpoint using `curl` or Postman with sample `store` and `query` payloads. 
+*   **Investigate and resolve the `permission denied for schema public` error encountered during the `store` operation test.**
+    *   Primary focus: Check Row Level Security (RLS) status on the `public.files` table in Supabase. Temporarily disable if active to see if it resolves the issue (indicating an unexpected interaction with the service key).
+    *   Secondary focus: If RLS is not the cause, consider resetting default privileges for the `public` schema using the `GRANT` commands previously discussed.
+*   Once the permission error is resolved, re-test the `'store'` mode via `curl`.
+*   If `'store'` mode succeeds, proceed to test `'query'` mode via `curl`.
+*   Address the Supabase performance advisor warning: "Function Search Path Mutable" for `search_memory_chunks` by setting `search_path` explicitly within the function definition (lower priority). 
+
+## Update (Apr 3rd): Troubleshooting Curl Tests
+
+*   First `curl` test failed with `{"error":"Unauthorized"}` due to sending the API key in the `Authorization: Bearer` header instead of the `x-api-key` header expected by the function.
+*   Second `curl` test (with corrected `x-api-key` header) failed with `{"error":"Expected property name or '}' in JSON at position 1 (line 1 column 2)"}`. This indicates a JSON parsing error, likely due to shell escaping issues with the `-d` payload.
+*   **Next Troubleshooting Step:** Create a temporary `payload.json` file and use `curl -d @payload.json` to ensure correct JSON formatting for the next test. 
+
+## Update (Apr 3rd - Continued): Resolving 'store' Mode Errors
+
+*   Third `curl` test (using `payload.json`) bypassed JSON parsing error but revealed original `permission denied for schema public` error for `files` table, even with RLS disabled.
+*   Executed `GRANT` commands to ensure `service_role` had privileges on `public` schema and `files` table.
+*   Fourth `curl` test failed with `null value in column "id" of relation "files" violates not-null constraint`.
+    *   **Fix:** Updated `sql/schema.sql` and ran `ALTER TABLE files ALTER COLUMN id SET DEFAULT gen_random_uuid();`.
+*   Fifth `curl` test failed with `violates check constraint "files_file_type_check"`.
+    *   **Fix:** Updated `sql/schema.sql` and ran `ALTER TABLE files DROP CONSTRAINT files_file_type_check;`, `ALTER TABLE files ADD CONSTRAINT files_file_type_check CHECK (file_type IN ('audio', 'image', 'document', 'gpt_interaction'));`.
+*   Sixth `curl` test partially succeeded: Inserted into `files` table but failed inserting into `transcript_embeddings` with `Could not find the 'chunk_text' column`. 
+    *   **Fix:** Corrected column name in `memory-action.ts` insert preparation from `chunk_text` to `content_chunk`. Deployed change.
+*   Audited function code against schema. Found discrepancy in RPC result processing: code expected `row.chunk_text` but schema implies `row.content_chunk` from `transcript_embeddings`.
+    *   **Fix:** Corrected column name in `memory-action.ts` result mapping. Deployed change.
+*   Identified that `transcript_embeddings.file_id` allowed NULLs, contradicting requirement for mandatory link to `files`.
+    *   **Fix:** Updated `sql/schema.sql` and ran `ALTER TABLE transcript_embeddings ALTER COLUMN file_id SET NOT NULL;`.
+
+## Current Status & Next Steps (End of Session):
+
+*   All identified schema/code discrepancies related to the 'store' operation have been addressed and deployed.
+*   Database schema (`sql/schema.sql`) is updated.
+*   RLS on the `files` table is still **disabled** for testing.
+*   **Next action:** Run the `curl` command for `'store'` mode again to verify the end-to-end storage flow works.
+*   If 'store' mode succeeds, re-enable RLS on the `files` table and test again.
+*   Then, proceed to test `'query'` mode via `curl`. 

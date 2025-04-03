@@ -15,11 +15,11 @@ CREATE TABLE users (
 
 -- Files Table: Central storage for all file types with metadata
 CREATE TABLE files (
-    id UUID PRIMARY KEY,                        -- Unique identifier for each file
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Unique identifier for each file, auto-generated
     user_id UUID REFERENCES users(id),          -- Links to the owner in users table
     title TEXT,                                 -- Display name for the file
     transcript_text TEXT,                       -- Text content for documents or transcribed audio
-    file_type TEXT CHECK (file_type IN ('audio', 'image', 'document')),  -- File category
+    file_type TEXT CHECK (file_type IN ('audio', 'image', 'document', 'gpt_interaction')),  -- File category, including direct GPT input
     file_id TEXT,                               -- External reference ID
     file_unique_id TEXT,                        -- Another external reference ID
     file_path TEXT,                             -- Location path for the file
@@ -96,8 +96,8 @@ CREATE TABLE persona_transactions (
 
 -- Vector Embeddings Table: Stores OpenAI large model embeddings for semantic search
 CREATE TABLE transcript_embeddings (
-    id UUID PRIMARY KEY,                        -- Unique identifier for each embedding
-    file_id UUID REFERENCES files(id) ON DELETE CASCADE, -- Links to source file (deleted if file is deleted)
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Unique identifier for each embedding, auto-generated
+    file_id UUID NOT NULL REFERENCES files(id) ON DELETE CASCADE, -- Links to source file (deleted if file is deleted), MUST exist
     content_chunk TEXT NOT NULL,                -- The actual text chunk that was embedded
     chunk_index INTEGER,                        -- Position of chunk within original content
     embedding vector(1536),                     -- Vector embedding (1536 for OpenAI small model)

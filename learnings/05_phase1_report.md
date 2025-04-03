@@ -55,9 +55,3 @@ This document summarizes the key accomplishments and decisions made during Phase
 *   `learnings/04_questions_to_answer.md`
 *   `sql/README.md`
 *   `learnings/05_phase1_report.md` (this file)
-
-**Next Steps (Start of Phase 2 Setup):**
-
-1.  Create a new Netlify site and import the `Choice-Architect/memory-locker` GitHub repository.
-2.  Configure Netlify environment variables (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ACTION_SECRET_KEY`, `OPENAI_API_KEY`).
-3.  Proceed to Phase 2: Core Action Development (Netlify Function), starting with API Endpoint Design.
