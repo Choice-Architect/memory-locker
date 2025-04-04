@@ -182,7 +182,8 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                     transcript_text: textToStore, // Store the full text
                     file_metadata: fileMetadata, // Store all extracted entities
                     title: textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : ''), // Simple title
-                    file_type: 'gpt_interaction' // Mark as originating from GPT interaction
+                    file_type: 'gpt_interaction', // Mark as originating from GPT interaction
+                    user_id: payload.user_id // Add user_id if available
                 })
                 .select('id') // Return the ID of the new row
                 .single(); // Expect only one row
