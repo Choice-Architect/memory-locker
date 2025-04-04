@@ -84,4 +84,24 @@ This document tracks the progress and decisions made during Phase 2 of the Memor
 *   RLS on the `files` table is still **disabled** for testing.
 *   **Next action:** Run the `curl` command for `'store'` mode again to verify the end-to-end storage flow works.
 *   If 'store' mode succeeds, re-enable RLS on the `files` table and test again.
-*   Then, proceed to test `'query'` mode via `curl`. 
+*   Then, proceed to test `'query'` mode via `curl`.
+
+## Update (Apr 3rd - End of Session Prep):
+
+*   Netlify function redeployment completed successfully after committing latest code fixes.
+*   Temporary `payload.json` file used for curl testing was deleted.
+
+## Update (Apr 4th): Testing Query Mode
+
+*   Ran `curl` test for `'store'` mode after re-enabling RLS on `files` table. **Success!** Confirmed service key bypasses RLS correctly.
+*   Ran `curl` test for `'query'` mode. Failed with `{"query_source":"error","message_for_gpt":"Error searching memories."}`.
+*   Hypothesis: Missing `EXECUTE` permission on the `search_memory_chunks` RPC function for the `service_role`.
+*   **Action:** Executed `GRANT EXECUTE ON FUNCTION public.search_memory_chunks(...) TO service_role;`.
+*   **Next Step for Next Session:** Re-run the `curl` command for `'query'` mode to see if granting execute permission resolved the issue. If not, investigate RPC function definition and parameters.
+
+## Update (Apr 4th): Endpoint Confirmation & Next Steps
+
+*   Further testing revealed that the correct Netlify function endpoint URL is `https://memory-locker-gpt.netlify.app/.netlify/functions/memory-action`, not the previously assumed `/api/memory-action` path.
+*   The successful 'store' mode test mentioned earlier was likely performed manually, but the endpoint used at that time is unconfirmed.
+*   The immediate next step is to test `'query'` mode using the confirmed `/.netlify/functions/` endpoint.
+*   If the `'query'` mode test succeeds, we should also re-run a `'store'` mode test using the confirmed endpoint to ensure full verification before concluding Phase 2. 
