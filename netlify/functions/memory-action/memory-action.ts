@@ -258,8 +258,10 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                         if (embeddingError) {
                             console.error("Error inserting into transcript_embeddings table:", embeddingError);
                             // Potentially attempt to delete the file record for consistency? Or report partial success.
-                            storage_status = `Stored file record (ID: ${fileId}) but failed to store embeddings: ${embeddingError.message}`;
+                            // storage_status = `Stored file record (ID: ${fileId}) but failed to store embeddings: ${embeddingError.message}`;
                             // Optionally throw error instead: throw new Error(`Failed to store embeddings: ${embeddingError.message}`);
+                            // THROW the error to ensure the function reports failure
+                            throw new Error(`Failed to store embeddings: ${embeddingError.message}`);
                         } else {
                              console.log("Embedding records inserted successfully.");
                             storage_status = `Successfully stored file record (ID: ${fileId}) and ${embeddingRecords.length} text chunks with embeddings.`;
@@ -287,9 +289,11 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
             if (!queryEmbedding) {
                 console.error("Failed to generate embedding for the query text.");
-                message_for_gpt = "Could not process the query embedding.";
-                query_source = 'error'; // Indicate an error state
+                // message_for_gpt = "Could not process the query embedding.";
+                // query_source = 'error'; // Indicate an error state
                 // Decide if we should throw an error or return partial results
+                // THROW the error as query cannot proceed without embedding
+                throw new Error("Failed to generate embedding for the query text.");
             } else {
                 console.log("Query embedding generated successfully.");
 
@@ -317,8 +321,10 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
                 if (rpcError) {
                     console.error("Error calling search_memory_chunks RPC:", rpcError);
-                    message_for_gpt = "Error searching memories.";
-                    query_source = 'error';
+                    // message_for_gpt = "Error searching memories.";
+                    // query_source = 'error';
+                    // THROW the error
+                    throw new Error(`Error searching memories: ${rpcError.message}`);
                 } else if (vectorResults && vectorResults.length > 0) {
                     console.log(`Found ${vectorResults.length} potential matches via vector search.`);
                     query_source = 'vector_store';
