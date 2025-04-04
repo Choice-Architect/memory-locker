@@ -132,7 +132,7 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
 ### Phase 4: Integration Testing & Iteration (Est. 2-3 weeks)
 
 **Objective:** Test the end-to-end flow from ChatGPT input to Supabase storage/retrieval and back, refining as needed.
-**Note (Apr 4, 2025):** Encountered foreign key constraint errors related to `user_id` during initial testing. Decided to refactor to remove `user_id` entirely for the single-user scope. Refactoring involved schema changes (removing `users` table, `user_id` columns, RLS policies), Netlify function updates, OpenAPI schema modification, and GPT instruction adjustments.
+**Note (Apr 4, 2025):** Encountered foreign key constraint errors related to `user_id` during initial testing. Decided to refactor to remove `user_id` entirely for the single-user scope. Refactoring involved schema changes (removing `users` table, `user_id` columns, RLS policies), Netlify function updates, OpenAPI schema modification, and GPT instruction adjustments. **Subsequently (Apr 4), RLS was re-enabled on all tables without specific ALLOW policies ('default deny') as a defense-in-depth measure, as the Netlify function uses the `service_role` key which bypasses RLS anyway.**
 
 1.  **End-to-End Testing:**
     *   Task: Interact with the Custom GPT in the ChatGPT preview or main interface.
@@ -171,7 +171,7 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
 ### Phase 6: Documentation & Launch (Est. 1 week)
 
 **Objective:** Finalize documentation and prepare for wider use (if applicable).
-**Note (Apr 4, 2025):** Need to ensure documentation reflects the removal of the `user_id` dependency.
+**Note (Apr 4, 2025):** Need to ensure documentation reflects the removal of the `user_id` dependency **and the re-enabling of RLS in 'default deny' mode.**
 
 1.  **Documentation:**
     *   Task: Clean up and finalize documentation for the OpenAPI schema.

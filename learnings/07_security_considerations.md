@@ -33,4 +33,12 @@ This document tracks security-related decisions made during development and item
 
 *   Phase 3 (Custom GPT Configuration) completed.
 *   Action authentication configured using API Key (`x-api-key`). This secures the Netlify function *endpoint* but does not change the backend authorization model.
-*   The primary remaining security consideration is the Netlify function's continued use of the Supabase `service_role` key, which bypasses RLS. This is acceptable for the current single-user testing phase but should be revisited for potential multi-user scenarios or stricter RLS enforcement requirements in the future (e.g., potentially using OAuth and passing user tokens to Supabase). 
+*   The primary remaining security consideration is the Netlify function's continued use of the Supabase `service_role` key, which bypasses RLS. This is acceptable for the current single-user testing phase but should be revisited for potential multi-user scenarios or stricter RLS enforcement requirements in the future (e.g., potentially using OAuth and passing user tokens to Supabase).
+
+## Considerations
+
+*   **API Key Security:** The `ACTION_SECRET_KEY` must be kept confidential. If exposed, anyone could call the Netlify function.
+*   **Supabase Service Role Key Security:** The `SUPABASE_SERVICE_ROLE_KEY` grants full database access, bypassing RLS. It's critical this key is never exposed client-side or in insecure environments.
+*   **Row Level Security (RLS):** While the function uses the service role key (bypassing RLS), RLS **is enabled** on tables without specific `ALLOW` policies ('default deny'). This acts as a defense-in-depth measure, preventing access from other roles (e.g., `anon`, `authenticated`) unless explicitly allowed by future policies. This protects against accidental exposure or misuse of other keys.
+*   **Input Validation:** The Netlify function should sanitize and validate inputs (`query_text`, `extracted_entities`) to prevent potential injection attacks or abuse, although the risk is lower when inputs primarily come from the trusted GPT context.
+*   **Rate Limiting:** Consider implementing rate limiting on the Netlify function endpoint to prevent abuse or denial-of-service attacks. 

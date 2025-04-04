@@ -110,7 +110,18 @@ CREATE TABLE transcript_embeddings (
 -- PART 2: SECURITY POLICIES
 -- =================================
 
--- (Removed all RLS policies and ENABLE ROW LEVEL SECURITY statements)
+-- Enable RLS on all tables in 'Default Deny' mode (no specific ALLOW policies defined).
+-- The service role key used by the Netlify function bypasses RLS.
+-- This provides defense-in-depth against other access vectors.
+ALTER TABLE files ENABLE ROW LEVEL SECURITY;
+ALTER TABLE queries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE personas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE persona_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_query_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE file_manager_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transcript_embeddings ENABLE ROW LEVEL SECURITY;
+
+-- (Removed all specific RLS policies during user_id refactor)
 
 -- PART 3: PERFORMANCE INDEXES
 -- =================================

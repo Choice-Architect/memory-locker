@@ -42,7 +42,7 @@ The `transcript_embeddings` table stores text chunks and their vector embeddings
 
 ### Security
 
-Row-level security is implemented to ensure users can only access their own data. Comprehensive policies are defined for each table.
+Row-level security (RLS) is **enabled** on all tables. However, no specific `ALLOW` policies are defined (using a 'default deny' approach). This means only roles that bypass RLS (like the `service_role` key used by the backend function) have access. It acts as a defense-in-depth measure.
 
 ## How to Use
 
@@ -81,7 +81,7 @@ To use the vector embeddings functionality:
 ### Schema Parts
 
 1.  **Tables:** Defines the structure for storing users, files, embeddings, personas, queries, logs, and transactions.
-2.  **Security Policies (RLS):** Implements Row Level Security to ensure users can only access their own data.
+2.  **Security Policies (RLS):** Enables Row Level Security on all tables using a 'default deny' approach (no specific `ALLOW` policies). Access relies on roles that bypass RLS (e.g., `service_role`).
 3.  **Performance Indexes:** Includes standard B-tree indexes for common query filtering and an HNSW index on the `transcript_embeddings.embedding` column for efficient vector similarity searches.
 4.  **Functions:** Contains helper functions, such as `search_memory_chunks` for performing vector searches.
 
