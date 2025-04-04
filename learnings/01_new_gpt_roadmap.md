@@ -23,11 +23,13 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
     *   Task: Enable the `pgvector` extension.
     *   Task: Secure API keys and project URL.
     *   Deliverable: Active Supabase project.
+    *   **Note (Apr 4):** User ID fields initially set to UUID, later changed to TEXT to accommodate GPT user IDs.
 2.  **Database Schema Definition:**
     *   Task: Define PostgreSQL table structures (e.g., `memories` renamed to `files`, `transcript_embeddings`, `queries`, etc. based on `schema.sql`). Columns include content, embeddings (`vector(1536)`), timestamps, source, metadata (`JSONB` for file-level in `files`, chunk-level in `transcript_embeddings`).
     *   Task: Define vector storage strategy (1536 dimensions for `text-embedding-3-small`, plan for HNSW index creation after initial setup).
-    *   Comment: *Schema largely defined in `schema.sql`. Key decisions made: Use `text-embedding-3-small`. File-level metadata (summary, all entities) in `files.file_metadata`. Chunk-level metadata (entities in chunk, timestamp) in `transcript_embeddings.metadata`.* 
+    *   Comment: *Schema largely defined in `schema.sql`. Key decisions made: Use `text-embedding-3-small`. File-level metadata (summary, all entities) in `files.file_metadata`. Chunk-level metadata (entities in chunk, timestamp) in `transcript_embeddings.metadata`.*
     *   Deliverable: SQL script for schema creation (`schema.sql` updated), documented schema design (partially covered by README and this roadmap).
+    *   **Note (Apr 4):** `users.id` and related foreign keys changed from UUID to TEXT post-Phase 1 to handle GPT user ID format (`user-...`).
 3.  **Netlify Project Setup:**
     *   Task: Create a new Netlify site.
     *   Task: Initialize a Git repository for the project.
@@ -92,11 +94,13 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
 ### Phase 3: Custom GPT Configuration & Action Schema (Est. 1-2 weeks)
 
 **Objective:** Configure the Custom GPT in the ChatGPT interface, including its instructions and the Action definition.
+**Status:** Completed (Apr 4, 2025)
 
 1.  **Custom GPT Creation:**
     *   Task: Create a new GPT via the ChatGPT UI.
     *   Task: Define name, description, and conversation starters.
     *   Deliverable: Basic Custom GPT shell.
+    *   **Note:** User completed this task.
 2.  **Instruction Authoring:**
     *   Task: Write detailed instructions defining the GPT's persona, purpose, and behavior.
     *   Task: Specify *when* and *why* to call the `Memory Action`.
@@ -104,8 +108,9 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
     *   Task: Specify the *format* for data sent to the Action (matching the Netlify function's expected input).
     *   Task: Explain how to use the `retrieved_context` from the Action's response.
     *   Task: Explain how to communicate `storage_status` or `error` messages back to the user appropriately.
-    *   **Comment:** *Requires detailed thought on the entity extraction strategy and how you want the GPT to behave.*
+    *   Comment: *Requires detailed thought on the entity extraction strategy and how you want the GPT to behave.*
     *   Deliverable: Comprehensive GPT instructions.
+    *   **Note:** Completed. Instructions refined to include "store by default" logic, dictation handling, and inferred metadata (`type`, `sentiment`). Final version saved in `learnings/09_gpt_instructions.md`.
 3.  **Action Schema Definition (OpenAPI):**
     *   Task: Create an OpenAPI v3 specification document (`openapi.yaml` or JSON).
     *   Task: Define the server URL (pointing to the deployed Netlify function).
@@ -114,11 +119,13 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
     *   Task: Define response schemas (e.g., 200 OK with success payload, error responses).
     *   Task: Define authentication requirements (likely API Key passed in header, managed by OpenAI).
     *   Deliverable: Valid OpenAPI specification file.
+    *   **Note:** Completed. Path confirmed as `/.netlify/functions/memory-action`. Switched from initial YAML approach to JSON due to parsing issues. Required OpenAPI version `3.1.0`. Final schema saved in `openapi.json`.
 4.  **Action Configuration:**
     *   Task: Add the OpenAPI schema to the Custom GPT configuration.
     *   Task: Configure authentication (set up API key if required by the Netlify function).
     *   Task: Test the schema validation within the GPT editor.
     *   Deliverable: Configured Action within the Custom GPT.
+    *   **Note:** Completed. Action configured using `openapi.json` schema. Authentication set to API Key using `x-api-key` header, value set to `ACTION_SECRET_KEY`. Schema validated successfully in editor.
 
 ---
 

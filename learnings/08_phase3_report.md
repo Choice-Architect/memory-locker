@@ -35,6 +35,7 @@ This document tracks the progress and decisions made during Phase 3 of the Memor
 *   Switched from **YAML to JSON** for the OpenAPI schema due to persistent parsing issues.
 *   Updated OpenAPI version requirement to **`3.1.0`**.
 *   Confirmed **API Key** authentication using `x-api-key` header is appropriate for this phase.
+*   Updated database schema (`users.id` and related FKs) from **UUID to TEXT** to accommodate non-UUID user IDs provided by the GPT system. Associated RLS policies updated accordingly.
 
 ## Next Steps (Phase 4):
 
@@ -42,4 +43,10 @@ This document tracks the progress and decisions made during Phase 3 of the Memor
 *   Perform initial tests in the GPT preview panel (simple store/query).
 *   Test more complex scenarios (dictation, combined mode, multi-part inputs).
 *   Verify data persistence and retrieval in Supabase.
-*   Monitor Netlify function logs. 
+*   Monitor Netlify function logs.
+
+## Final Status Update (End of Session):
+
+*   All Phase 3 code changes (Netlify function update, schema file creation, RLS policy updates) and documentation updates committed to Git.
+*   Changes successfully pushed and deployed via Netlify.
+*   Ready to begin Phase 4 testing in the next session. 
