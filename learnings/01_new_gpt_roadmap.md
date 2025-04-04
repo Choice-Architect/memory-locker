@@ -52,6 +52,7 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
 ### Phase 2: Core Action Development (Netlify Function) (Est. 2-4 weeks)
 
 **Objective:** Build the serverless function that acts as the bridge between the GPT Action and the Supabase database.
+**Status:** Completed (Apr 4, 2025)
 
 1.  **API Endpoint Design:**
     *   Task: Define the request/response structure for the Netlify function (e.g., endpoint path `/api/memory-action`).
@@ -84,6 +85,7 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
     *   Task: Deploy the first version of the function to Netlify.
     *   Task: Test the function endpoint directly (e.g., using `curl` or Postman) with sample data.
     *   Deliverable: Deployed and testable Netlify function endpoint URL.
+    *   **Status:** Completed. Function tested successfully for store, query, and combined modes via `curl` on the confirmed endpoint (`/.netlify/functions/memory-action`).
 
 ---
 

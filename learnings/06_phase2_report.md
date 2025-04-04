@@ -1,6 +1,6 @@
 # Phase 2: Core Action Development (Netlify Function) - Progress Report
 
-**Status:** Tasks 2.1-2.4 Completed. Task 2.5 In Progress.
+**Status:** Tasks 2.1-2.4 Completed. Task 2.5 Completed.
 
 This document tracks the progress and decisions made during Phase 2 of the Memory Locker Custom GPT project.
 
@@ -30,7 +30,7 @@ This document tracks the progress and decisions made during Phase 2 of the Memor
     *   Details: Basic `console.log`/`console.error` added. Main `catch` block refined to return more specific HTTP status codes (400, 401, 405, 500) based on error types.
 
 5.  **Initial Deployment & Testing (Task 2.5):**
-    *   Status: **In Progress**
+    *   Status: **Completed**
     *   Objective: Deploy the function and test the endpoint directly.
     *   Progress:
         *   Initial deployment failed due to missing root `package.json`.
@@ -104,4 +104,13 @@ This document tracks the progress and decisions made during Phase 2 of the Memor
 *   Further testing revealed that the correct Netlify function endpoint URL is `https://memory-locker-gpt.netlify.app/.netlify/functions/memory-action`, not the previously assumed `/api/memory-action` path.
 *   The successful 'store' mode test mentioned earlier was likely performed manually, but the endpoint used at that time is unconfirmed.
 *   The immediate next step is to test `'query'` mode using the confirmed `/.netlify/functions/` endpoint.
-*   If the `'query'` mode test succeeds, we should also re-run a `'store'` mode test using the confirmed endpoint to ensure full verification before concluding Phase 2. 
+*   If the `\'query\'` mode test succeeds, we should also re-run a `\'store\'` mode test using the confirmed endpoint to ensure full verification before concluding Phase 2.
+
+## Update (Apr 4th - Evening): Phase 2 Complete
+
+*   After correcting the `search_memory_chunks` function definition (column name, return types, and search_path) in the Supabase database, `curl` tests confirmed:
+    *   `'query'` mode returns successfully (tested with no matching data).
+    *   `'store'` mode functions correctly (tested without providing `user_id`).
+    *   `'combined'` mode correctly executes both store and query operations sequentially.
+*   The function is deployed and operational on the confirmed endpoint: `https://memory-locker-gpt.netlify.app/.netlify/functions/memory-action`.
+*   All core objectives for Phase 2 are met. 
