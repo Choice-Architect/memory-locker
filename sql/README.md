@@ -76,4 +76,22 @@ To use the vector embeddings functionality:
 - Timestamps are used to track creation and update times
 - Foreign keys maintain referential integrity
 - Indexing is added for common search operations
-- An HNSW index on transcript_embeddings.embedding is crucial for performance and must be added manually. 
+- An HNSW index on transcript_embeddings.embedding is crucial for performance and must be added manually.
+
+### Schema Parts
+
+1.  **Tables:** Defines the structure for storing users, files, embeddings, personas, queries, logs, and transactions.
+2.  **Security Policies (RLS):** Implements Row Level Security to ensure users can only access their own data.
+3.  **Performance Indexes:** Includes standard B-tree indexes for common query filtering and an HNSW index on the `transcript_embeddings.embedding` column for efficient vector similarity searches.
+4.  **Functions:** Contains helper functions, such as `search_memory_chunks` for performing vector searches.
+
+### Key Tables
+
+1. **users** - User accounts
+2. **files** - Central storage for all file types with metadata
+3. **queries** - Search queries and results
+4. **user_query_history** - History of user interactions
+5. **personas** - Digital personas with identity information
+6. **persona_transactions** - Memories and information extracted for personas
+7. **file_manager_log** - File processing tracking
+8. **transcript_embeddings** - Vector embeddings for semantic search 

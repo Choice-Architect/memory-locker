@@ -1,6 +1,12 @@
 -- DATABASE SCHEMA FOR MEMORY LOCKER
 -- =================================
 
+-- PART 0: EXTENSIONS
+-- =================================
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
+
+
 -- PART 1: TABLE DEFINITIONS
 -- =================================
 
@@ -230,4 +236,34 @@ CREATE INDEX idx_file_manager_log_processed ON file_manager_log(processed);
 --       and should be created manually after enabling the pgvector extension.
 --       Example: CREATE INDEX ON transcript_embeddings USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX idx_transcript_embeddings_file_id ON transcript_embeddings(file_id);
-CREATE INDEX idx_transcript_embeddings_created_at ON transcript_embeddings(created_at); 
+CREATE INDEX idx_transcript_embeddings_created_at ON transcript_embeddings(created_at);
+CREATE INDEX transcript_embeddings_embedding_hnsw_idx ON public.transcript_embeddings USING hnsw (embedding vector_cosine_ops);
+
+-- PART 4: FUNCTIONS
+-- =================================
+
+-- Function for vector similarity search on memory chunks
+CREATE OR REPLACE FUNCTION public.search_memory_chunks(query_embedding vector(1536), match_threshold double precision, match_count integer, filter_metadata jsonb DEFAULT '{}'::jsonb)
+ RETURNS TABLE(id uuid, file_id uuid, content_chunk text, metadata jsonb, similarity double precision) -- Corrected return types to UUID
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+  RETURN QUERY
+  SELECT
+    te.id,
+    te.file_id,
+    te.content_chunk, -- Corrected column name from chunk_text
+    te.metadata,
+    1 - (te.embedding <=> query_embedding) AS similarity
+  FROM transcript_embeddings te
+  WHERE
+    -- Apply metadata filter only if provided and not empty
+    (filter_metadata = '{}'::jsonb OR te.metadata @> filter_metadata)
+  AND
+    -- Compare embedding similarity
+    1 - (te.embedding <=> query_embedding) > match_threshold
+  ORDER BY similarity DESC
+  LIMIT match_count;
+END;
+$function$
+; 
