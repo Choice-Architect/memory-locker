@@ -17,6 +17,7 @@
         "operationId": "memoryAction",
         "summary": "Store or query user memories",
         "description": "Handles storing new information provided by the user or querying existing memories based on user questions. Requires an API key for authentication.",
+        "x-openai-isConsequential": false,
         "requestBody": {
           "required": true,
           "content": {
