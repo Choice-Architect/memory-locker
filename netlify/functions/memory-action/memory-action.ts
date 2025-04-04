@@ -184,15 +184,30 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             };
 
             if (payload.user_id) {
-                console.log(`Inserting with user_id: ${payload.user_id}`);
+                console.log(`Ensuring user exists with ID: ${payload.user_id}`);
+                // Upsert user - insert if not exists, do nothing if exists
+                const { error: userUpsertError } = await supabase
+                    .from('users')
+                    .upsert({ id: payload.user_id }, { onConflict: 'id' });
+
+                if (userUpsertError) {
+                    console.error("Error upserting user:", userUpsertError);
+                    // Decide if this is fatal. For now, maybe just log and continue,
+                    // as the files insert might still fail but maybe other parts work?
+                    // Or throw: throw new Error(`Failed to ensure user exists: ${userUpsertError.message}`);
+                    // Let's throw for now to be safe.
+                    throw new Error(`Failed to ensure user exists: ${userUpsertError.message}`);
+                }
+
+                console.log(`Inserting file record with user_id: ${payload.user_id}`);
                 fileInsertData.user_id = payload.user_id;
             } else {
-                console.log("No user_id provided in payload, inserting without it.");
+                console.log("No user_id provided in payload, inserting file without user association.");
             }
 
             const { data: fileData, error: fileError } = await supabase
                 .from('files')
-                .insert(fileInsertData) // Use the constructed object
+                .insert(fileInsertData)
                 .select('id') // Return the ID of the new row
                 .single(); // Expect only one row
 
