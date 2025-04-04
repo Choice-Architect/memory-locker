@@ -175,16 +175,24 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             const fileMetadata = payload.extracted_entities; // Using extracted entities as file metadata for now
 
             // a. Insert into 'files' table
-            console.log("Inserting into files table...");
+            console.log("Preparing to insert into files table...");
+            const fileInsertData: { [key: string]: any } = {
+                transcript_text: textToStore, // Store the full text
+                file_metadata: fileMetadata, // Store all extracted entities
+                title: textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : ''), // Simple title
+                file_type: 'gpt_interaction', // Mark as originating from GPT interaction
+            };
+
+            if (payload.user_id) {
+                console.log(`Inserting with user_id: ${payload.user_id}`);
+                fileInsertData.user_id = payload.user_id;
+            } else {
+                console.log("No user_id provided in payload, inserting without it.");
+            }
+
             const { data: fileData, error: fileError } = await supabase
                 .from('files')
-                .insert({
-                    transcript_text: textToStore, // Store the full text
-                    file_metadata: fileMetadata, // Store all extracted entities
-                    title: textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : ''), // Simple title
-                    file_type: 'gpt_interaction', // Mark as originating from GPT interaction
-                    user_id: payload.user_id // Add user_id if available
-                })
+                .insert(fileInsertData) // Use the constructed object
                 .select('id') // Return the ID of the new row
                 .single(); // Expect only one row
 

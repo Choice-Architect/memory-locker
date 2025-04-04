@@ -1,0 +1,251 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Memory Locker Action API",
+    "version": "1.0.0",
+    "description": "API for storing and querying user memories via a Netlify function connected to Supabase."
+  },
+  "servers": [
+    {
+      "url": "https://memory-locker-gpt.netlify.app",
+      "description": "Production Netlify Function endpoint"
+    }
+  ],
+  "paths": {
+    "/.netlify/functions/memory-action": {
+      "post": {
+        "operationId": "memoryAction",
+        "summary": "Store or query user memories",
+        "description": "Handles storing new information provided by the user or querying existing memories based on user questions. Requires an API key for authentication.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation (store, query, or combined)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request (e.g., invalid JSON, missing fields)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized (e.g., missing or incorrect API key)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method Not Allowed (e.g., used GET instead of POST)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error (e.g., function error, database issue)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "apiKeyAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ExtractedEntities": {
+        "type": "object",
+        "properties": {
+          "people": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "locations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "type": {
+            "type": "string",
+            "description": "Inferred type of interaction (e.g., story, dictated_email, note, reminder, task)"
+          },
+          "sentiment": {
+            "type": "string",
+            "description": "Inferred sentiment if applicable (e.g., funny, important, angry)"
+          }
+        },
+        "additionalProperties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": "Flexible container for entities extracted from text, including inferred type/sentiment."
+      },
+      "RequestPayload": {
+        "type": "object",
+        "required": [
+          "query_text",
+          "mode",
+          "extracted_entities",
+          "user_id"
+        ],
+        "properties": {
+          "query_text": {
+            "type": "string",
+            "description": "The core text content from the user to be stored or used for querying."
+          },
+          "extracted_entities": {
+            "$ref": "#/components/schemas/ExtractedEntities"
+          },
+          "user_id": {
+            "type": "string",
+            "description": "The unique identifier for the user (obtained from ChatGPT context). MUST be provided by the GPT."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "store",
+              "query",
+              "combined"
+            ],
+            "description": "Specifies the operation mode for the action."
+          }
+        }
+      },
+      "ContextObject": {
+        "type": "object",
+        "properties": {
+          "chunk": {
+            "type": "string",
+            "description": "A relevant snippet of text retrieved from memory."
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp associated with the chunk or original file."
+          },
+          "entities_in_chunk": {
+            "$ref": "#/components/schemas/ExtractedEntities",
+            "description": "Entities identified within this specific chunk (Note: function currently uses file-level entities)."
+          }
+        },
+        "required": [
+          "chunk"
+        ]
+      },
+      "SuccessResponse": {
+        "type": "object",
+        "properties": {
+          "retrieved_context": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextObject"
+            },
+            "description": "An array of relevant memory chunks found."
+          },
+          "storage_status": {
+            "type": "string",
+            "description": "Confirmation message about the storage operation status."
+          },
+          "query_source": {
+            "type": "string",
+            "enum": [
+              "vector_store",
+              "postgres_fallback",
+              "none",
+              "combined",
+              "error"
+            ],
+            "description": "Indicates the source of the retrieved context."
+          },
+          "message_for_gpt": {
+            "type": "string",
+            "description": "Optional additional message or instruction for the GPT's response generation."
+          },
+          "error": {
+            "type": "null",
+            "description": "Always null for a successful response."
+          }
+        },
+        "required": [
+          "retrieved_context",
+          "storage_status",
+          "query_source",
+          "error"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "A description of the error that occurred."
+          }
+        },
+        "required": [
+          "error"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "API key provided by the user during Action configuration to authenticate requests to the Netlify function."
+      }
+    }
+  }
+} 

@@ -124,6 +124,7 @@ ALTER TABLE persona_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_query_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE file_manager_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transcript_embeddings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
 -- Create access policies for files table
 CREATE POLICY "Users can view their own files" 
@@ -199,6 +200,15 @@ USING (EXISTS (
     WHERE files.id = transcript_embeddings.file_id 
     AND files.user_id = (SELECT auth.uid())
 ));
+
+-- Create access policies for users table
+CREATE POLICY "Users can view their own profile" 
+ON users FOR SELECT 
+USING (id = auth.uid());
+
+CREATE POLICY "Users can update their own profile" 
+ON users FOR UPDATE 
+USING (id = auth.uid());
 
 -- PART 3: PERFORMANCE INDEXES
 -- =================================
