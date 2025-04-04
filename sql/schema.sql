@@ -247,7 +247,7 @@ CREATE OR REPLACE FUNCTION public.search_memory_chunks(query_embedding vector(15
  RETURNS TABLE(id uuid, file_id uuid, content_chunk text, metadata jsonb, similarity double precision) -- Corrected return types to UUID
  LANGUAGE plpgsql
  -- Explicitly set the search path for security
- SET search_path = 'public'
+ SET search_path = 'public', 'extensions'
 AS $function$
 BEGIN
   RETURN QUERY
