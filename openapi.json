@@ -138,8 +138,7 @@
         "required": [
           "query_text",
           "mode",
-          "extracted_entities",
-          "user_id"
+          "extracted_entities"
         ],
         "properties": {
           "query_text": {
@@ -148,10 +147,6 @@
           },
           "extracted_entities": {
             "$ref": "#/components/schemas/ExtractedEntities"
-          },
-          "user_id": {
-            "type": "string",
-            "description": "The unique identifier for the user (obtained from ChatGPT context). MUST be provided by the GPT."
           },
           "mode": {
             "type": "string",

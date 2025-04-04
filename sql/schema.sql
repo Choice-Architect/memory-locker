@@ -11,18 +11,12 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
 -- =================================
 
 -- Users Table: Stores basic user identity and authentication information
-CREATE TABLE users (
-    id TEXT PRIMARY KEY,                        -- Unique identifier from auth provider (changed from UUID)
-    username TEXT,                              -- User's chosen display name
-    email TEXT UNIQUE,                          -- User's email (must be unique)
-    created_at TIMESTAMPTZ DEFAULT now(),       -- When the user account was created
-    updated_at TIMESTAMPTZ                      -- When the user account was last modified
-);
+-- (Removed as part of user_id refactoring)
 
 -- Files Table: Central storage for all file types with metadata
 CREATE TABLE files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Unique identifier for each file, auto-generated
-    user_id TEXT REFERENCES users(id),          -- Links to the owner in users table (changed from UUID)
+    -- user_id TEXT REFERENCES users(id), (Removed)
     title TEXT,                                 -- Display name for the file
     transcript_text TEXT,                       -- Text content for documents or transcribed audio
     file_type TEXT CHECK (file_type IN ('audio', 'image', 'document', 'gpt_interaction')),  -- File category, including direct GPT input
@@ -47,7 +41,7 @@ CREATE TABLE files (
 -- Queries Table: Tracks user searches and their results
 CREATE TABLE queries (
     id UUID PRIMARY KEY,                        -- Unique identifier for each query
-    user_id TEXT REFERENCES users(id),          -- Links to the user who made the query (changed from UUID)
+    -- user_id TEXT REFERENCES users(id), (Removed)
     query_text TEXT,                            -- The actual search text
     source TEXT CHECK (source IN ('vector_store', 'postgres_fallback', 'persona_profile')),  -- Where results came from
     result JSONB,                               -- Structured storage for search results
@@ -57,7 +51,7 @@ CREATE TABLE queries (
 -- User Query History: Maintains a searchable history of user interactions
 CREATE TABLE user_query_history (
     id UUID PRIMARY KEY,                        -- Unique identifier for history entry
-    user_id TEXT REFERENCES users(id),          -- Links to the user who made the query (changed from UUID)
+    -- user_id TEXT REFERENCES users(id), (Removed)
     query_id UUID REFERENCES queries(id) ON DELETE CASCADE,  -- Links to the query record (will be deleted if query is deleted)
     query_text TEXT,                            -- Duplicate of query text for faster access
     result_snippet TEXT,                        -- Short version of the result for display
@@ -67,7 +61,7 @@ CREATE TABLE user_query_history (
 -- Personas Table: Stores identity information for digital personas
 CREATE TABLE personas (
     id UUID PRIMARY KEY,                        -- Unique identifier for each persona
-    user_id TEXT REFERENCES users(id),          -- Links to the user who owns this persona (changed from UUID)
+    -- user_id TEXT REFERENCES users(id), (Removed)
     full_name TEXT,                             -- Complete name of the persona
     alias TEXT[],                               -- Alternative names/nicknames as an array
     birthday DATE,                              -- Birth date of the persona
@@ -116,113 +110,21 @@ CREATE TABLE transcript_embeddings (
 -- PART 2: SECURITY POLICIES
 -- =================================
 
--- Enable Row Level Security on all tables
-ALTER TABLE files ENABLE ROW LEVEL SECURITY;
-ALTER TABLE queries ENABLE ROW LEVEL SECURITY;
-ALTER TABLE personas ENABLE ROW LEVEL SECURITY;
-ALTER TABLE persona_transactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_query_history ENABLE ROW LEVEL SECURITY;
-ALTER TABLE file_manager_log ENABLE ROW LEVEL SECURITY;
-ALTER TABLE transcript_embeddings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-
--- Create access policies for files table
-CREATE POLICY "Users can view their own files" 
-ON files FOR SELECT USING (user_id = auth.uid()::text); -- Cast auth.uid() to text for comparison
-
-CREATE POLICY "Users can insert their own files" 
-ON files FOR INSERT WITH CHECK (user_id = auth.uid()::text); -- Cast auth.uid() to text for comparison
-
-CREATE POLICY "Users can update their own files" 
-ON files FOR UPDATE USING (user_id = auth.uid()::text); -- Cast auth.uid() to text for comparison
-
-CREATE POLICY "Users can delete their own files" 
-ON files FOR DELETE USING (user_id = auth.uid()::text); -- Cast auth.uid() to text for comparison
-
--- Create access policies for queries table
-CREATE POLICY "Users can view their own queries" 
-ON queries FOR SELECT USING (user_id = (SELECT auth.uid()::text)); -- Cast auth.uid() to text for comparison
-
-CREATE POLICY "Users can insert their own queries" 
-ON queries FOR INSERT WITH CHECK (user_id = (SELECT auth.uid()::text)); -- Cast auth.uid() to text for comparison
-
--- Create access policies for personas table
-CREATE POLICY "Users can view their own personas" 
-ON personas FOR SELECT USING (user_id = (SELECT auth.uid()::text)); -- Cast auth.uid() to text for comparison
-
-CREATE POLICY "Users can insert their own personas" 
-ON personas FOR INSERT WITH CHECK (user_id = (SELECT auth.uid()::text)); -- Cast auth.uid() to text for comparison
-
-CREATE POLICY "Users can update their own personas" 
-ON personas FOR UPDATE USING (user_id = (SELECT auth.uid()::text)); -- Cast auth.uid() to text for comparison
-
-CREATE POLICY "Users can delete their own personas" 
-ON personas FOR DELETE USING (user_id = (SELECT auth.uid()::text)); -- Cast auth.uid() to text for comparison
-
--- Create access policies for persona_transactions table
-CREATE POLICY "Users can view transactions for their personas" 
-ON persona_transactions FOR SELECT
-USING (EXISTS (
-    SELECT 1 FROM personas 
-    WHERE personas.id = persona_transactions.persona_id 
-    AND personas.user_id = (SELECT auth.uid()::text) -- Cast auth.uid() to text for comparison
-));
-
-CREATE POLICY "Users can insert transactions for their personas" 
-ON persona_transactions FOR INSERT
-WITH CHECK (EXISTS (
-    SELECT 1 FROM personas 
-    WHERE personas.id = persona_transactions.persona_id 
-    AND personas.user_id = (SELECT auth.uid()::text) -- Cast auth.uid() to text for comparison
-));
-
--- Create access policies for user_query_history table
-CREATE POLICY "Users can view their own query history" 
-ON user_query_history FOR SELECT USING (user_id = (SELECT auth.uid()::text)); -- Cast auth.uid() to text for comparison
-
-CREATE POLICY "Users can insert their own query history" 
-ON user_query_history FOR INSERT WITH CHECK (user_id = (SELECT auth.uid()::text)); -- Cast auth.uid() to text for comparison
-
--- Create access policies for file_manager_log table
-CREATE POLICY "Users can view logs for their files" 
-ON file_manager_log FOR SELECT
-USING (EXISTS (
-    SELECT 1 FROM files 
-    WHERE files.id = file_manager_log.file_id 
-    AND files.user_id = (SELECT auth.uid()::text) -- Cast auth.uid() to text for comparison
-));
-
--- Create access policies for transcript_embeddings table
-CREATE POLICY "Users can access their own embeddings" 
-ON transcript_embeddings FOR SELECT
-USING (EXISTS (
-    SELECT 1 FROM files 
-    WHERE files.id = transcript_embeddings.file_id 
-    AND files.user_id = (SELECT auth.uid()::text) -- Cast auth.uid() to text for comparison
-));
-
--- Create access policies for users table
-CREATE POLICY "Users can view their own profile" 
-ON users FOR SELECT 
-USING (id = auth.uid()::text); -- Cast auth.uid() to text for comparison
-
-CREATE POLICY "Users can update their own profile" 
-ON users FOR UPDATE 
-USING (id = auth.uid()::text); -- Cast auth.uid() to text for comparison
+-- (Removed all RLS policies and ENABLE ROW LEVEL SECURITY statements)
 
 -- PART 3: PERFORMANCE INDEXES
 -- =================================
 
 -- Indexes for files table
-CREATE INDEX idx_files_user_id ON files(user_id);
+-- CREATE INDEX idx_files_user_id ON files(user_id); (Removed)
 CREATE INDEX idx_files_file_type ON files(file_type);
 CREATE INDEX idx_files_conversation_id ON files(conversation_id);
 
 -- Indexes for queries table
-CREATE INDEX idx_queries_user_id ON queries(user_id);
+-- CREATE INDEX idx_queries_user_id ON queries(user_id); (Removed)
 
 -- Indexes for personas table
-CREATE INDEX idx_personas_user_id ON personas(user_id);
+-- CREATE INDEX idx_personas_user_id ON personas(user_id); (Removed)
 
 -- Indexes for persona_transactions table
 CREATE INDEX idx_transactions_persona_id ON persona_transactions(persona_id);
@@ -231,7 +133,7 @@ CREATE INDEX idx_transactions_query_id ON persona_transactions(query_id);
 CREATE INDEX idx_transactions_memory_type ON persona_transactions(memory_type);
 
 -- Indexes for user_query_history table
-CREATE INDEX idx_user_query_history_user_id ON user_query_history(user_id);
+-- CREATE INDEX idx_user_query_history_user_id ON user_query_history(user_id); (Removed)
 CREATE INDEX idx_user_query_history_query_id ON user_query_history(query_id);
 
 -- Indexes for file_manager_log table
