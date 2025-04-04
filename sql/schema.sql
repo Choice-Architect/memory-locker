@@ -246,6 +246,8 @@ CREATE INDEX transcript_embeddings_embedding_hnsw_idx ON public.transcript_embed
 CREATE OR REPLACE FUNCTION public.search_memory_chunks(query_embedding vector(1536), match_threshold double precision, match_count integer, filter_metadata jsonb DEFAULT '{}'::jsonb)
  RETURNS TABLE(id uuid, file_id uuid, content_chunk text, metadata jsonb, similarity double precision) -- Corrected return types to UUID
  LANGUAGE plpgsql
+ -- Explicitly set the search path for security
+ SET search_path = 'public'
 AS $function$
 BEGIN
   RETURN QUERY
