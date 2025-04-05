@@ -1,6 +1,7 @@
 import { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
+import { PorterStemmer } from 'natural';
 
 // --- Interfaces for API Contract ---
 
@@ -370,7 +371,11 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
                 if (topics && topics.length > 0) {
                     console.log(`Using extracted topics for fallback search: ${topics.join(', ')}`);
-                    const orFilter = topics.map(topic => `transcript_text.ilike.%${topic}%`).join(',');
+                    // Stem each topic before creating the ILIKE pattern
+                    const orFilter = topics
+                        .map(topic => `transcript_text.ilike.%${PorterStemmer.stem(topic)}%`)
+                        .join(',');
+                    console.log(`Stemmed topics OR filter: ${orFilter}`); // Log the filter being used
                     fallbackQuery = fallbackQuery.or(orFilter);
                 } else {
                     // Fallback to searching the whole query text if no specific topics extracted

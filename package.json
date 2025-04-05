@@ -21,6 +21,8 @@
   "dependencies": {
     "@netlify/functions": "^3.0.4",
     "@supabase/supabase-js": "^2.49.4",
+    "@types/natural": "^5.1.5",
+    "natural": "^8.0.1",
     "openai": "^4.91.1"
   }
 }

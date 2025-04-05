@@ -1,64 +1,8 @@
-Apr 5, 06:56:52 PM: ERROR  (node:9) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+Apr 5, 07:05:35 PM: ERROR  (node:9) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
 (Use `node --trace-deprecation ...` to show where the warning was created)
-Apr 5, 06:56:52 PM: b67c5f4f INFO   Parsed Payload: {
+Apr 5, 07:05:35 PM: 7b20946f INFO   Parsed Payload: {
   mode: 'query',
-  text_length: 71,
-  entities: {
-    people: [],
-    dates: [ 'this week' ],
-    locations: [],
-    topics: [ 'test', 'testing' ],
-    type: 'query',
-    sentiment: ''
-  }
-}
-Apr 5, 06:56:52 PM: b67c5f4f INFO   Processing 'query' mode...
-Apr 5, 06:56:52 PM: b67c5f4f INFO   Generating embedding for query text...
-Apr 5, 06:56:53 PM: b67c5f4f INFO   Searching for relevant memory chunks via vector search...
-Apr 5, 06:56:53 PM: b67c5f4f INFO   Vector search yielded no results or failed. Attempting fallback search on 'files' table...
-Apr 5, 06:56:54 PM: b67c5f4f INFO   Fallback search on 'files' table also found no results.
-Apr 5, 06:56:54 PM: b67c5f4f INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
-Apr 5, 06:56:54 PM: b67c5f4f Duration: 1525.9 ms	Memory Usage: 116 MB
-Apr 5, 06:57:12 PM: a9d281f9 INFO   Parsed Payload: {
-  mode: 'query',
-  text_length: 48,
-  entities: {
-    people: [ 'Marc' ],
-    dates: [],
-    locations: [],
-    topics: [ 'app name' ],
-    type: 'query',
-    sentiment: ''
-  }
-}
-Apr 5, 06:57:12 PM: a9d281f9 INFO   Processing 'query' mode...
-Apr 5, 06:57:12 PM: a9d281f9 INFO   Generating embedding for query text...
-Apr 5, 06:57:13 PM: a9d281f9 INFO   Searching for relevant memory chunks via vector search...
-Apr 5, 06:57:14 PM: a9d281f9 INFO   Found 1 potentially relevant chunks via vector search.
-Apr 5, 06:57:14 PM: a9d281f9 INFO   DEBUG: Final retrieved_context before returning: [{"file_id":"5515f73d-7e17-4b64-b821-9028b1f12f00","chunk":"Yesterday, Marc told me about this new app called Lovable. He wouldn't shut up about it when we had lunch at Alfredo's.","timestamp":"2025-04-04T16:18:03.228Z","entities_in_chunk":{}}]... (1 items)
-Apr 5, 06:57:14 PM: a9d281f9 Duration: 1289.42 ms	Memory Usage: 120 MB
-Apr 5, 06:57:37 PM: 87dc37e4 INFO   Parsed Payload: {
-  mode: 'query',
-  text_length: 36,
-  entities: {
-    people: [],
-    dates: [],
-    locations: [],
-    topics: [ 'test' ],
-    type: 'query',
-    sentiment: ''
-  }
-}
-Apr 5, 06:57:37 PM: 87dc37e4 INFO   Processing 'query' mode...
-Apr 5, 06:57:37 PM: 87dc37e4 INFO   Generating embedding for query text...
-Apr 5, 06:57:38 PM: 87dc37e4 INFO   Searching for relevant memory chunks via vector search...
-Apr 5, 06:57:39 PM: 87dc37e4 INFO   Vector search yielded no results or failed. Attempting fallback search on 'files' table...
-Apr 5, 06:57:39 PM: 87dc37e4 INFO   Fallback search on 'files' table also found no results.
-Apr 5, 06:57:39 PM: 87dc37e4 INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
-Apr 5, 06:57:39 PM: 87dc37e4 Duration: 1249.42 ms	Memory Usage: 121 MB
-Apr 5, 06:57:57 PM: 8cb655f0 INFO   Parsed Payload: {
-  mode: 'query',
-  text_length: 52,
+  text_length: 47,
   entities: {
     people: [ 'Marc' ],
     dates: [],
@@ -68,29 +12,31 @@ Apr 5, 06:57:57 PM: 8cb655f0 INFO   Parsed Payload: {
     sentiment: ''
   }
 }
-Apr 5, 06:57:57 PM: 8cb655f0 INFO   Processing 'query' mode...
-Apr 5, 06:57:57 PM: 8cb655f0 INFO   Generating embedding for query text...
-Apr 5, 06:57:58 PM: 8cb655f0 INFO   Searching for relevant memory chunks via vector search...
-Apr 5, 06:57:58 PM: 8cb655f0 INFO   Vector search yielded no results or failed. Attempting fallback search on 'files' table...
-Apr 5, 06:57:58 PM: 8cb655f0 INFO   Fallback search on 'files' table also found no results.
-Apr 5, 06:57:58 PM: 8cb655f0 INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
-Apr 5, 06:57:58 PM: 8cb655f0 Duration: 1030.51 ms	Memory Usage: 125 MB
-Apr 5, 06:58:11 PM: 4a7d866c INFO   Parsed Payload: {
+Apr 5, 07:05:35 PM: 7b20946f INFO   Processing 'query' mode...
+Apr 5, 07:05:35 PM: 7b20946f INFO   Generating embedding for query text...
+Apr 5, 07:05:36 PM: 7b20946f INFO   Searching for relevant memory chunks via vector search...
+Apr 5, 07:05:36 PM: 7b20946f INFO   Vector search yielded no results or failed. Attempting fallback search on 'files' table...
+Apr 5, 07:05:36 PM: 7b20946f INFO   No specific topics extracted, falling back to ILIKE on full query text.
+Apr 5, 07:05:37 PM: 7b20946f INFO   Fallback search on 'files' table also found no results.
+Apr 5, 07:05:37 PM: 7b20946f INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
+Apr 5, 07:05:37 PM: 7b20946f Duration: 1166.65 ms	Memory Usage: 116 MB
+Apr 5, 07:06:09 PM: 10f9a5e4 INFO   Parsed Payload: {
   mode: 'query',
-  text_length: 44,
+  text_length: 41,
   entities: {
-    people: [ 'Marc' ],
+    people: [],
     dates: [],
     locations: [],
-    topics: [],
+    topics: [ 'tests' ],
     type: 'query',
     sentiment: ''
   }
 }
-Apr 5, 06:58:11 PM: 4a7d866c INFO   Processing 'query' mode...
-Apr 5, 06:58:11 PM: 4a7d866c INFO   Generating embedding for query text...
-Apr 5, 06:58:12 PM: 4a7d866c INFO   Searching for relevant memory chunks via vector search...
-Apr 5, 06:58:12 PM: 4a7d866c INFO   Vector search yielded no results or failed. Attempting fallback search on 'files' table...
-Apr 5, 06:58:12 PM: 4a7d866c INFO   Fallback search on 'files' table also found no results.
-Apr 5, 06:58:12 PM: 4a7d866c INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
-Apr 5, 06:58:12 PM: 4a7d866c Duration: 1033.45 ms	Memory Usage: 125 MB
+Apr 5, 07:06:09 PM: 10f9a5e4 INFO   Processing 'query' mode...
+Apr 5, 07:06:09 PM: 10f9a5e4 INFO   Generating embedding for query text...
+Apr 5, 07:06:10 PM: 10f9a5e4 INFO   Searching for relevant memory chunks via vector search...
+Apr 5, 07:06:10 PM: 10f9a5e4 INFO   Vector search yielded no results or failed. Attempting fallback search on 'files' table...
+Apr 5, 07:06:10 PM: 10f9a5e4 INFO   Using extracted topics for fallback search: tests
+Apr 5, 07:06:10 PM: 10f9a5e4 INFO   Fallback search on 'files' table also found no results.
+Apr 5, 07:06:10 PM: 10f9a5e4 INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
+Apr 5, 07:06:10 PM: 10f9a5e4 Duration: 1108.33 ms	Memory Usage: 121 MB

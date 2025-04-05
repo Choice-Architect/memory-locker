@@ -167,6 +167,8 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
 
 **Sub-Tasks for Iteration:**
 *   Implement Fallback Search Logic: Add functionality to `memory-action` to query the `files` table (text search, metadata filtering) when vector search yields no results.
+    *   **Update (Apr 6):** Implemented fallback using `ILIKE` on `files.transcript_text`. Initial version searched for the full query text. Refined to use an `.or()` filter based on topics extracted by the GPT (e.g., `payload.extracted_entities.topics`).
+    *   **Update (Apr 6):** Added stemming (using `natural` library's PorterStemmer) to the extracted topics before building the `ILIKE` query to handle variations like singular/plural forms (e.g., searching for `test` when the topic is `tests`).
 
 ---
 
