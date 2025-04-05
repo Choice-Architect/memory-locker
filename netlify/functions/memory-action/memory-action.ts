@@ -362,16 +362,26 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             if (retrieved_context.length === 0) {
                 console.log("Vector search yielded no results or failed. Attempting fallback search on 'files' table...");
 
-                // Prepare a pattern for ILIKE - simple substring search for now
-                const fallbackPattern = `%${queryText}%`;
-
-                const { data: fallbackResults, error: fallbackError } = await supabase
+                // Use extracted topics for fallback if available, otherwise use full query text
+                const topics = payload.extracted_entities?.topics;
+                let fallbackQuery = supabase
                     .from('files')
-                    .select('id, transcript_text, created_at, file_metadata') // Select needed columns
-                    .ilike('transcript_text', fallbackPattern) // Case-insensitive search on the full text
-                    // .or(`title.ilike.${fallbackPattern},transcript_text.ilike.${fallbackPattern}`) // Optionally search title too
-                    // TODO: Consider adding filtering based on payload.extracted_entities and file_metadata JSONB
-                    .limit(FALLBACK_MATCH_COUNT); // Limit results
+                    .select('id, transcript_text, created_at, file_metadata'); // Select needed columns
+
+                if (topics && topics.length > 0) {
+                    console.log(`Using extracted topics for fallback search: ${topics.join(', ')}`);
+                    const orFilter = topics.map(topic => `transcript_text.ilike.%${topic}%`).join(',');
+                    fallbackQuery = fallbackQuery.or(orFilter);
+                } else {
+                    // Fallback to searching the whole query text if no specific topics extracted
+                    console.log("No specific topics extracted, falling back to ILIKE on full query text.");
+                    const fallbackPattern = `%${queryText}%`;
+                    fallbackQuery = fallbackQuery.ilike('transcript_text', fallbackPattern);
+                }
+
+                // Add limit and execute
+                fallbackQuery = fallbackQuery.limit(FALLBACK_MATCH_COUNT);
+                const { data: fallbackResults, error: fallbackError } = await fallbackQuery;
 
                 // Explicitly type the fallback results
                 const typedFallbackResults = fallbackResults as FallbackResultItem[] | null;
