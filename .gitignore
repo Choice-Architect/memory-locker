@@ -29,3 +29,14 @@ build/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Supabase CLI temp files
+supabase/.temp/
+
+# Debugging artifacts
+debug-logs/
+
+# IDE / Editor specific
+.vscode/
+.idea/
+*.code-workspace

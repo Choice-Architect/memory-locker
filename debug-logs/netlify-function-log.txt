@@ -1,42 +1,80 @@
-Apr 5, 07:05:35 PM: ERROR  (node:9) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+Apr 5, 07:21:54 PM: ERROR  (node:9) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
 (Use `node --trace-deprecation ...` to show where the warning was created)
-Apr 5, 07:05:35 PM: 7b20946f INFO   Parsed Payload: {
+Apr 5, 07:21:54 PM: 24406c4b INFO   Parsed Payload: {
   mode: 'query',
-  text_length: 47,
-  entities: {
-    people: [ 'Marc' ],
-    dates: [],
-    locations: [],
-    topics: [],
-    type: 'query',
-    sentiment: ''
-  }
-}
-Apr 5, 07:05:35 PM: 7b20946f INFO   Processing 'query' mode...
-Apr 5, 07:05:35 PM: 7b20946f INFO   Generating embedding for query text...
-Apr 5, 07:05:36 PM: 7b20946f INFO   Searching for relevant memory chunks via vector search...
-Apr 5, 07:05:36 PM: 7b20946f INFO   Vector search yielded no results or failed. Attempting fallback search on 'files' table...
-Apr 5, 07:05:36 PM: 7b20946f INFO   No specific topics extracted, falling back to ILIKE on full query text.
-Apr 5, 07:05:37 PM: 7b20946f INFO   Fallback search on 'files' table also found no results.
-Apr 5, 07:05:37 PM: 7b20946f INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
-Apr 5, 07:05:37 PM: 7b20946f Duration: 1166.65 ms	Memory Usage: 116 MB
-Apr 5, 07:06:09 PM: 10f9a5e4 INFO   Parsed Payload: {
-  mode: 'query',
-  text_length: 41,
+  text_length: 46,
   entities: {
     people: [],
     dates: [],
     locations: [],
-    topics: [ 'tests' ],
-    type: 'query',
+    topics: [ 'quarterly report' ],
+    type: 'question',
     sentiment: ''
   }
 }
-Apr 5, 07:06:09 PM: 10f9a5e4 INFO   Processing 'query' mode...
-Apr 5, 07:06:09 PM: 10f9a5e4 INFO   Generating embedding for query text...
-Apr 5, 07:06:10 PM: 10f9a5e4 INFO   Searching for relevant memory chunks via vector search...
-Apr 5, 07:06:10 PM: 10f9a5e4 INFO   Vector search yielded no results or failed. Attempting fallback search on 'files' table...
-Apr 5, 07:06:10 PM: 10f9a5e4 INFO   Using extracted topics for fallback search: tests
-Apr 5, 07:06:10 PM: 10f9a5e4 INFO   Fallback search on 'files' table also found no results.
-Apr 5, 07:06:10 PM: 10f9a5e4 INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
-Apr 5, 07:06:10 PM: 10f9a5e4 Duration: 1108.33 ms	Memory Usage: 121 MB
+Apr 5, 07:21:54 PM: 24406c4b INFO   Processing 'query' mode...
+Apr 5, 07:21:54 PM: 24406c4b INFO   Generating embedding for query text...
+Apr 5, 07:21:54 PM: 24406c4b INFO   Searching for relevant memory chunks via vector search...
+Apr 5, 07:21:55 PM: 24406c4b INFO   Found 1 potentially relevant chunks via vector search.
+Apr 5, 07:21:55 PM: 24406c4b INFO   DEBUG: Final retrieved_context before returning: [{"file_id":"61c9a0c1-579a-47f8-8394-647575bca025","chunk":"I need to finish the quarterly report by Friday the 11th.","timestamp":"2025-04-05T16:31:03.082Z","entities_in_chunk":{}}]... (1 items)
+Apr 5, 07:21:55 PM: 24406c4b Duration: 1105.67 ms	Memory Usage: 281 MB
+Apr 5, 07:22:14 PM: bdcb5117 INFO   Parsed Payload: {
+  mode: 'query',
+  text_length: 50,
+  entities: {
+    people: [],
+    dates: [ 'this week' ],
+    locations: [],
+    topics: [ 'testing' ],
+    type: 'question',
+    sentiment: ''
+  }
+}
+Apr 5, 07:22:14 PM: bdcb5117 INFO   Processing 'query' mode...
+Apr 5, 07:22:14 PM: bdcb5117 INFO   Generating embedding for query text...
+Apr 5, 07:22:14 PM: bdcb5117 INFO   Searching for relevant memory chunks via vector search...
+Apr 5, 07:22:14 PM: bdcb5117 INFO   Vector search yielded no results or failed. Attempting fallback search on 'files' table...
+Apr 5, 07:22:14 PM: bdcb5117 INFO   Using extracted topics for fallback search: testing
+Apr 5, 07:22:14 PM: bdcb5117 INFO   Stemmed topics OR filter: transcript_text.ilike.%test%
+Apr 5, 07:22:15 PM: bdcb5117 INFO   Found 5 potentially relevant files via fallback search.
+Apr 5, 07:22:15 PM: bdcb5117 INFO   DEBUG: Final retrieved_context before returning: [{"file_id":"7469f6d4-3501-48c5-b135-a33e8ef68415","chunk":"This is the test after setting the default ID for transcript_embeddings.","timestamp":"2025-04-03T16:03:09.675Z","entities_in_chunk":{"concept":"final store test","timestamp_iso":"2025-04-04T10:30:00Z"}}]... (5 items)
+Apr 5, 07:22:15 PM: bdcb5117 Duration: 1100.09 ms	Memory Usage: 306 MB
+Apr 5, 07:23:03 PM: 1de4fc4d INFO   Parsed Payload: {
+  mode: 'query',
+  text_length: 49,
+  entities: {
+    people: [ 'Marc' ],
+    dates: [],
+    locations: [],
+    topics: [ 'app name' ],
+    type: 'question',
+    sentiment: ''
+  }
+}
+Apr 5, 07:23:03 PM: 1de4fc4d INFO   Processing 'query' mode...
+Apr 5, 07:23:03 PM: 1de4fc4d INFO   Generating embedding for query text...
+Apr 5, 07:23:03 PM: 1de4fc4d INFO   Searching for relevant memory chunks via vector search...
+Apr 5, 07:23:03 PM: 1de4fc4d INFO   Found 1 potentially relevant chunks via vector search.
+Apr 5, 07:23:03 PM: 1de4fc4d INFO   DEBUG: Final retrieved_context before returning: [{"file_id":"5515f73d-7e17-4b64-b821-9028b1f12f00","chunk":"Yesterday, Marc told me about this new app called Lovable. He wouldn't shut up about it when we had lunch at Alfredo's.","timestamp":"2025-04-04T16:18:03.228Z","entities_in_chunk":{}}]... (1 items)
+Apr 5, 07:23:03 PM: 1de4fc4d Duration: 935.39 ms	Memory Usage: 306 MB
+Apr 5, 07:23:18 PM: f4781066 INFO   Parsed Payload: {
+  mode: 'query',
+  text_length: 42,
+  entities: {
+    people: [],
+    dates: [ 'this week' ],
+    locations: [],
+    topics: [ 'reminders' ],
+    type: 'question',
+    sentiment: ''
+  }
+}
+Apr 5, 07:23:18 PM: f4781066 INFO   Processing 'query' mode...
+Apr 5, 07:23:18 PM: f4781066 INFO   Generating embedding for query text...
+Apr 5, 07:23:19 PM: f4781066 INFO   Searching for relevant memory chunks via vector search...
+Apr 5, 07:23:20 PM: f4781066 INFO   Vector search yielded no results or failed. Attempting fallback search on 'files' table...
+Apr 5, 07:23:20 PM: f4781066 INFO   Using extracted topics for fallback search: reminders
+Apr 5, 07:23:20 PM: f4781066 INFO   Stemmed topics OR filter: transcript_text.ilike.%remind%
+Apr 5, 07:23:20 PM: f4781066 INFO   Found 1 potentially relevant files via fallback search.
+Apr 5, 07:23:20 PM: f4781066 INFO   DEBUG: Final retrieved_context before returning: [{"file_id":"5b2ad926-bf2b-4fb4-92a3-b1e1876bbf62","chunk":"Remind me to call my mother tomorrow at 4PM.","timestamp":"2025-04-04T16:11:11.586Z","entities_in_chunk":{"type":"reminder","dates":["tomorrow at 4PM"],"people":["mother"],"topics":["reminder"],"sentiment":""}}]... (1 items)
+Apr 5, 07:23:20 PM: f4781066 Duration: 1373.6 ms	Memory Usage: 306 MB

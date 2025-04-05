@@ -132,6 +132,14 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
 ### Phase 4: Integration Testing & Iteration (Est. 2-3 weeks)
 
 **Objective:** Test the end-to-end flow from ChatGPT input to Supabase storage/retrieval and back, refining as needed.
+**Status (Apr 6, 2025 - Updated):**
+*   Successfully implemented and tested basic `store` operations via the GPT panel.
+*   Resolved initial `query` failures by lowering `VECTOR_MATCH_THRESHOLD` to `0.5`.
+*   Implemented fallback search logic in the Netlify function using `ILIKE` on `files.transcript_text`.
+*   Improved fallback search accuracy by using stemmed versions (via `natural` library) of topics extracted by the GPT.
+*   Core functionality (`store`, `query` via vector search, `query` via keyword fallback) is working.
+*   **Phase largely complete.** Remaining refinement (e.g., metadata filtering in fallback, more robust error handling, removing debug logs) can move to Phase 5.
+
 **Note (Apr 4, 2025):** Encountered foreign key constraint errors related to `user_id` during initial testing. Decided to refactor to remove `user_id` entirely for the single-user scope. Refactoring involved schema changes (removing `users` table, `user_id` columns, RLS policies), Netlify function updates, OpenAPI schema modification, and GPT instruction adjustments. **Subsequently (Apr 4), RLS was re-enabled on all tables without specific ALLOW policies ('default deny') as a defense-in-depth measure, as the Netlify function uses the `service_role` key which bypasses RLS anyway.**
 
 **Status (Apr 5, 2025 - Updated):**

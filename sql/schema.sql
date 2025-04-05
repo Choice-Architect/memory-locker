@@ -207,6 +207,11 @@ AS $function$
 -- However, calling this function via RPC (e.g., Supabase JS client) appears to work correctly
 -- without dimension errors, implying the vector is passed differently. Focus debugging on the
 -- match_threshold if RPC calls return empty results.
+-- NOTE (Apr 6, 2025): Application layer (Netlify function) handles fallback search using ILIKE on files.transcript_text
+-- when this vector search returns no results. Stemming (e.g., PorterStemmer from 'natural' library)
+-- is applied to extracted topics in the application layer before constructing the ILIKE query
+-- to handle word variations (singular/plural). Consider using DB-level Full-Text Search (FTS) on
+-- files.transcript_text as a future enhancement for more robust keyword searching.
 BEGIN
   RETURN QUERY
   SELECT
