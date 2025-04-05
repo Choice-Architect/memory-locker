@@ -94,4 +94,8 @@ To use the vector embeddings functionality:
 5. **personas** - Digital personas with identity information
 6. **persona_transactions** - Memories and information extracted for personas
 7. **file_manager_log** - File processing tracking
-8. **transcript_embeddings** - Vector embeddings for semantic search 
+8. **transcript_embeddings** - Vector embeddings for semantic search
+
+### Debugging Note (2025-04-04)
+
+- **TODO:** Review the definition and logic of the `search_memory_chunks` function (defined in `schema.sql`) as part of debugging the issue where Netlify logs report "No relevant matches found" despite successful Supabase function execution (HTTP 200). Need to verify the vector similarity algorithm, `match_threshold` application, and overall filtering logic. 

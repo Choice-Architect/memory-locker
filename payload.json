@@ -1,9 +1,0 @@
-{
-    "mode": "store",
-    "query_text": "This is a fourth test memory added via curl after GRANT commands.",
-    "extracted_entities": {
-        "concept": "curl grant test",
-        "timestamp_iso": "2025-04-03T11:00:00Z"
-    },
-    "user_id": "test-user-curl-04"
-} 

@@ -51,4 +51,5 @@
     *   **Action:** Update `learnings/01_new_gpt_roadmap.md`, `learnings/07_security_considerations.md`, and `learnings/08_phase3_report.md` (or create `11_phase4_report.md`) to reflect this refactoring.
 
 8.  **Re-Test:**
-    *   **Action:** After deployment, perform basic `store` and `query` tests using the Custom GPT preview panel. 
+    *   **Action:** After deployment, perform basic `store` and `query` tests using the Custom GPT preview panel.
+    *   **(Note - Apr 5):** Detailed testing/debugging of the `search_memory_chunks` function via direct database connection (`psql`) is currently blocked due to a DNS resolution failure for the `db.*` hostname. Basic GPT panel tests might still succeed as they use the API endpoint. 

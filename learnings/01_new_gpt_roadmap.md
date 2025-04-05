@@ -134,6 +134,17 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
 **Objective:** Test the end-to-end flow from ChatGPT input to Supabase storage/retrieval and back, refining as needed.
 **Note (Apr 4, 2025):** Encountered foreign key constraint errors related to `user_id` during initial testing. Decided to refactor to remove `user_id` entirely for the single-user scope. Refactoring involved schema changes (removing `users` table, `user_id` columns, RLS policies), Netlify function updates, OpenAPI schema modification, and GPT instruction adjustments. **Subsequently (Apr 4), RLS was re-enabled on all tables without specific ALLOW policies ('default deny') as a defense-in-depth measure, as the Netlify function uses the `service_role` key which bypasses RLS anyway.**
 
+**Status (Apr 5, 2025 - Updated):**
+*   Successfully implemented and tested basic `store` operations via the GPT panel. User ID refactoring completed. RLS re-enabled in 'default deny' mode (bypassed by service key).
+*   Encountered consistent failures with `query` operations: the Netlify function receives the query, generates an embedding, calls the `search_memory_chunks` RPC, but Supabase consistently returns `data: []` (empty results), indicating the issue lies within Supabase execution (function logic, data, or index interaction).
+*   Attempted to debug `search_memory_chunks` directly using `psql`.
+*   Initial direct database connection attempts (`db.*` hostname) failed due to DNS resolution issues (likely IPv6 incompatibility).
+*   **Resolved direct connection issue** by successfully connecting via `psql` using the IPv4-compatible **Shared Pooler hostname** (`aws-0-...pooler.supabase.com`).
+*   Interactive `psql` test of `search_memory_chunks` (with embedding copied from logs) failed with vector dimension mismatch error (1536 vs 164), strongly suggesting **input truncation** by the interactive terminal.
+*   RLS linter warnings addressed by adding default permissive policies to `sql/schema.sql` (pending application via SQL Editor if not already done).
+*   **Current Blocker:** The immediate next step is to execute the `search_memory_chunks` test query **from a file** using `psql -f test_query.sql` to bypass interactive input limits. This will determine if the function itself returns *any* results with a low threshold (e.g., 0.1), helping isolate the root cause (SQL logic vs. data/index issue).
+*   **Current Investigation:** Paused direct SQL function testing via `psql -f` to gather more context by testing basic table access (`files`) and checking Supabase query logs via the UI.
+
 1.  **End-to-End Testing:**
     *   Task: Interact with the Custom GPT in the ChatGPT preview or main interface.
     *   Task: Test various scenarios:
@@ -153,6 +164,9 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
     *   Task: Redeploy function and re-test.
     *   **Note:** Remember to remove temporary debug logging (`// TODO: REMOVE DEBUG LOGS`) from the Netlify function before moving to Phase 5.
     *   Deliverable: Improved GPT instructions, refined Action schema, updated Netlify function code.
+
+**Sub-Tasks for Iteration:**
+*   Implement Fallback Search Logic: Add functionality to `memory-action` to query the `files` table (text search, metadata filtering) when vector search yields no results.
 
 ---
 

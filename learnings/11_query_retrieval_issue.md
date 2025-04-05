@@ -136,16 +136,20 @@ To systematically pinpoint the failure, we need to gather the following informat
 *   The Netlify function successfully calls the `search_memory_chunks` RPC, passing the full 1536-dimension vector (likely via a non-literal mechanism within the JS library).
 *   The function executes without dimension errors on the backend *when called via RPC*, but returns no results (`data: []`).
 *   The most likely cause of the empty results is that the `match_threshold` of `0.75` used in the function was **too high**, causing the similarity condition `1 - (te.embedding <=> query_embedding) > 0.75` to evaluate to false for all stored chunks.
+*   **Additionally, the lack of an implemented fallback search mechanism (querying the `files` table directly) meant that queries unsuitable for semantic search (e.g., keyword counting, specific metadata filtering) would fail even if relevant data exists.**
 
 **Resolution Attempted:**
 
-*   Lowered `VECTOR_MATCH_THRESHOLD` constant in `netlify/functions/memory-action/memory-action.ts` from `0.75` to `0.5`.
+*   Lowered `VECTOR_MATCH_THRESHOLD` constant in `netlify/functions/memory-action/memory-action.ts` from `0.75` to `0.5`. This successfully enabled retrieval for semantic queries.
 
 **Next Steps:**
 
 1.  Deploy the updated Netlify function with the lower threshold.
 2.  Test querying via the Custom GPT interface.
 3.  Verify if results are now returned in the GPT response and check Netlify logs for `retrieved_context` content.
+4.  **Implement Fallback Search:** Modify the `memory-action` function to include logic that queries the `files` table (e.g., using `ILIKE` on `transcript_text` or filtering `file_metadata`) when the initial vector search returns no results.
+    *   **(Plan for Next Session):** Implement a combined approach: attempt filtering based on `file_metadata` using extracted entities, and also perform a keyword search (e.g., `ILIKE`) on `transcript_text`.
+5.  Test queries that rely on keyword or metadata matching.
 
 ---
 

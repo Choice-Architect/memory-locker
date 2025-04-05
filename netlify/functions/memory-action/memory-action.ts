@@ -24,8 +24,8 @@ interface ContextObject {
     chunk: string;
     timestamp: string; // ISO 8601 format
     entities_in_chunk: ExtractedEntities; // Note: Currently storing file-level entities here
-    file_id?: number; // Reference to the source file
-    chunk_id?: number; // Reference to the specific chunk
+    file_id?: string; // Reference to the source file (Corrected: UUID as string)
+    chunk_id?: string; // Reference to the specific chunk (Corrected: UUID as string)
 }
 
 interface SuccessResponse {
@@ -40,6 +40,27 @@ interface ErrorResponse {
     error: string;
 }
 
+// Define interface for the structure returned by search_memory_chunks RPC
+interface SearchResultItem {
+    // id?: string; // Chunk ID from transcript_embeddings if returned by RPC (Corrected: UUID as string)
+    file_id: string; // Corrected: UUID as string
+    content_chunk: string;
+    metadata?: {
+        created_at?: string;
+        entities_in_chunk?: ExtractedEntities;
+        [key: string]: any;
+    };
+    similarity?: number;
+}
+
+// Define interface for the structure returned by the fallback files query
+interface FallbackResultItem {
+    id: string; // Corrected: UUID as string
+    transcript_text: string;
+    created_at: string | null;
+    file_metadata: ExtractedEntities | null;
+}
+
 // --- Constants ---
 const EMBEDDING_MODEL = 'text-embedding-3-small';
 const EMBEDDING_DIMENSIONS = 1536; // Dimension for text-embedding-3-small
@@ -47,6 +68,7 @@ const CHUNK_SIZE = 1000; // Target size in characters
 const CHUNK_OVERLAP = 200; // Overlap in characters
 const VECTOR_MATCH_THRESHOLD = 0.5; // Similarity threshold for vector search (Lowered from 0.75)
 const VECTOR_MATCH_COUNT = 5;     // Max number of chunks to retrieve via vector search
+const FALLBACK_MATCH_COUNT = 10; // Added fallback match count
 
 // --- Environment Variables ---
 const supabaseUrl = process.env.SUPABASE_URL || '';
@@ -165,7 +187,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         let storage_status: string = "No storage operation requested.";
         let query_source: SuccessResponse['query_source'] = 'none';
         let message_for_gpt: string | undefined = undefined;
-        let fileId: number | null = null;
+        let fileId: string | null = null;
 
 
         // 2. Process based on mode
@@ -287,16 +309,11 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
             // a. Generate embedding for the query text
             console.log("Generating embedding for query text...");
-            // TODO: REMOVE DEBUG LOGS
-            console.log(`DEBUG: Query text for embedding: "${queryText}"`);
             const queryEmbeddings = await generateEmbeddings([queryText]);
             if (!queryEmbeddings || queryEmbeddings.length === 0 || !queryEmbeddings[0]) {
                 throw new Error("Failed to generate embedding for the query text.");
             }
             const queryEmbedding = queryEmbeddings[0];
-            // TODO: REMOVE DEBUG LOGS
-            console.log(`DEBUG: Generated query embedding (first 5 dims): ${queryEmbedding.slice(0, 5).join(', ')}...`);
-
 
             // b. Search for similar chunks in 'transcript_embeddings' using the SQL function
             console.log("Searching for relevant memory chunks via vector search...");
@@ -306,64 +323,113 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                 match_count: VECTOR_MATCH_COUNT
                 // No user_id included here as it was removed from payload and function logic
             };
-            // TODO: REMOVE DEBUG LOGS
-            console.log('DEBUG: Calling search_memory_chunks with params:', JSON.stringify(searchParams));
 
             const { data: searchResults, error: searchError } = await supabase.rpc(
                 'search_memory_chunks',
                 searchParams
             );
 
-            // TODO: REMOVE DEBUG LOGS
-            console.log('DEBUG: Response from search_memory_chunks:', JSON.stringify({ data: searchResults, error: searchError }));
-
+            // Explicitly type the search results
+            const typedSearchResults = searchResults as SearchResultItem[] | null;
 
             if (searchError) {
                 console.error("Error during vector search RPC call:", searchError);
-                // Don't throw here, maybe fallback later? For now, report error via message.
+                // Don't throw here, proceed to fallback or report error
                 query_source = 'error';
-                message_for_gpt = `Error searching memories: ${searchError.message}`;
-            } else if (searchResults && searchResults.length > 0) {
-                console.log(`Found ${searchResults.length} potentially relevant chunks via vector search.`);
+                message_for_gpt = `Error searching memories via vector: ${searchError.message}. Trying fallback.`; // Update message
+            } else if (typedSearchResults && typedSearchResults.length > 0) {
+                console.log(`Found ${typedSearchResults.length} potentially relevant chunks via vector search.`);
                 query_source = 'vector_store';
-                // Map results to ContextObject format
-                // Assuming search_memory_chunks returns objects like { content_chunk: string, file_id: number, metadata: { created_at: string, ... }, similarity: number }
-                retrieved_context = searchResults.map((result: any) => ({
-                    chunk: result.content_chunk || '', // Ensure chunk is string
-                    timestamp: result.metadata?.created_at || new Date(0).toISOString(), // Provide default timestamp
-                    // Currently, file-level entities are stored in 'files'. We might fetch them if needed.
-                    // For now, returning empty entities for the chunk.
-                    entities_in_chunk: {},
+                // Map results to ContextObject format, using the defined type for 'result'
+                retrieved_context = typedSearchResults.map((result: SearchResultItem) => ({
+                    // chunk_id: result.id, // Assuming the RPC returns the transcript_embeddings.id
                     file_id: result.file_id,
-                    // chunk_id: result.id, // Assuming the function returns the embedding row ID as 'id'
-                    // similarity: result.similarity // If needed
+                    chunk: result.content_chunk,
+                    // timestamp: result.metadata?.created_at || new Date(0).toISOString(), // Use timestamp from metadata if available
+                    // Attempt to get timestamp robustly
+                    timestamp: typeof result.metadata === 'object' && result.metadata !== null && 'created_at' in result.metadata
+                               ? String(result.metadata.created_at)
+                               : new Date(0).toISOString(), // Default if not found
+                    entities_in_chunk: typeof result.metadata === 'object' && result.metadata !== null && 'entities_in_chunk' in result.metadata
+                               ? result.metadata.entities_in_chunk as ExtractedEntities
+                               : {}, // Default if not found or wrong type
+                    // Add similarity score if needed for GPT context/debugging?
+                    // similarity_score: result.similarity // Assuming the function returns similarity
                 }));
-                 message_for_gpt = `Found ${retrieved_context.length} relevant memory snippets.`;
-
-            } else {
-                console.log("No relevant matches found via vector search.");
-                query_source = 'none'; // Or 'postgres_fallback' if implemented
-                // --- Fallback logic would go here ---
-                // console.log("Attempting fallback search...");
-                // const { data: fallbackData, error: fallbackError } = await supabase...
-                // console.log('DEBUG: Response from fallback_search:', JSON.stringify({ data: fallbackData, error: fallbackError }));
-                // if (fallbackData) { query_source = 'postgres_fallback'; retrieved_context = ... }
-                // --- End Fallback Logic ---
-
-                message_for_gpt = "I couldn't find any specific memories matching your query in the vector store.";
             }
+
+            // c. Fallback Search Logic (if vector search yielded no results or errored initially)
+            if (retrieved_context.length === 0) {
+                console.log("Vector search yielded no results or failed. Attempting fallback search on 'files' table...");
+
+                // Prepare a pattern for ILIKE - simple substring search for now
+                const fallbackPattern = `%${queryText}%`;
+
+                const { data: fallbackResults, error: fallbackError } = await supabase
+                    .from('files')
+                    .select('id, transcript_text, created_at, file_metadata') // Select needed columns
+                    .ilike('transcript_text', fallbackPattern) // Case-insensitive search on the full text
+                    // .or(`title.ilike.${fallbackPattern},transcript_text.ilike.${fallbackPattern}`) // Optionally search title too
+                    // TODO: Consider adding filtering based on payload.extracted_entities and file_metadata JSONB
+                    .limit(FALLBACK_MATCH_COUNT); // Limit results
+
+                // Explicitly type the fallback results
+                const typedFallbackResults = fallbackResults as FallbackResultItem[] | null;
+
+                if (fallbackError) {
+                    console.error("Error during fallback search on files table:", fallbackError);
+                    // If vector search also failed, report combined errors. Otherwise, just report fallback error.
+                    if (query_source === 'error') {
+                        message_for_gpt += ` Fallback search also failed: ${fallbackError.message}`;
+                    } else {
+                         query_source = 'error'; // Mark as error state
+                         message_for_gpt = `Vector search found nothing. Fallback search failed: ${fallbackError.message}`;
+                    }
+                } else if (typedFallbackResults && typedFallbackResults.length > 0) {
+                    console.log(`Found ${typedFallbackResults.length} potentially relevant files via fallback search.`);
+                     // If vector search was okay but found nothing, set source to fallback.
+                     // If vector search errored, keep source as error but add fallback results.
+                     if (query_source !== 'error') {
+                        query_source = 'postgres_fallback';
+                    }
+                    message_for_gpt = message_for_gpt ? message_for_gpt + ` Found ${typedFallbackResults.length} file(s) via fallback.` : `Found ${typedFallbackResults.length} file(s) via fallback search (full text match).`;
+
+                    // Map fallback results to ContextObject format, using the defined type for 'file'
+                    const fallbackContext: ContextObject[] = typedFallbackResults.map((file: FallbackResultItem) => ({
+                        file_id: file.id, // Use the file's UUID as file_id
+                        // IMPORTANT: For fallback, the 'chunk' is the *entire* transcript_text
+                        chunk: file.transcript_text,
+                        timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
+                         // Use file_metadata as entities - assumption is file-level entities apply to whole text
+                        entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
+                                            ? file.file_metadata as ExtractedEntities
+                                            : {},
+                        // chunk_id: undefined // No specific chunk ID for fallback results
+                    }));
+                    retrieved_context.push(...fallbackContext); // Append fallback results
+                } else {
+                    console.log("Fallback search on 'files' table also found no results.");
+                     // If vector search already errored, message_for_gpt is set. Otherwise...
+                     if (query_source !== 'error') {
+                        query_source = 'none'; // No results from either method
+                        message_for_gpt = "I couldn't find any relevant information using vector search or direct text search.";
+                    } else {
+                         message_for_gpt += " Fallback search also found nothing.";
+                    }
+                }
+            }
+
         } // End of 'query'/'combined' block
 
-        // TODO: REMOVE DEBUG LOGS
-        console.log(`DEBUG: Final retrieved_context before returning: ${JSON.stringify(retrieved_context)}`);
+        // Final response construction
+        console.log(`DEBUG: Final retrieved_context before returning: ${JSON.stringify(retrieved_context.slice(0, 1))}... (${retrieved_context.length} items)`); // Log first item for structure check
 
-        // 4. Construct and return the success response
         const successResponse: SuccessResponse = {
             retrieved_context: retrieved_context,
             storage_status: storage_status,
-            query_source: query_source,
+            query_source: retrieved_context.length > 0 ? query_source : 'none', // Ensure source is 'none' if context is empty
             message_for_gpt: message_for_gpt,
-            error: null
+            error: null,
         };
 
         return {
