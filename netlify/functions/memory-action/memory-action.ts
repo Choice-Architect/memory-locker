@@ -45,7 +45,7 @@ const EMBEDDING_MODEL = 'text-embedding-3-small';
 const EMBEDDING_DIMENSIONS = 1536; // Dimension for text-embedding-3-small
 const CHUNK_SIZE = 1000; // Target size in characters
 const CHUNK_OVERLAP = 200; // Overlap in characters
-const VECTOR_MATCH_THRESHOLD = 0.75; // Similarity threshold for vector search
+const VECTOR_MATCH_THRESHOLD = 0.5; // Similarity threshold for vector search (Lowered from 0.75)
 const VECTOR_MATCH_COUNT = 5;     // Max number of chunks to retrieve via vector search
 
 // --- Environment Variables ---
