@@ -281,92 +281,89 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         if (payload.mode === 'query' || payload.mode === 'combined') {
             console.log("Processing 'query' mode...");
             const queryText = payload.query_text;
+            if (!queryText) {
+                 throw new Error("query_text is required for 'query' or 'combined' mode.");
+            }
 
             // a. Generate embedding for the query text
-            console.log("Generating query embedding...");
-            const queryEmbeddingResponse = await generateEmbeddings([queryText]); // Use existing function
-            const queryEmbedding = queryEmbeddingResponse[0];
-
-            if (!queryEmbedding) {
-                console.error("Failed to generate embedding for the query text.");
-                // message_for_gpt = "Could not process the query embedding.";
-                // query_source = 'error'; // Indicate an error state
-                // Decide if we should throw an error or return partial results
-                // THROW the error as query cannot proceed without embedding
+            console.log("Generating embedding for query text...");
+            // TODO: REMOVE DEBUG LOGS
+            console.log(`DEBUG: Query text for embedding: "${queryText}"`);
+            const queryEmbeddings = await generateEmbeddings([queryText]);
+            if (!queryEmbeddings || queryEmbeddings.length === 0 || !queryEmbeddings[0]) {
                 throw new Error("Failed to generate embedding for the query text.");
+            }
+            const queryEmbedding = queryEmbeddings[0];
+            // TODO: REMOVE DEBUG LOGS
+            console.log(`DEBUG: Generated query embedding (first 5 dims): ${queryEmbedding.slice(0, 5).join(', ')}...`);
+
+
+            // b. Search for similar chunks in 'transcript_embeddings' using the SQL function
+            console.log("Searching for relevant memory chunks via vector search...");
+            const searchParams = {
+                query_embedding: queryEmbedding,
+                match_threshold: VECTOR_MATCH_THRESHOLD,
+                match_count: VECTOR_MATCH_COUNT
+                // No user_id included here as it was removed from payload and function logic
+            };
+            // TODO: REMOVE DEBUG LOGS
+            console.log('DEBUG: Calling search_memory_chunks with params:', JSON.stringify(searchParams));
+
+            const { data: searchResults, error: searchError } = await supabase.rpc(
+                'search_memory_chunks',
+                searchParams
+            );
+
+            // TODO: REMOVE DEBUG LOGS
+            console.log('DEBUG: Response from search_memory_chunks:', JSON.stringify({ data: searchResults, error: searchError }));
+
+
+            if (searchError) {
+                console.error("Error during vector search RPC call:", searchError);
+                // Don't throw here, maybe fallback later? For now, report error via message.
+                query_source = 'error';
+                message_for_gpt = `Error searching memories: ${searchError.message}`;
+            } else if (searchResults && searchResults.length > 0) {
+                console.log(`Found ${searchResults.length} potentially relevant chunks via vector search.`);
+                query_source = 'vector_store';
+                // Map results to ContextObject format
+                // Assuming search_memory_chunks returns objects like { content_chunk: string, file_id: number, metadata: { created_at: string, ... }, similarity: number }
+                retrieved_context = searchResults.map((result: any) => ({
+                    chunk: result.content_chunk || '', // Ensure chunk is string
+                    timestamp: result.metadata?.created_at || new Date(0).toISOString(), // Provide default timestamp
+                    // Currently, file-level entities are stored in 'files'. We might fetch them if needed.
+                    // For now, returning empty entities for the chunk.
+                    entities_in_chunk: {},
+                    file_id: result.file_id,
+                    // chunk_id: result.id, // Assuming the function returns the embedding row ID as 'id'
+                    // similarity: result.similarity // If needed
+                }));
+                 message_for_gpt = `Found ${retrieved_context.length} relevant memory snippets.`;
+
             } else {
-                console.log("Query embedding generated successfully.");
+                console.log("No relevant matches found via vector search.");
+                query_source = 'none'; // Or 'postgres_fallback' if implemented
+                // --- Fallback logic would go here ---
+                // console.log("Attempting fallback search...");
+                // const { data: fallbackData, error: fallbackError } = await supabase...
+                // console.log('DEBUG: Response from fallback_search:', JSON.stringify({ data: fallbackData, error: fallbackError }));
+                // if (fallbackData) { query_source = 'postgres_fallback'; retrieved_context = ... }
+                // --- End Fallback Logic ---
 
-                // b. Perform filtered vector search using the RPC function
-                console.log("Performing vector search...");
-
-                // Prepare metadata filter if entities are present
-                // Simple filter: matching any provided entity - adapt as needed
-                // Currently, the RPC filters on transcript_embeddings.metadata, which only has created_at.
-                // To filter by entities, they need to be in transcript_embeddings.metadata.
-                // OR adjust the RPC function/query logic.
-                // For now, we'll call without entity filtering in the RPC.
-                // Filtering could potentially be done client-side after retrieval if necessary.
-                const filterMetadata = {}; // Empty filter for now - adjust if needed
-
-                const { data: vectorResults, error: rpcError } = await supabase.rpc(
-                    'search_memory_chunks',
-                    {
-                        query_embedding: queryEmbedding,
-                        match_threshold: VECTOR_MATCH_THRESHOLD,
-                        match_count: VECTOR_MATCH_COUNT,
-                        filter_metadata: filterMetadata // Pass the filter object
-                    }
-                );
-
-                if (rpcError) {
-                    console.error("Error calling search_memory_chunks RPC:", rpcError);
-                    // message_for_gpt = "Error searching memories.";
-                    // query_source = 'error';
-                    // THROW the error
-                    throw new Error(`Error searching memories: ${rpcError.message}`);
-                } else if (vectorResults && vectorResults.length > 0) {
-                    console.log(`Found ${vectorResults.length} potential matches via vector search.`);
-                    query_source = 'vector_store';
-
-                    // c. Format results into ContextObject[]
-                    retrieved_context = vectorResults.map((row: any) => ({
-                        chunk: row.content_chunk,
-                        // Assuming metadata contains timestamp, adjust if schema differs
-                        timestamp: row.metadata?.created_at || new Date(0).toISOString(),
-                        // Add file-level entities here? Requires fetching from files table or joining in RPC.
-                        // For now, returning empty object or potentially chunk-level if added to metadata
-                        entities_in_chunk: row.metadata?.entities_in_chunk || {},
-                        file_id: row.file_id,
-                        chunk_id: row.id,
-                        similarity: row.similarity // Include similarity score if useful for GPT
-                    }));
-
-                    message_for_gpt = `Found ${vectorResults.length} relevant context snippets.`;
-
-                    // d. (Optional Fallback Logic - Placeholder)
-                    // if (vectorResults.length < SOME_THRESHOLD) {
-                    //    console.log("Vector search results low, considering fallback...");
-                    //    // Implement fallback search on 'files' table here
-                    //    // query_source = 'combined' or 'postgres_fallback';
-                    // }
-
-                } else {
-                    console.log("No relevant matches found via vector search.");
-                    message_for_gpt = "I couldn't find any specific memories matching your query.";
-                    query_source = 'none'; // Or 'vector_store' if you want to indicate it was tried
-                }
+                message_for_gpt = "I couldn't find any specific memories matching your query in the vector store.";
             }
         } // End of 'query'/'combined' block
 
+        // TODO: REMOVE DEBUG LOGS
+        console.log(`DEBUG: Final retrieved_context before returning: ${JSON.stringify(retrieved_context)}`);
 
-        // 3. Format Success Response
+        // 4. Construct and return the success response
         const successResponse: SuccessResponse = {
-            retrieved_context,
-            storage_status,
-            query_source,
-            message_for_gpt,
-            error: null,
+            retrieved_context: retrieved_context,
+            storage_status: storage_status,
+            query_source: query_source,
+            message_for_gpt: message_for_gpt,
+            error: null
         };
 
         return {
@@ -376,38 +373,12 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         };
 
     } catch (error: unknown) {
-        // 4. Format Error Response
-        console.error("Error processing request:", error); // Log the full error
-
-        let statusCode = 500; // Default to Internal Server Error
-        let errorMessage = "An unexpected internal error occurred.";
-
-        if (error instanceof Error) {
-            errorMessage = error.message; // Use the actual error message
-
-            // Set specific status codes for common client-side errors
-            if (errorMessage.includes("Unauthorized") || errorMessage.includes("API key") || errorMessage.includes("ACTION_SECRET_KEY")) {
-                statusCode = 401; // Unauthorized
-            } else if (errorMessage.includes("Method Not Allowed")) {
-                statusCode = 405; // Method Not Allowed
-            } else if (
-                errorMessage.includes("Request body is missing") ||
-                errorMessage.includes("Missing required fields") ||
-                errorMessage.includes("Unexpected token") || // JSON parsing error
-                errorMessage.includes("invalid input syntax for type json") // JSON parsing error at DB level?
-            ) {
-                statusCode = 400; // Bad Request
-            }
-             // Add more specific checks if needed (e.g., OpenAI rate limits -> 429)
-            // Supabase errors might also warrant specific codes (e.g., 404 if an ID isn't found, though RPC likely handles this)
-        }
-
-        const errorResponse: ErrorResponse = { error: errorMessage };
-
+        console.error("Handler Error:", error);
+        const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
         return {
-            statusCode,
+            statusCode: 500, // Use 500 for internal server errors
             headers,
-            body: JSON.stringify(errorResponse),
+            body: JSON.stringify({ error: errorMessage } as ErrorResponse),
         };
     }
 };

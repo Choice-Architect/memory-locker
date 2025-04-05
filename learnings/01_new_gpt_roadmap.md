@@ -151,6 +151,7 @@ Okay, here is a detailed product development roadmap for the Memory Locker proje
     *   Task: Modify Action schema if API contract needs adjustment.
     *   Task: Update Netlify function logic to fix bugs, improve queries, or handle edge cases found during testing.
     *   Task: Redeploy function and re-test.
+    *   **Note:** Remember to remove temporary debug logging (`// TODO: REMOVE DEBUG LOGS`) from the Netlify function before moving to Phase 5.
     *   Deliverable: Improved GPT instructions, refined Action schema, updated Netlify function code.
 
 ---
