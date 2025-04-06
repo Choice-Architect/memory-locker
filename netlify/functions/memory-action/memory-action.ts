@@ -371,10 +371,17 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
             // a. Insert into 'files' table
             console.log("Preparing to insert into files table with processed metadata:", JSON.stringify(fileMetadata));
+
+            // Determine the title: Use GPT-generated title if available, otherwise fallback
+            const generatedTitle = typeof fileMetadata?.title === 'string' && fileMetadata.title.trim() !== ''
+                ? fileMetadata.title.trim()
+                : null;
+            const fallbackTitle = textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : '');
+
             const fileInsertData: { [key: string]: any } = {
                 transcript_text: textToStore,
-                file_metadata: fileMetadata, // Store processed metadata with normalized dates
-                title: textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : ''),
+                file_metadata: fileMetadata, // Store processed metadata (incl. normalized dates, potentially the title)
+                title: generatedTitle || fallbackTitle, // Use generated title or fallback
                 file_type: 'gpt_interaction',
             };
 
