@@ -190,43 +190,69 @@ CREATE INDEX transcript_embeddings_embedding_hnsw_idx ON public.transcript_embed
 -- PART 4: FUNCTIONS
 -- =================================
 
--- Function for vector similarity search on memory chunks
-CREATE OR REPLACE FUNCTION public.search_memory_chunks(query_embedding vector(1536), match_threshold double precision, match_count integer, filter_metadata jsonb DEFAULT '{}'::jsonb)
- RETURNS TABLE(id uuid, file_id uuid, content_chunk text, metadata jsonb, similarity double precision) -- Corrected return types to UUID
+-- Function for vector similarity search on memory chunks with metadata filtering
+CREATE OR REPLACE FUNCTION public.search_memory_chunks(
+    query_embedding vector(1536),
+    match_threshold double precision,
+    match_count integer,
+    filter_topics TEXT[] DEFAULT NULL,      -- Optional: Filter by topics (array contains ALL)
+    filter_people TEXT[] DEFAULT NULL,      -- Optional: Filter by people (array contains ALL)
+    filter_locations TEXT[] DEFAULT NULL,   -- Optional: Filter by locations (array contains ALL)
+    filter_type TEXT DEFAULT NULL,          -- Optional: Filter by specific type
+    filter_sentiment TEXT DEFAULT NULL,     -- Optional: Filter by specific sentiment
+    filter_date_start TEXT DEFAULT NULL,    -- Optional: Start date (ISO 8601 string or YYYY-MM-DD)
+    filter_date_end TEXT DEFAULT NULL       -- Optional: End date (ISO 8601 string or YYYY-MM-DD)
+)
+ RETURNS TABLE(id uuid, file_id uuid, content_chunk text, metadata jsonb, similarity double precision)
  LANGUAGE plpgsql
  -- Explicitly set the search path for security
  SET search_path = 'public', 'extensions'
 AS $function$
--- NOTE (Apr 5, 2025): When testing this function directly via psql with long vector literals
--- (e.g., copied from logs), execute the query from a file using `psql -f <filename>`
--- to avoid potential truncation of the vector by interactive terminal input limits,
--- which can cause dimension mismatch errors.
--- FURTHER NOTE (Apr 5, 2025): Even executing via `psql -f` or passing the vector literal via
--- `psql -v` or pasting into a GUI client consistently resulted in dimension mismatch errors (1536 vs 68).
--- This suggests a backend parsing/casting issue with very long vector *string literals*.
--- However, calling this function via RPC (e.g., Supabase JS client) appears to work correctly
--- without dimension errors, implying the vector is passed differently. Focus debugging on the
--- match_threshold if RPC calls return empty results.
--- NOTE (Apr 6, 2025): Application layer (Netlify function) handles fallback search using ILIKE on files.transcript_text
--- when this vector search returns no results. Stemming (e.g., PorterStemmer from 'natural' library)
--- is applied to extracted topics in the application layer before constructing the ILIKE query
--- to handle word variations (singular/plural). Consider using DB-level Full-Text Search (FTS) on
--- files.transcript_text as a future enhancement for more robust keyword searching.
+DECLARE
+    start_date TIMESTAMPTZ;
+    end_date TIMESTAMPTZ;
 BEGIN
+    -- Attempt to cast date strings to TIMESTAMPTZ, handle potential errors
+    BEGIN
+        start_date := filter_date_start::TIMESTAMPTZ;
+    EXCEPTION WHEN others THEN
+        start_date := NULL;
+    END;
+    BEGIN
+        -- Add 1 day to end_date to make the range inclusive of the end day
+        end_date := (filter_date_end::DATE + interval '1 day')::TIMESTAMPTZ;
+    EXCEPTION WHEN others THEN
+        end_date := NULL;
+    END;
+
   RETURN QUERY
   SELECT
     te.id,
     te.file_id,
-    te.content_chunk, -- Corrected column name from chunk_text
+    te.content_chunk,
     te.metadata,
     1 - (te.embedding <=> query_embedding) AS similarity
   FROM transcript_embeddings te
   WHERE
-    -- Apply metadata filter only if provided and not empty
-    (filter_metadata = '{}'::jsonb OR te.metadata @> filter_metadata)
-  AND
-    -- Compare embedding similarity
+    -- Vector similarity check (always applied)
     1 - (te.embedding <=> query_embedding) > match_threshold
+
+    -- Optional Metadata Filters (applied only if filter parameter is NOT NULL)
+    AND (filter_topics IS NULL OR (te.metadata -> 'topics')::jsonb @> to_jsonb(filter_topics))
+    AND (filter_people IS NULL OR (te.metadata -> 'people')::jsonb @> to_jsonb(filter_people))
+    AND (filter_locations IS NULL OR (te.metadata -> 'locations')::jsonb @> to_jsonb(filter_locations))
+    AND (filter_type IS NULL OR te.metadata ->> 'type' = filter_type)
+    AND (filter_sentiment IS NULL OR te.metadata ->> 'sentiment' = filter_sentiment)
+
+    -- Optional Date Range Filter
+    -- Checks if ANY normalized date within the metadata's 'dates' array falls within the specified range
+    AND (
+        (start_date IS NULL AND end_date IS NULL) OR -- Pass if no date filter applied
+        (start_date IS NOT NULL AND end_date IS NULL AND EXISTS (SELECT 1 FROM jsonb_array_elements(te.metadata -> 'dates') AS d WHERE (d ->> 'normalized')::TIMESTAMPTZ >= start_date)) OR -- Only start date
+        (start_date IS NULL AND end_date IS NOT NULL AND EXISTS (SELECT 1 FROM jsonb_array_elements(te.metadata -> 'dates') AS d WHERE (d ->> 'normalized')::TIMESTAMPTZ < end_date)) OR -- Only end date
+        (start_date IS NOT NULL AND end_date IS NOT NULL AND EXISTS (SELECT 1 FROM jsonb_array_elements(te.metadata -> 'dates') AS d WHERE (d ->> 'normalized')::TIMESTAMPTZ >= start_date AND (d ->> 'normalized')::TIMESTAMPTZ < end_date)) -- Both dates
+    )
+
   ORDER BY similarity DESC
   LIMIT match_count;
 END;

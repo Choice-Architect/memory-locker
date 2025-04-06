@@ -2,7 +2,7 @@ import { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import stemmer from '@stdlib/nlp-porter-stemmer';
-import { parse, formatISO, startOfDay, endOfDay, addDays, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addMonths, subMonths, set, isMatch, parseISO, isValid } from 'date-fns';
+import { parse, formatISO, startOfDay, endOfDay, addDays, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addMonths, subMonths, set, isMatch, parseISO, isValid, format } from 'date-fns';
 
 // --- Interfaces for API Contract ---
 
@@ -191,6 +191,61 @@ function normalizeDateString(dateString: string, referenceDate: Date): Normalize
         original: dateString,
         normalized: normalizedDate ? formatISO(normalizedDate) : null
     };
+}
+
+/**
+ * Given a normalized ISO date string (potentially with varying precision like YYYY-MM-DD or YYYY-MM),
+ * generate an array of standardized formats (YYYY-MM-DDTHH:mm:ssZ, YYYY-MM-DD, YYYY-MM, YYYY)
+ * for use in fallback queries.
+ */
+function generateDateFormats(normalizedDateString: string): string[] {
+    const formats = new Set<string>(); // Use a Set to avoid duplicates
+
+    try {
+        // Attempt to parse the input string, assuming it's already somewhat normalized
+        // Handles YYYY-MM-DDTHH:mm:ssZ, YYYY-MM-DD
+        const parsedDate = parseISO(normalizedDateString);
+
+        if (isValid(parsedDate)) {
+            // Always add the most specific format possible (full ISO with time)
+            // If the original didn't have time, parseISO defaults to 00:00:00Z
+            formats.add(formatISO(parsedDate));
+
+            // Add Date only format
+            formats.add(format(parsedDate, 'yyyy-MM-dd'));
+
+            // Add Month only format
+            formats.add(format(parsedDate, 'yyyy-MM'));
+
+             // Add Year only format
+             formats.add(format(parsedDate, 'yyyy'));
+
+        } else {
+             // Handle cases parseISO might fail on, like YYYY-MM or YYYY
+             if (normalizedDateString.match(/^\d{4}-\d{2}$/)) { // YYYY-MM
+                 formats.add(normalizedDateString); // Add the original YYYY-MM
+                 // Attempt to parse for year format
+                 const parsedForYear = parse(normalizedDateString, 'yyyy-MM', new Date());
+                 if (isValid(parsedForYear)) formats.add(format(parsedForYear, 'yyyy'));
+
+             } else if (normalizedDateString.match(/^\d{4}$/)) { // YYYY
+                 formats.add(normalizedDateString); // Add the original YYYY
+             } else {
+                 // If it's not a recognized format, just add the original string
+                 // as a fallback, though it might not match storage formats.
+                 console.warn(`generateDateFormats received potentially unparseable input: ${normalizedDateString}`);
+                 if (normalizedDateString) formats.add(normalizedDateString);
+             }
+        }
+    } catch (error) {
+        console.error(`Error generating date formats for "${normalizedDateString}":`, error);
+        // Add the original string as a last resort on error
+        if (normalizedDateString) {
+            formats.add(normalizedDateString);
+        }
+    }
+
+    return Array.from(formats); // Convert Set back to array
 }
 
 /**
@@ -404,15 +459,15 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             throw new Error(`Failed to store embeddings: ${embeddingError.message}`);
                         } else {
                              console.log("Embedding records inserted successfully.");
-                            storage_status = `Successfully stored file record (ID: ${fileId}) and ${embeddingRecords.length} text chunks with embeddings.`;
+                            storage_status = "Noted."; // Concise success status
                         }
                     } else {
                         console.warn("No valid embedding records to insert.");
-                        storage_status = `Stored file record (ID: ${fileId}) but no valid embeddings were generated to store.`;
+                        storage_status = `Stored file record (ID: ${fileId}) but no valid embeddings were generated to store.`; // Keep details for partial failure
                     }
                 } else {
                      console.warn("No embeddings were generated successfully.");
-                     storage_status = `Stored file record (ID: ${fileId}) but failed to generate any embeddings.`;
+                     storage_status = `Stored file record (ID: ${fileId}) but failed to generate any embeddings.`; // Keep details for failure
                 }
             }
 
@@ -439,12 +494,46 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
             // b. Search for similar chunks in 'transcript_embeddings' using the SQL function
             console.log("Searching for relevant memory chunks via vector search...");
+
+            // Prepare metadata filters from queryMetadata
+            const filterTopics = queryMetadata.topics?.length ? queryMetadata.topics : null;
+            const filterPeople = queryMetadata.people?.length ? queryMetadata.people : null;
+            const filterLocations = queryMetadata.locations?.length ? queryMetadata.locations : null;
+            const filterType = queryMetadata.type || null;
+            const filterSentiment = queryMetadata.sentiment || null;
+
+            // Determine date range from normalized query dates
+            let filterDateStart: string | null = null;
+            let filterDateEnd: string | null = null;
+            const validNormalizedDates = (queryMetadata.dates as NormalizedDate[] | undefined)
+                ?.map(d => d.normalized)
+                .filter((d): d is string => d !== null)
+                .map(d => parseISO(d)) // Parse to Date objects for comparison
+                .filter(isValid);
+
+            if (validNormalizedDates && validNormalizedDates.length > 0) {
+                validNormalizedDates.sort((a, b) => a.getTime() - b.getTime()); // Sort dates chronologically
+                // Use the earliest date as start, latest as end
+                filterDateStart = formatISO(validNormalizedDates[0]);
+                filterDateEnd = formatISO(validNormalizedDates[validNormalizedDates.length - 1]);
+                 console.log(`Applying vector search date filter: Start=${filterDateStart}, End=${filterDateEnd}`);
+            }
+
+            // Construct the parameters for the RPC call
             const searchParams = {
                 query_embedding: queryEmbedding,
                 match_threshold: VECTOR_MATCH_THRESHOLD,
-                match_count: VECTOR_MATCH_COUNT
-                // No user_id included here as it was removed from payload and function logic
+                match_count: VECTOR_MATCH_COUNT,
+                filter_topics: filterTopics,
+                filter_people: filterPeople,
+                filter_locations: filterLocations,
+                filter_type: filterType,
+                filter_sentiment: filterSentiment,
+                filter_date_start: filterDateStart,
+                filter_date_end: filterDateEnd
             };
+
+            console.log("Calling search_memory_chunks with params:", JSON.stringify(searchParams));
 
             const { data: searchResults, error: searchError } = await supabase.rpc(
                 'search_memory_chunks',
@@ -496,35 +585,31 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
 
                 // ** Filter by Dates **
-                // Basic approach: Check if any normalized query date *exactly matches*
-                // any normalized date stored in the file's metadata.
-                // TODO: Implement more robust range overlap checks if needed.
+                // New approach: Generate multiple formats for each query date and check if
+                // any stored normalized date matches any of the generated query formats.
+                let allQueryDateFormats: string[] = [];
                 if (queryDates.length > 0) {
-                    const normalizedQueryDateStrings = queryDates.map(d => d.normalized).filter(d => d !== null);
-                    if (normalizedQueryDateStrings.length > 0) {
-                         console.log(`Applying fallback date filter for: ${normalizedQueryDateStrings.join(', ')}`);
-                         // This uses Supabase JSONB operators. Checks if the 'dates' array in file_metadata
-                         // contains any object ({}) whose 'normalized' property matches any of the query dates.
-                         // Syntax: column->'key' @> 'json_value'::jsonb
-                         // We need to check if any element in the array matches.
-                         // Using `contains` (`@>`) on the array level with a specific object structure.
-                         // Example check: Does file_metadata->'dates' contain an object like {"normalized": "2025-04-06T00:00:00Z"}?
-                         const dateFilters = normalizedQueryDateStrings.map(nqds =>
-                            // Correct syntax for Supabase JS client: column.operator.value
-                            // Use 'cs' (contains) for JSONB array check
-                            // The value needs to be JSON stringified
-                            `file_metadata->dates.cs.${JSON.stringify([{"normalized": nqds}])}`
-                         ).join(','); // Join multiple conditions with a comma for .or()
+                    queryDates.forEach(dateObj => {
+                        if (dateObj.normalized) {
+                            const formats = generateDateFormats(dateObj.normalized);
+                            allQueryDateFormats.push(...formats);
+                        }
+                    });
+                    // Remove duplicates
+                    allQueryDateFormats = [...new Set(allQueryDateFormats)];
+                }
 
-                        // Note: This exact match is limited. Range overlaps would be better.
-                        // Another approach: Use jsonb_path_exists
-                        // const dateFilters = `jsonb_path_exists(file_metadata->'dates', '$[*] ? (@.normalized == any($queryDates))', jsonb_build_object('queryDates', normalizedQueryDateStrings))` - Requires PG12+ features and might be complex to implement correctly via the JS client's .filter() or .or()
+                if (allQueryDateFormats.length > 0) {
+                    console.log(`Applying fallback date filter for potential formats: ${allQueryDateFormats.join(', ')}`);
+                    // Construct the .or() filter string
+                    // Checks if the 'dates' array contains any object whose 'normalized' property
+                    // matches ANY of the generated formats.
+                    const dateFilters = allQueryDateFormats.map(format =>
+                        `file_metadata->dates.cs.${JSON.stringify([{"normalized": format}])}`
+                    ).join(',');
 
-                         console.log(`Fallback Date Filter Condition (Supabase JS client syntax): ${dateFilters}`);
-                         // Applying as OR condition for now, assuming any date match is relevant
-                          fallbackQuery = fallbackQuery.or(dateFilters);
-                          // If we need AND logic (file must match ALL query dates), this needs rework.
-                    }
+                    console.log(`Fallback Date Filter Condition (OR across formats): ${dateFilters}`);
+                    fallbackQuery = fallbackQuery.or(dateFilters);
                 }
 
 
