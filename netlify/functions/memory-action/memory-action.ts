@@ -1,17 +1,25 @@
 import { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
-import { PorterStemmer } from 'natural';
+import stemmer from '@stdlib/nlp-porter-stemmer';
+import { parse, formatISO, startOfDay, endOfDay, addDays, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addMonths, subMonths, set, isMatch, parseISO, isValid } from 'date-fns';
 
 // --- Interfaces for API Contract ---
 
+// Interface for normalized date object
+interface NormalizedDate {
+    original: string;
+    normalized: string | null; // ISO 8601 format or null if failed
+}
+
 interface ExtractedEntities {
     people?: string[];
-    dates?: string[];
+    dates?: (string | NormalizedDate)[]; // Allow storing original strings or normalized objects
     locations?: string[];
     topics?: string[];
-    // Add other entity types as needed
-    [key: string]: string[] | undefined; // Allow flexible entity types
+    type?: string; // Added based on schema
+    sentiment?: string; // Added based on schema
+    [key: string]: any; // Allow flexible entity types, keep for now
 }
 
 interface RequestPayload {
@@ -59,7 +67,10 @@ interface FallbackResultItem {
     id: string; // Corrected: UUID as string
     transcript_text: string;
     created_at: string | null;
-    file_metadata: ExtractedEntities | null;
+    file_metadata: { // Assuming file_metadata is an object
+        dates?: NormalizedDate[]; // Expect normalized dates here now
+        [key: string]: any; // Allow other properties
+    } | null;
 }
 
 // --- Constants ---
@@ -70,6 +81,7 @@ const CHUNK_OVERLAP = 200; // Overlap in characters
 const VECTOR_MATCH_THRESHOLD = 0.5; // Similarity threshold for vector search (Lowered from 0.75)
 const VECTOR_MATCH_COUNT = 5;     // Max number of chunks to retrieve via vector search
 const FALLBACK_MATCH_COUNT = 10; // Added fallback match count
+const STORAGE_REFERENCE_DATE = new Date('2025-04-06T12:00:00Z'); // Fixed reference for storing test data
 
 // --- Environment Variables ---
 const supabaseUrl = process.env.SUPABASE_URL || '';
@@ -101,6 +113,85 @@ const initializeClients = () => {
 };
 
 // --- Utility Functions ---
+
+/**
+ * Normalizes a date string to ISO 8601 format using a reference date.
+ * Handles relative terms like "today", "yesterday", "next week", etc.
+ * Returns null if parsing/normalization fails.
+ */
+function normalizeDateString(dateString: string, referenceDate: Date): NormalizedDate {
+    const lowerCaseDateString = dateString.toLowerCase().trim();
+    let normalizedDate: Date | null = null;
+
+    try {
+        // Specific keywords first
+        if (lowerCaseDateString === 'today') {
+            normalizedDate = startOfDay(referenceDate);
+        } else if (lowerCaseDateString === 'yesterday') {
+            normalizedDate = startOfDay(subDays(referenceDate, 1));
+        } else if (lowerCaseDateString === 'tomorrow') {
+            normalizedDate = startOfDay(addDays(referenceDate, 1));
+        } else if (lowerCaseDateString === 'last weekend') {
+             // Assuming weekend is Sat/Sun. Get start of last week's Saturday.
+             const lastWeekStart = startOfWeek(subDays(referenceDate, 7), { weekStartsOn: 0 }); // Last Sunday
+             normalizedDate = addDays(lastWeekStart, 6); // Saturday of last week
+             // Note: This returns a single date. Range handling might be needed.
+        } else if (lowerCaseDateString === 'next weekend') {
+            // Get start of next week's Saturday.
+            const nextWeekStart = startOfWeek(addDays(referenceDate, 7), { weekStartsOn: 0 }); // Next Sunday
+            normalizedDate = addDays(nextWeekStart, 6); // Saturday of next week
+            // Note: This returns a single date.
+        } else if (lowerCaseDateString.startsWith('next ')) {
+            const parts = lowerCaseDateString.split(' ');
+            if (parts.length === 2) {
+                // Simple handling for 'next month', 'next week', 'next tuesday' etc.
+                // Requires more robust parsing for specific days relative to referenceDate
+                // For now, approximate:
+                if (parts[1] === 'month') normalizedDate = startOfMonth(addMonths(referenceDate, 1));
+                else if (parts[1] === 'week') normalizedDate = startOfWeek(addDays(referenceDate, 7), { weekStartsOn: 1 }); // Assuming week starts Mon
+                // Add more specific day handling if needed ('next tuesday')
+            }
+        } else if (lowerCaseDateString.startsWith('last ')) {
+             const parts = lowerCaseDateString.split(' ');
+            if (parts.length === 2) {
+                if (parts[1] === 'month') normalizedDate = startOfMonth(subMonths(referenceDate, 1));
+                else if (parts[1] === 'week') normalizedDate = startOfWeek(subDays(referenceDate, 7), { weekStartsOn: 1 });
+                 // Add more specific day handling if needed ('last tuesday')
+            }
+        } else if (lowerCaseDateString === 'eod friday') {
+            // Find the next Friday (or today if it is Friday) and set time to 17:00
+            let nextFriday = referenceDate;
+            while (nextFriday.getDay() !== 5) {
+                nextFriday = addDays(nextFriday, 1);
+            }
+            normalizedDate = set(startOfDay(nextFriday), { hours: 17 });
+        } else {
+            // Attempt parsing common formats (requires date-fns v2+)
+             // Try ISO format first
+            if (isMatch(dateString, "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'") || isMatch(dateString, "yyyy-MM-dd")) {
+                 const parsed = parseISO(dateString);
+                 if (isValid(parsed)) normalizedDate = parsed;
+            }
+            // Add more specific format parsing if needed, e.g., 'MM/dd/yyyy', 'MMMM d, yyyy'
+            // Example:
+            // else if (isMatch(dateString, 'MM/dd/yyyy')) {
+            //    normalizedDate = parse(dateString, 'MM/dd/yyyy', referenceDate);
+            // }
+            if (!normalizedDate) {
+                console.warn(`Could not parse date string: "${dateString}" with basic patterns.`);
+            }
+        }
+
+    } catch (error) {
+        console.error(`Error normalizing date string "${dateString}":`, error);
+        normalizedDate = null; // Ensure null on error
+    }
+
+    return {
+        original: dateString,
+        normalized: normalizedDate ? formatISO(normalizedDate) : null
+    };
+}
 
 /**
  * Simple text chunking function.
@@ -189,22 +280,47 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         let query_source: SuccessResponse['query_source'] = 'none';
         let message_for_gpt: string | undefined = undefined;
         let fileId: string | null = null;
+        let processedMetadata: ExtractedEntities = { ...payload.extracted_entities }; // Copy to modify
 
+
+        // 1. Normalize Dates if present
+        if (processedMetadata.dates && Array.isArray(processedMetadata.dates)) {
+            const referenceDateForNormalization = (payload.mode === 'store' || payload.mode === 'combined')
+                ? STORAGE_REFERENCE_DATE // Use fixed date for storing test data
+                : new Date(); // Use current date for queries
+
+            console.log(`Normalizing dates with reference: ${referenceDateForNormalization.toISOString()}`);
+            processedMetadata.dates = processedMetadata.dates
+                .map(date => {
+                     // If it's already a NormalizedDate object (e.g., from a previous step), skip
+                     if (typeof date === 'object' && date !== null && 'original' in date && 'normalized' in date) {
+                         return date as NormalizedDate;
+                     }
+                     // Otherwise, assume it's a string and normalize it
+                     if (typeof date === 'string') {
+                         return normalizeDateString(date, referenceDateForNormalization);
+                     }
+                     // If it's neither, log a warning and filter it out
+                     console.warn(`Unexpected date format in extracted_entities: ${JSON.stringify(date)}`);
+                     return null;
+                })
+                .filter(d => d !== null) as NormalizedDate[]; // Filter out any nulls from failed normalizations/bad types
+        }
 
         // 2. Process based on mode
         if (payload.mode === 'store' || payload.mode === 'combined') {
             console.log("Processing 'store' mode...");
             const textToStore = payload.query_text;
-            const fileMetadata = payload.extracted_entities; // Using extracted entities as file metadata for now
+            // Use the processedMetadata which now contains normalized dates
+            const fileMetadata = processedMetadata;
 
             // a. Insert into 'files' table
-            console.log("Preparing to insert into files table...");
+            console.log("Preparing to insert into files table with processed metadata:", JSON.stringify(fileMetadata));
             const fileInsertData: { [key: string]: any } = {
-                transcript_text: textToStore, // Store the full text
-                file_metadata: fileMetadata, // Store all extracted entities
-                title: textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : ''), // Simple title
-                file_type: 'gpt_interaction', // Mark as originating from GPT interaction
-                // user_id field removed
+                transcript_text: textToStore,
+                file_metadata: fileMetadata, // Store processed metadata with normalized dates
+                title: textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : ''),
+                file_type: 'gpt_interaction',
             };
 
             /*
@@ -256,11 +372,12 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                         const embedding = embeddings[index];
                         if (!embedding) return null; // Skip if embedding failed for this chunk
 
-                        // For now, chunk metadata only includes timestamp. File-level entities are in 'files' table.
-                        // Could add chunk-specific entities later if needed.
+                        // Store the *full fileMetadata* (including normalized dates and other entities)
+                        // in each chunk's metadata field.
                         const chunkMetadata = {
-                            created_at: timestamp,
-                            // entities_in_chunk: {} // Placeholder for future chunk-specific entity extraction
+                            ...fileMetadata, // Spread all file-level metadata
+                            created_at: timestamp, // Add chunk creation timestamp
+                            // Optionally add chunk-specific details later if needed
                         };
 
                         return {
@@ -304,6 +421,10 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         if (payload.mode === 'query' || payload.mode === 'combined') {
             console.log("Processing 'query' mode...");
             const queryText = payload.query_text;
+            // Use processedMetadata which has dates normalized relative to the *current* time
+            const queryMetadata = processedMetadata;
+            const queryDates = (queryMetadata.dates as NormalizedDate[] | undefined)?.filter(d => d.normalized) || [];
+
             if (!queryText) {
                  throw new Error("query_text is required for 'query' or 'combined' mode.");
             }
@@ -346,46 +467,83 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                     // chunk_id: result.id, // Assuming the RPC returns the transcript_embeddings.id
                     file_id: result.file_id,
                     chunk: result.content_chunk,
-                    // timestamp: result.metadata?.created_at || new Date(0).toISOString(), // Use timestamp from metadata if available
-                    // Attempt to get timestamp robustly
                     timestamp: typeof result.metadata === 'object' && result.metadata !== null && 'created_at' in result.metadata
                                ? String(result.metadata.created_at)
-                               : new Date(0).toISOString(), // Default if not found
-                    entities_in_chunk: typeof result.metadata === 'object' && result.metadata !== null && 'entities_in_chunk' in result.metadata
-                               ? result.metadata.entities_in_chunk as ExtractedEntities
-                               : {}, // Default if not found or wrong type
-                    // Add similarity score if needed for GPT context/debugging?
-                    // similarity_score: result.similarity // Assuming the function returns similarity
+                               : new Date(0).toISOString(),
+                    // Extract entities from chunk metadata (which should mirror file metadata now)
+                    entities_in_chunk: typeof result.metadata === 'object' && result.metadata !== null
+                               ? { // Reconstruct entities from metadata, expecting normalized dates
+                                    people: result.metadata.people,
+                                    dates: result.metadata.dates as NormalizedDate[],
+                                    locations: result.metadata.locations,
+                                    topics: result.metadata.topics,
+                                    type: result.metadata.type,
+                                    sentiment: result.metadata.sentiment
+                                  }
+                                : {},
                 }));
             }
 
             // c. Fallback Search Logic (if vector search yielded no results or errored initially)
             if (retrieved_context.length === 0) {
-                console.log("Vector search yielded no results or failed. Attempting fallback search on 'files' table...");
+                 console.log("Vector search yielded no results or failed. Attempting fallback search on 'files' table...");
 
-                // Use extracted topics for fallback if available, otherwise use full query text
-                const topics = payload.extracted_entities?.topics;
+                // Use extracted topics and normalized dates for fallback
+                const topics = queryMetadata?.topics;
                 let fallbackQuery = supabase
                     .from('files')
                     .select('id, transcript_text, created_at, file_metadata'); // Select needed columns
 
+
+                // ** Filter by Dates **
+                // Basic approach: Check if any normalized query date *exactly matches*
+                // any normalized date stored in the file's metadata.
+                // TODO: Implement more robust range overlap checks if needed.
+                if (queryDates.length > 0) {
+                    const normalizedQueryDateStrings = queryDates.map(d => d.normalized).filter(d => d !== null);
+                    if (normalizedQueryDateStrings.length > 0) {
+                         console.log(`Applying fallback date filter for: ${normalizedQueryDateStrings.join(', ')}`);
+                         // This uses Supabase JSONB operators. Checks if the 'dates' array in file_metadata
+                         // contains any object ({}) whose 'normalized' property matches any of the query dates.
+                         // Syntax: column->'key' @> 'json_value'::jsonb
+                         // We need to check if any element in the array matches.
+                         // Using `contains` (`@>`) on the array level with a specific object structure.
+                         // Example check: Does file_metadata->'dates' contain an object like {"normalized": "2025-04-06T00:00:00Z"}?
+                         const dateFilters = normalizedQueryDateStrings.map(nqds =>
+                            `file_metadata->dates::jsonb @> '[{"normalized": "${nqds}"}]'::jsonb`
+                         ).join(' or ');
+                        // Note: This exact match is limited. Range overlaps would be better.
+                        // Another approach: Use jsonb_path_exists
+                        // const dateFilters = `jsonb_path_exists(file_metadata->'dates', '$[*] ? (@.normalized == any($queryDates))', jsonb_build_object('queryDates', normalizedQueryDateStrings))` - Requires PG12+ features and might be complex to implement correctly via the JS client's .filter() or .or()
+
+                         console.log(`Fallback Date Filter Condition (simplified exact match): ${dateFilters}`);
+                         // Applying as OR condition for now, assuming any date match is relevant
+                          fallbackQuery = fallbackQuery.or(dateFilters);
+                          // If we need AND logic (file must match ALL query dates), this needs rework.
+                    }
+                }
+
+
+                // ** Filter by Topics (ILIKE on stemmed topics) **
                 if (topics && topics.length > 0) {
                     console.log(`Using extracted topics for fallback search: ${topics.join(', ')}`);
-                    // Stem each topic before creating the ILIKE pattern
                     const orFilter = topics
-                        .map(topic => `transcript_text.ilike.%${PorterStemmer.stem(topic)}%`)
+                        .map(topic => `transcript_text.ilike.%${stemmer(topic)}%`)
                         .join(',');
-                    console.log(`Stemmed topics OR filter: ${orFilter}`); // Log the filter being used
+                    console.log(`Stemmed topics OR filter: ${orFilter}`);
+                    // Chain the topic filter. Use .and() if date filter was applied, .or() otherwise?
+                    // Let's make them additive for now (match date OR topic) - easily changed to AND if needed.
                     fallbackQuery = fallbackQuery.or(orFilter);
-                } else {
-                    // Fallback to searching the whole query text if no specific topics extracted
-                    console.log("No specific topics extracted, falling back to ILIKE on full query text.");
+                } else if (queryDates.length === 0) { // Only use full text if no dates or topics provided
+                    console.log("No specific topics or dates extracted, falling back to ILIKE on full query text.");
                     const fallbackPattern = `%${queryText}%`;
                     fallbackQuery = fallbackQuery.ilike('transcript_text', fallbackPattern);
                 }
 
+
                 // Add limit and execute
                 fallbackQuery = fallbackQuery.limit(FALLBACK_MATCH_COUNT);
+                console.log("Executing Fallback Query...");
                 const { data: fallbackResults, error: fallbackError } = await fallbackQuery;
 
                 // Explicitly type the fallback results
@@ -411,15 +569,20 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
                     // Map fallback results to ContextObject format, using the defined type for 'file'
                     const fallbackContext: ContextObject[] = typedFallbackResults.map((file: FallbackResultItem) => ({
-                        file_id: file.id, // Use the file's UUID as file_id
-                        // IMPORTANT: For fallback, the 'chunk' is the *entire* transcript_text
-                        chunk: file.transcript_text,
+                        file_id: file.id,
+                        chunk: file.transcript_text, // Entire transcript for fallback
                         timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
-                         // Use file_metadata as entities - assumption is file-level entities apply to whole text
+                        // Extract entities from file_metadata, expecting normalized dates
                         entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
-                                            ? file.file_metadata as ExtractedEntities
-                                            : {},
-                        // chunk_id: undefined // No specific chunk ID for fallback results
+                            ? { // Reconstruct based on expected structure
+                                people: file.file_metadata.people,
+                                dates: file.file_metadata.dates || [], // Ensure dates array exists
+                                locations: file.file_metadata.locations,
+                                topics: file.file_metadata.topics,
+                                type: file.file_metadata.type,
+                                sentiment: file.file_metadata.sentiment
+                              }
+                            : {},
                     }));
                     retrieved_context.push(...fallbackContext); // Append fallback results
                 } else {

@@ -20,9 +20,11 @@
   "homepage": "https://github.com/Choice-Architect/memory-locker#readme",
   "dependencies": {
     "@netlify/functions": "^3.0.4",
+    "@stdlib/nlp-porter-stemmer": "^0.2.2",
     "@supabase/supabase-js": "^2.49.4",
-    "@types/natural": "^5.1.5",
-    "natural": "^8.0.1",
+    "date-fns": "^3.6.0",
     "openai": "^4.91.1"
+  },
+  "devDependencies": {
   }
 }
