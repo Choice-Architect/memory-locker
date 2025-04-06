@@ -499,7 +499,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             console.log("Searching for relevant memory chunks via vector search...");
 
             // Prepare metadata filters from queryMetadata
-            const filterTopics = queryMetadata.topics?.length ? queryMetadata.topics : null;
             const filterPeople = queryMetadata.people?.length ? queryMetadata.people : null;
             const filterLocations = queryMetadata.locations?.length ? queryMetadata.locations : null;
             const filterType = queryMetadata.type || null;
@@ -527,7 +526,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                 query_embedding: queryEmbedding,
                 match_threshold: VECTOR_MATCH_THRESHOLD,
                 match_count: VECTOR_MATCH_COUNT,
-                filter_topics: filterTopics,
                 filter_people: filterPeople,
                 filter_locations: filterLocations,
                 filter_type: filterType,
@@ -580,16 +578,20 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             if (retrieved_context.length === 0) {
                  console.log("Vector search yielded no results or failed. Attempting fallback search on 'files' table...");
 
-                // Use extracted topics and normalized dates for fallback
-                const topics = queryMetadata?.topics;
+                // Use specific entities extracted from query for metadata filtering first.
+                const queryPeople = queryMetadata?.people;
+                const queryLocations = queryMetadata?.locations;
+                // Keep queryDates processed earlier
+                // const queryTopics = queryMetadata?.topics; // Don't use query topics directly for text search
+
                 let fallbackQuery = supabase
                     .from('files')
                     .select('id, transcript_text, created_at, file_metadata'); // Select needed columns
 
+                let appliedSpecificFilter = false;
+                let filterConditions: string[] = [];
 
-                // ** Filter by Dates **
-                // New approach: Generate multiple formats for each query date and check if
-                // any stored normalized date matches any of the generated query formats.
+                // ** Filter by Dates (using normalized formats) **
                 let allQueryDateFormats: string[] = [];
                 if (queryDates.length > 0) {
                     queryDates.forEach(dateObj => {
@@ -598,37 +600,52 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             allQueryDateFormats.push(...formats);
                         }
                     });
-                    // Remove duplicates
-                    allQueryDateFormats = [...new Set(allQueryDateFormats)];
+                    allQueryDateFormats = [...new Set(allQueryDateFormats)]; // Remove duplicates
                 }
 
                 if (allQueryDateFormats.length > 0) {
-                    console.log(`Applying fallback date filter for potential formats: ${allQueryDateFormats.join(', ')}`);
-                    // Construct the .or() filter string
-                    // Checks if the 'dates' array contains any object whose 'normalized' property
-                    // matches ANY of the generated formats.
+                    console.log(`Fallback: Applying date filter for potential formats: ${allQueryDateFormats.join(', ')}`);
+                    // Checks if the 'dates' array contains any object whose 'normalized' property matches ANY of the generated formats.
                     const dateFilters = allQueryDateFormats.map(format =>
                         `file_metadata->dates.cs.${JSON.stringify([{"normalized": format}])}`
-                    ).join(',');
-
-                    console.log(`Fallback Date Filter Condition (OR across formats): ${dateFilters}`);
-                    fallbackQuery = fallbackQuery.or(dateFilters);
+                    );
+                    filterConditions.push(...dateFilters); // Add to OR conditions
+                    appliedSpecificFilter = true;
                 }
 
+                // ** Filter by People (contains any of the query people) **
+                if (queryPeople && queryPeople.length > 0) {
+                     console.log(`Fallback: Applying people filter: ${queryPeople.join(', ')}`);
+                     // Checks if file_metadata->people contains any of the queryPeople
+                     const peopleFilters = queryPeople.map(person =>
+                         `file_metadata->people.cs.${JSON.stringify([person])}`
+                     );
+                     filterConditions.push(...peopleFilters); // Add to OR conditions
+                     appliedSpecificFilter = true;
+                 }
 
-                // ** Filter by Topics (ILIKE on stemmed topics) **
-                if (topics && topics.length > 0) {
-                    console.log(`Using extracted topics for fallback search: ${topics.join(', ')}`);
-                    const orFilter = topics
-                        .map(topic => `transcript_text.ilike.%${stemmer(topic)}%`)
-                        .join(',');
-                    console.log(`Stemmed topics OR filter: ${orFilter}`);
-                    // Chain the topic filter. Use .and() if date filter was applied, .or() otherwise?
-                    // Let's make them additive for now (match date OR topic) - easily changed to AND if needed.
-                    fallbackQuery = fallbackQuery.or(orFilter);
-                } else if (queryDates.length === 0) { // Only use full text if no dates or topics provided
-                    console.log("No specific topics or dates extracted, falling back to ILIKE on full query text.");
-                    const fallbackPattern = `%${queryText}%`;
+                // ** Filter by Locations (contains any of the query locations) **
+                if (queryLocations && queryLocations.length > 0) {
+                     console.log(`Fallback: Applying locations filter: ${queryLocations.join(', ')}`);
+                     // Checks if file_metadata->locations contains any of the queryLocations
+                     const locationFilters = queryLocations.map(location =>
+                         `file_metadata->locations.cs.${JSON.stringify([location])}`
+                     );
+                     filterConditions.push(...locationFilters); // Add to OR conditions
+                     appliedSpecificFilter = true;
+                }
+
+                // Apply combined specific filters if any were found (Date OR Person OR Location)
+                if (filterConditions.length > 0) {
+                    const orFilterString = filterConditions.join(',');
+                    console.log(`Fallback: Applying combined specific filters (OR): ${orFilterString}`);
+                    fallbackQuery = fallbackQuery.or(orFilterString);
+                }
+
+                // ** If NO specific filters were applied, fall back to full text search on original query **
+                if (!appliedSpecificFilter) {
+                    console.log("Fallback: No specific entities (date, person, location) found in query. Falling back to ILIKE on full original query text.");
+                    const fallbackPattern = `%${queryText}%`; // Use original query text
                     fallbackQuery = fallbackQuery.ilike('transcript_text', fallbackPattern);
                 }
 
