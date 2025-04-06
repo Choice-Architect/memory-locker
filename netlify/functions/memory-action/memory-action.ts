@@ -510,13 +510,17 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                          // Using `contains` (`@>`) on the array level with a specific object structure.
                          // Example check: Does file_metadata->'dates' contain an object like {"normalized": "2025-04-06T00:00:00Z"}?
                          const dateFilters = normalizedQueryDateStrings.map(nqds =>
-                            `file_metadata->dates::jsonb @> '[{"normalized": "${nqds}"}]'::jsonb`
-                         ).join(' or ');
+                            // Correct syntax for Supabase JS client: column.operator.value
+                            // Use 'cs' (contains) for JSONB array check
+                            // The value needs to be JSON stringified
+                            `file_metadata->dates.cs.${JSON.stringify([{"normalized": nqds}])}`
+                         ).join(','); // Join multiple conditions with a comma for .or()
+
                         // Note: This exact match is limited. Range overlaps would be better.
                         // Another approach: Use jsonb_path_exists
                         // const dateFilters = `jsonb_path_exists(file_metadata->'dates', '$[*] ? (@.normalized == any($queryDates))', jsonb_build_object('queryDates', normalizedQueryDateStrings))` - Requires PG12+ features and might be complex to implement correctly via the JS client's .filter() or .or()
 
-                         console.log(`Fallback Date Filter Condition (simplified exact match): ${dateFilters}`);
+                         console.log(`Fallback Date Filter Condition (Supabase JS client syntax): ${dateFilters}`);
                          // Applying as OR condition for now, assuming any date match is relevant
                           fallbackQuery = fallbackQuery.or(dateFilters);
                           // If we need AND logic (file must match ALL query dates), this needs rework.
