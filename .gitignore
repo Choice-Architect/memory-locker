@@ -36,6 +36,9 @@ supabase/.temp/
 # Debugging artifacts
 debug-logs/
 
+# Learnings / Documentation (User request)
+learnings/
+
 # IDE / Editor specific
 .vscode/
 .idea/
