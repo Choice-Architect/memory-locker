@@ -19,13 +19,14 @@ interface ExtractedEntities {
     topics?: string[];
     type?: string; // Added based on schema
     sentiment?: string; // Added based on schema
+    title?: string; // Optional title provided by GPT
     [key: string]: any; // Allow flexible entity types, keep for now
 }
 
 interface RequestPayload {
     query_text: string;
     extracted_entities: ExtractedEntities;
-    // user_id?: string; (Removed)
+    // user_id has been removed as this is a single-user app
     mode: 'store' | 'query' | 'combined';
 }
 
@@ -367,25 +368,27 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             console.log("Processing 'store' mode...");
             const textToStore = payload.query_text;
             // Use the processedMetadata which now contains normalized dates
+            // We will modify processedMetadata in place to remove the title after using it.
             const fileMetadata = processedMetadata;
 
+            // Determine the title for the file record
+            // Prioritize the title provided by the GPT in extracted_entities
+            const fileTitle = (fileMetadata.title && fileMetadata.title.trim() !== '')
+                ? fileMetadata.title.trim()
+                : textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : '');
+
+            // Remove title from metadata object *before* inserting into file_metadata column
+            // to avoid duplication.
+            delete fileMetadata.title;
+
             // a. Insert into 'files' table
-            console.log("Preparing to insert into files table with processed metadata:", JSON.stringify(fileMetadata));
+            console.log("Preparing to insert into files table with processed metadata (title removed):", JSON.stringify(fileMetadata));
             const fileInsertData: { [key: string]: any } = {
                 transcript_text: textToStore,
-                file_metadata: fileMetadata, // Store processed metadata with normalized dates
-                title: textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : ''),
+                file_metadata: fileMetadata, // Store processed metadata (without title)
+                title: fileTitle, // Use the determined title here
                 file_type: 'gpt_interaction',
             };
-
-            /*
-            if (payload.user_id) {
-                console.log(`Inserting with user_id: ${payload.user_id}`);
-                fileInsertData.user_id = payload.user_id;
-            } else {
-                console.log("No user_id provided in payload, inserting without it.");
-            }
-            */
 
             const { data: fileData, error: fileError } = await supabase
                 .from('files')
