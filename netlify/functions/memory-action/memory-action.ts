@@ -2,7 +2,7 @@ import { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import stemmer from '@stdlib/nlp-porter-stemmer';
-import { parse, formatISO, startOfDay, endOfDay, addDays, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addMonths, subMonths, set, isMatch, parseISO, isValid, format } from 'date-fns';
+import { parse, formatISO, startOfDay, endOfDay, addDays, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addMonths, subMonths, set, isMatch, parseISO, isValid } from 'date-fns';
 
 // --- Interfaces for API Contract ---
 
@@ -19,14 +19,13 @@ interface ExtractedEntities {
     topics?: string[];
     type?: string; // Added based on schema
     sentiment?: string; // Added based on schema
-    title?: string; // Optional title provided by GPT
     [key: string]: any; // Allow flexible entity types, keep for now
 }
 
 interface RequestPayload {
     query_text: string;
     extracted_entities: ExtractedEntities;
-    // user_id has been removed as this is a single-user app
+    // user_id?: string; (Removed)
     mode: 'store' | 'query' | 'combined';
 }
 
@@ -195,61 +194,6 @@ function normalizeDateString(dateString: string, referenceDate: Date): Normalize
 }
 
 /**
- * Given a normalized ISO date string (potentially with varying precision like YYYY-MM-DD or YYYY-MM),
- * generate an array of standardized formats (YYYY-MM-DDTHH:mm:ssZ, YYYY-MM-DD, YYYY-MM, YYYY)
- * for use in fallback queries.
- */
-function generateDateFormats(normalizedDateString: string): string[] {
-    const formats = new Set<string>(); // Use a Set to avoid duplicates
-
-    try {
-        // Attempt to parse the input string, assuming it's already somewhat normalized
-        // Handles YYYY-MM-DDTHH:mm:ssZ, YYYY-MM-DD
-        const parsedDate = parseISO(normalizedDateString);
-
-        if (isValid(parsedDate)) {
-            // Always add the most specific format possible (full ISO with time)
-            // If the original didn't have time, parseISO defaults to 00:00:00Z
-            formats.add(formatISO(parsedDate));
-
-            // Add Date only format
-            formats.add(format(parsedDate, 'yyyy-MM-dd'));
-
-            // Add Month only format
-            formats.add(format(parsedDate, 'yyyy-MM'));
-
-             // Add Year only format
-             formats.add(format(parsedDate, 'yyyy'));
-
-        } else {
-             // Handle cases parseISO might fail on, like YYYY-MM or YYYY
-             if (normalizedDateString.match(/^\d{4}-\d{2}$/)) { // YYYY-MM
-                 formats.add(normalizedDateString); // Add the original YYYY-MM
-                 // Attempt to parse for year format
-                 const parsedForYear = parse(normalizedDateString, 'yyyy-MM', new Date());
-                 if (isValid(parsedForYear)) formats.add(format(parsedForYear, 'yyyy'));
-
-             } else if (normalizedDateString.match(/^\d{4}$/)) { // YYYY
-                 formats.add(normalizedDateString); // Add the original YYYY
-             } else {
-                 // If it's not a recognized format, just add the original string
-                 // as a fallback, though it might not match storage formats.
-                 console.warn(`generateDateFormats received potentially unparseable input: ${normalizedDateString}`);
-                 if (normalizedDateString) formats.add(normalizedDateString);
-             }
-        }
-    } catch (error) {
-        console.error(`Error generating date formats for "${normalizedDateString}":`, error);
-        // Add the original string as a last resort on error
-        if (normalizedDateString) {
-            formats.add(normalizedDateString);
-        }
-    }
-
-    return Array.from(formats); // Convert Set back to array
-}
-
-/**
  * Simple text chunking function.
  */
 function chunkText(text: string, size: number, overlap: number): string[] {
@@ -368,27 +312,25 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             console.log("Processing 'store' mode...");
             const textToStore = payload.query_text;
             // Use the processedMetadata which now contains normalized dates
-            // We will modify processedMetadata in place to remove the title after using it.
             const fileMetadata = processedMetadata;
 
-            // Determine the title for the file record
-            // Prioritize the title provided by the GPT in extracted_entities
-            const fileTitle = (fileMetadata.title && fileMetadata.title.trim() !== '')
-                ? fileMetadata.title.trim()
-                : textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : '');
-
-            // Remove title from metadata object *before* inserting into file_metadata column
-            // to avoid duplication.
-            delete fileMetadata.title;
-
             // a. Insert into 'files' table
-            console.log("Preparing to insert into files table with processed metadata (title removed):", JSON.stringify(fileMetadata));
+            console.log("Preparing to insert into files table with processed metadata:", JSON.stringify(fileMetadata));
             const fileInsertData: { [key: string]: any } = {
                 transcript_text: textToStore,
-                file_metadata: fileMetadata, // Store processed metadata (without title)
-                title: fileTitle, // Use the determined title here
+                file_metadata: fileMetadata, // Store processed metadata with normalized dates
+                title: textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : ''),
                 file_type: 'gpt_interaction',
             };
+
+            /*
+            if (payload.user_id) {
+                console.log(`Inserting with user_id: ${payload.user_id}`);
+                fileInsertData.user_id = payload.user_id;
+            } else {
+                console.log("No user_id provided in payload, inserting without it.");
+            }
+            */
 
             const { data: fileData, error: fileError } = await supabase
                 .from('files')
@@ -462,15 +404,15 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             throw new Error(`Failed to store embeddings: ${embeddingError.message}`);
                         } else {
                              console.log("Embedding records inserted successfully.");
-                            storage_status = "Noted."; // Concise success status
+                            storage_status = `Successfully stored file record (ID: ${fileId}) and ${embeddingRecords.length} text chunks with embeddings.`;
                         }
                     } else {
                         console.warn("No valid embedding records to insert.");
-                        storage_status = `Stored file record (ID: ${fileId}) but no valid embeddings were generated to store.`; // Keep details for partial failure
+                        storage_status = `Stored file record (ID: ${fileId}) but no valid embeddings were generated to store.`;
                     }
                 } else {
                      console.warn("No embeddings were generated successfully.");
-                     storage_status = `Stored file record (ID: ${fileId}) but failed to generate any embeddings.`; // Keep details for failure
+                     storage_status = `Stored file record (ID: ${fileId}) but failed to generate any embeddings.`;
                 }
             }
 
@@ -497,44 +439,12 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
             // b. Search for similar chunks in 'transcript_embeddings' using the SQL function
             console.log("Searching for relevant memory chunks via vector search...");
-
-            // Prepare metadata filters from queryMetadata
-            const filterPeople = queryMetadata.people?.length ? queryMetadata.people : null;
-            const filterLocations = queryMetadata.locations?.length ? queryMetadata.locations : null;
-            const filterType = queryMetadata.type || null;
-            const filterSentiment = queryMetadata.sentiment || null;
-
-            // Determine date range from normalized query dates
-            let filterDateStart: string | null = null;
-            let filterDateEnd: string | null = null;
-            const validNormalizedDates = (queryMetadata.dates as NormalizedDate[] | undefined)
-                ?.map(d => d.normalized)
-                .filter((d): d is string => d !== null)
-                .map(d => parseISO(d)) // Parse to Date objects for comparison
-                .filter(isValid);
-
-            if (validNormalizedDates && validNormalizedDates.length > 0) {
-                validNormalizedDates.sort((a, b) => a.getTime() - b.getTime()); // Sort dates chronologically
-                // Use the earliest date as start, latest as end
-                filterDateStart = formatISO(validNormalizedDates[0]);
-                filterDateEnd = formatISO(validNormalizedDates[validNormalizedDates.length - 1]);
-                 console.log(`Applying vector search date filter: Start=${filterDateStart}, End=${filterDateEnd}`);
-            }
-
-            // Construct the parameters for the RPC call
             const searchParams = {
                 query_embedding: queryEmbedding,
                 match_threshold: VECTOR_MATCH_THRESHOLD,
-                match_count: VECTOR_MATCH_COUNT,
-                filter_people: filterPeople,
-                filter_locations: filterLocations,
-                filter_type: filterType,
-                filter_sentiment: filterSentiment,
-                filter_date_start: filterDateStart,
-                filter_date_end: filterDateEnd
+                match_count: VECTOR_MATCH_COUNT
+                // No user_id included here as it was removed from payload and function logic
             };
-
-            console.log("Calling search_memory_chunks with params:", JSON.stringify(searchParams));
 
             const { data: searchResults, error: searchError } = await supabase.rpc(
                 'search_memory_chunks',
@@ -578,74 +488,55 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             if (retrieved_context.length === 0) {
                  console.log("Vector search yielded no results or failed. Attempting fallback search on 'files' table...");
 
-                // Use specific entities extracted from query for metadata filtering first.
-                const queryPeople = queryMetadata?.people;
-                const queryLocations = queryMetadata?.locations;
-                // Keep queryDates processed earlier
-                // const queryTopics = queryMetadata?.topics; // Don't use query topics directly for text search
-
+                // Use extracted topics and normalized dates for fallback
+                const topics = queryMetadata?.topics;
                 let fallbackQuery = supabase
                     .from('files')
                     .select('id, transcript_text, created_at, file_metadata'); // Select needed columns
 
-                let appliedSpecificFilter = false;
-                let filterConditions: string[] = [];
 
-                // ** Filter by Dates (using normalized formats) **
-                let allQueryDateFormats: string[] = [];
+                // ** Filter by Dates **
+                // Basic approach: Check if any normalized query date *exactly matches*
+                // any normalized date stored in the file's metadata.
+                // TODO: Implement more robust range overlap checks if needed.
                 if (queryDates.length > 0) {
-                    queryDates.forEach(dateObj => {
-                        if (dateObj.normalized) {
-                            const formats = generateDateFormats(dateObj.normalized);
-                            allQueryDateFormats.push(...formats);
-                        }
-                    });
-                    allQueryDateFormats = [...new Set(allQueryDateFormats)]; // Remove duplicates
+                    const normalizedQueryDateStrings = queryDates.map(d => d.normalized).filter(d => d !== null);
+                    if (normalizedQueryDateStrings.length > 0) {
+                         console.log(`Applying fallback date filter for: ${normalizedQueryDateStrings.join(', ')}`);
+                         // This uses Supabase JSONB operators. Checks if the 'dates' array in file_metadata
+                         // contains any object ({}) whose 'normalized' property matches any of the query dates.
+                         // Syntax: column->'key' @> 'json_value'::jsonb
+                         // We need to check if any element in the array matches.
+                         // Using `contains` (`@>`) on the array level with a specific object structure.
+                         // Example check: Does file_metadata->'dates' contain an object like {"normalized": "2025-04-06T00:00:00Z"}?
+                         const dateFilters = normalizedQueryDateStrings.map(nqds =>
+                            `file_metadata->dates::jsonb @> '[{"normalized": "${nqds}"}]'::jsonb`
+                         ).join(' or ');
+                        // Note: This exact match is limited. Range overlaps would be better.
+                        // Another approach: Use jsonb_path_exists
+                        // const dateFilters = `jsonb_path_exists(file_metadata->'dates', '$[*] ? (@.normalized == any($queryDates))', jsonb_build_object('queryDates', normalizedQueryDateStrings))` - Requires PG12+ features and might be complex to implement correctly via the JS client's .filter() or .or()
+
+                         console.log(`Fallback Date Filter Condition (simplified exact match): ${dateFilters}`);
+                         // Applying as OR condition for now, assuming any date match is relevant
+                          fallbackQuery = fallbackQuery.or(dateFilters);
+                          // If we need AND logic (file must match ALL query dates), this needs rework.
+                    }
                 }
 
-                if (allQueryDateFormats.length > 0) {
-                    console.log(`Fallback: Applying date filter for potential formats: ${allQueryDateFormats.join(', ')}`);
-                    // Checks if the 'dates' array contains any object whose 'normalized' property matches ANY of the generated formats.
-                    const dateFilters = allQueryDateFormats.map(format =>
-                        `file_metadata->dates.cs.${JSON.stringify([{"normalized": format}])}`
-                    );
-                    filterConditions.push(...dateFilters); // Add to OR conditions
-                    appliedSpecificFilter = true;
-                }
 
-                // ** Filter by People (contains any of the query people) **
-                if (queryPeople && queryPeople.length > 0) {
-                     console.log(`Fallback: Applying people filter: ${queryPeople.join(', ')}`);
-                     // Checks if file_metadata->people contains any of the queryPeople
-                     const peopleFilters = queryPeople.map(person =>
-                         `file_metadata->people.cs.${JSON.stringify([person])}`
-                     );
-                     filterConditions.push(...peopleFilters); // Add to OR conditions
-                     appliedSpecificFilter = true;
-                 }
-
-                // ** Filter by Locations (contains any of the query locations) **
-                if (queryLocations && queryLocations.length > 0) {
-                     console.log(`Fallback: Applying locations filter: ${queryLocations.join(', ')}`);
-                     // Checks if file_metadata->locations contains any of the queryLocations
-                     const locationFilters = queryLocations.map(location =>
-                         `file_metadata->locations.cs.${JSON.stringify([location])}`
-                     );
-                     filterConditions.push(...locationFilters); // Add to OR conditions
-                     appliedSpecificFilter = true;
-                }
-
-                // Apply combined specific filters if any were found (Date OR Person OR Location)
-                if (filterConditions.length > 0) {
-                    const orFilterString = filterConditions.join(',');
-                    console.log(`Fallback: Applying combined specific filters (OR): ${orFilterString}`);
-                    fallbackQuery = fallbackQuery.or(orFilterString);
-                }
-
-                // ** If NO specific filters were applied, fall back to full text search on original query **
-                if (!appliedSpecificFilter) {
-                    console.log("Fallback: No specific entities (date, person, location) found in query. Falling back to ILIKE on full original query text.");
-                    const fallbackPattern = `%${queryText}%`; // Use original query text
+                // ** Filter by Topics (ILIKE on stemmed topics) **
+                if (topics && topics.length > 0) {
+                    console.log(`Using extracted topics for fallback search: ${topics.join(', ')}`);
+                    const orFilter = topics
+                        .map(topic => `transcript_text.ilike.%${stemmer(topic)}%`)
+                        .join(',');
+                    console.log(`Stemmed topics OR filter: ${orFilter}`);
+                    // Chain the topic filter. Use .and() if date filter was applied, .or() otherwise?
+                    // Let's make them additive for now (match date OR topic) - easily changed to AND if needed.
+                    fallbackQuery = fallbackQuery.or(orFilter);
+                } else if (queryDates.length === 0) { // Only use full text if no dates or topics provided
+                    console.log("No specific topics or dates extracted, falling back to ILIKE on full query text.");
+                    const fallbackPattern = `%${queryText}%`;
                     fallbackQuery = fallbackQuery.ilike('transcript_text', fallbackPattern);
                 }
 
