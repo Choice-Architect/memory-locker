@@ -155,6 +155,9 @@ ON public.transcript_embeddings FOR ALL USING (true);
 -- CREATE INDEX idx_files_user_id ON files(user_id); (Removed)
 CREATE INDEX idx_files_file_type ON files(file_type);
 CREATE INDEX idx_files_conversation_id ON files(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_files_metadata_gin ON public.files USING gin (file_metadata jsonb_path_ops);
+CREATE INDEX IF NOT EXISTS idx_files_thread_id ON public.files (thread_id);
+CREATE INDEX IF NOT EXISTS idx_files_created_at ON public.files (created_at);
 
 -- Indexes for queries table
 -- CREATE INDEX idx_queries_user_id ON queries(user_id); (Removed)
@@ -203,7 +206,14 @@ CREATE OR REPLACE FUNCTION public.search_memory_chunks(
     filter_date_start TEXT DEFAULT NULL,    -- Optional: Start date (ISO 8601 string or YYYY-MM-DD)
     filter_date_end TEXT DEFAULT NULL       -- Optional: End date (ISO 8601 string or YYYY-MM-DD)
 )
- RETURNS TABLE(id uuid, file_id uuid, content_chunk text, metadata jsonb, similarity double precision)
+ RETURNS TABLE(
+     id uuid,
+     file_id uuid,
+     content_chunk text,
+     metadata jsonb,
+     similarity double precision,
+     chunk_index integer
+ )
  LANGUAGE plpgsql
  -- Explicitly set the search path for security
  SET search_path = 'public', 'extensions'
@@ -231,7 +241,8 @@ BEGIN
     te.file_id,
     te.content_chunk,
     te.metadata,
-    1 - (te.embedding <=> query_embedding) AS similarity
+    1 - (te.embedding <=> query_embedding) AS similarity,
+    te.chunk_index
   FROM transcript_embeddings te
   WHERE
     -- Vector similarity check (always applied)

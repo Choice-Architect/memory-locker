@@ -82,8 +82,8 @@ To use the vector embeddings functionality:
 
 1.  **Tables:** Defines the structure for storing users, files, embeddings, personas, queries, logs, and transactions.
 2.  **Security Policies (RLS):** Enables Row Level Security on all tables using a 'default deny' approach (no specific `ALLOW` policies). Access relies on roles that bypass RLS (e.g., `service_role`).
-3.  **Performance Indexes:** Includes standard B-tree indexes for common query filtering and an HNSW index on the `transcript_embeddings.embedding` column for efficient vector similarity searches.
-4.  **Functions:** Contains helper functions, such as `search_memory_chunks` for performing vector searches.
+3.  **Performance Indexes:** Includes standard B-tree indexes for common query filtering and an HNSW index on the `transcript_embeddings.embedding` column for efficient vector similarity searches. Also includes a GIN index on `files.file_metadata` and B-tree indexes on `files.thread_id` and `files.created_at` (added Apr 8, 2025).
+4.  **Functions:** Contains helper functions, such as `search_memory_chunks` for performing vector searches (now returns `chunk_index`).
 
 ### Key Tables
 
@@ -98,4 +98,5 @@ To use the vector embeddings functionality:
 
 ### Debugging Note (2025-04-04)
 
-- **TODO:** Review the definition and logic of the `search_memory_chunks` function (defined in `schema.sql`) as part of debugging the issue where Netlify logs report "No relevant matches found" despite successful Supabase function execution (HTTP 200). Need to verify the vector similarity algorithm, `match_threshold` application, and overall filtering logic. 
+- **TODO:** Review the definition and logic of the `search_memory_chunks` function (defined in `schema.sql`) as part of debugging the issue where Netlify logs report "No relevant matches found" despite successful Supabase function execution (HTTP 200). Need to verify the vector similarity algorithm, `match_threshold` application, and overall filtering logic.
+**Update (Apr 8, 2025):** The function was updated to return `chunk_index`. Further review of filtering logic within the function and the calling Netlify function may still be beneficial if query issues persist, but the specific TODO regarding the function definition update is resolved. 
