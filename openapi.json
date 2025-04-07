@@ -124,6 +124,34 @@
           "sentiment": {
             "type": "string",
             "description": "Inferred sentiment if applicable (e.g., funny, important, angry)"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "User-assigned priority level (1-10, 10 = highest)",
+            "nullable": true
+          },
+          "conversation_id": {
+            "type": "string",
+            "description": "Identifier for the ongoing conversation session (if available)",
+            "nullable": true
+          },
+          "thread_id": {
+             "type": "string",
+             "description": "Identifier for a specific topic thread within a conversation (if available and distinct)",
+             "nullable": true
+          },
+          "due_date": {
+            "type": "string",
+            "description": "Specific due date/deadline associated with the memory (extracted as string, normalized by function)",
+            "nullable": true
+          },
+          "language": {
+            "type": "string",
+            "enum": ["en", "fr", "ar"],
+            "description": "Detected language of the query_text (ISO 639-1 code, default 'en')",
+            "nullable": true
           }
         },
         "additionalProperties": {

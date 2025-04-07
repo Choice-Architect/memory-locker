@@ -57,4 +57,17 @@ This document outlines the necessary modifications to the Supabase database sche
 1.  **Verify/Modify `search_memory_chunks` Function:** Check and update the function in Supabase SQL Editor to ensure it returns `chunk_index`. Review its date logic.
 2.  **Apply Index Modifications:** Run the `CREATE INDEX IF NOT EXISTS ...` statements for `idx_files_metadata_gin`, `idx_files_thread_id`, and `idx_files_created_at`.
 
+---
+
+## Status Update (Apr 8, 2025)
+
+*   **Step 1 (Verify Function):** Pending manual verification by user in Supabase SQL Editor.
+**Update (Apr 8):** User confirmed function definition retrieved. Function **does not** return `chunk_index`. SQL provided to user to `CREATE OR REPLACE` the function with the necessary modification. Status pending user confirmation of update.
+**Update 2 (Apr 8):** `CREATE OR REPLACE` failed due to return type change (Error 42P13). Provided necessary `DROP FUNCTION` followed by `CREATE FUNCTION` sequence to user. Status pending user confirmation of update.
+**Update 3 (Apr 8):** User confirmed successful execution of `DROP` and `CREATE`. Function `search_memory_chunks` is now updated.
+*   **Step 2 (Apply Indexes):** SQL provided to user for execution via `CREATE INDEX IF NOT EXISTS ...` commands. Status pending user confirmation.
+**Update (Apr 8):** User confirmed successful execution, indexes are now applied.
+
+**Phase 1 Status: Completed (Apr 8, 2025)**
+
 --- 

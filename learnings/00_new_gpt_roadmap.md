@@ -188,6 +188,17 @@
 
 **Objective:** Improve the quality, performance, and feature set beyond the core functionality.
 
+**Update (Apr 8, 2025):** Implemented several metadata and filtering enhancements:
+*   **Priority:** Added support for user-assigned priority (1-10) stored in `files.file_metadata`. GPT instructions updated.
+*   **Due Date:** Added support for extracting due dates, normalizing them, storing in `files.file_metadata.normalized_due_date`, and filtering in fallback search. GPT instructions updated.
+*   **Language:** Added support for detecting language (en, fr, ar), storing in `files.file_metadata.language`, and filtering. GPT instructions updated.
+*   **Conversation/Thread Linking:** Added columns `conversation_id`, `thread_id` to `files` table and fields to API/function. GPT instructions updated to extract if available (experimental).
+*   **Auto-Keywords:** Implemented basic stop-word removal and keyword extraction, stored in `files.file_metadata.auto_keywords`. Fallback search now queries this field.
+*   **Chunk Index:** `transcript_embeddings.chunk_index` is now stored and returned by `search_memory_chunks` function, included in `ContextObject`.
+*   **Enhanced Vector Search Filtering:** `search_memory_chunks` RPC call now utilizes metadata filters (topics, people, dates, type, sentiment).
+*   **Enhanced Fallback Search Filtering:** Fallback search now filters by `files.created_at` based on query dates, and filters `file_metadata` for priority, language, due date, and auto-keywords.
+*   **Database Indexes:** Added GIN index on `files.file_metadata`, and indexes on `files.thread_id` and `files.created_at`.
+
 1.  **Advanced Retrieval:** Implement more sophisticated search strategies (e.g., hybrid search, filtering by metadata, time-based decay).
 2.  **Context Management:** Improve how the GPT handles multi-turn conversations related to memories.
 3.  **File Handling:** Fully implement robust file analysis, metadata extraction, and storage (if not part of the initial scope).

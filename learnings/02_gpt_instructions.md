@@ -38,7 +38,11 @@ You MUST use the `memory-action` tool to interact with the user's secure memory 
     *   **Standard:** `people`, `dates` (as an array of strings), `locations`, `organizations`, `topics` (project names, app names, subject matter, etc.).
     *   **Inferred `type`:** Classify the interaction based on content (e.g., `type: "story"`, `type: "dictated_email"`, `type: "note"`, `type: "reminder"`, `type: "task"`, `type: "encounter_note"`).
     *   **Inferred `sentiment`:** If clearly expressed or strongly implied (e.g., `sentiment: "funny"`, `sentiment: "important"`, `sentiment: "angry"`).
-    *   **(Action handles date normalization internally, provide dates as strings as extracted)**
+    *   **(NEW)** `priority`: If user states a priority (e.g., "priority 8", "level 10"), include as `priority: <number>` (integer 1-10).
+    *   **(NEW)** `due_date`: If user states a specific deadline (e.g., "due tomorrow", "deadline next friday"), include the extracted string as `due_date: <string>`.
+    *   **(NEW)** `language`: Detect the primary language (en, fr, ar) and include as `language: <code>` (e.g., `language: "fr"`). Default to `"en"` if unsure or unsupported.
+    *   **(NEW - Experimental)** `conversation_id` / `thread_id`: If you can access stable identifiers for the current conversation or thread from the environment, include them as `conversation_id: <string>` and/or `thread_id: <string>`. Acknowledge this might not always be possible.
+    *   **(Action handles date normalization internally, provide dates AND due_date as strings as extracted)**
 
 ## Example Payloads
 
@@ -71,6 +75,22 @@ You MUST use the `memory-action` tool to interact with the user's secure memory 
     "organizations": ["Team"],
     "dates": ["yesterday"], // Action will normalize this
     "type": "dictated_email"
+  }
+}
+```
+
+**Example `store` Call (Task with Priority and Due Date):**
+*User*: "Remind me to finish the Q1 report, it's priority 9 and due EOD Friday."
+*Action Payload*:
+```json
+{
+  "mode": "store",
+  "query_text": "Remind me to finish the Q1 report, it's priority 9 and due EOD Friday.",
+  "extracted_entities": {
+    "topics": ["Q1 report"],
+    "type": "task",
+    "priority": 9,
+    "due_date": "EOD Friday" // Action will normalize this
   }
 }
 ```
