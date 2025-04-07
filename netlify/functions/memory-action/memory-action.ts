@@ -19,6 +19,11 @@ interface ExtractedEntities {
     topics?: string[];
     type?: string; // Added based on schema
     sentiment?: string; // Added based on schema
+    priority?: number; // Added: Optional user-assigned priority (1-10)
+    conversation_id?: string; // Added: Optional conversation identifier
+    thread_id?: string; // Added: Optional thread identifier
+    due_date?: string; // Added: Optional due date string (to be normalized)
+    language?: 'en' | 'fr' | 'ar'; // Added: Optional language code
     [key: string]: any; // Allow flexible entity types, keep for now
 }
 
@@ -35,6 +40,7 @@ interface ContextObject {
     entities_in_chunk: ExtractedEntities; // Note: Currently storing file-level entities here
     file_id?: string; // Reference to the source file (Corrected: UUID as string)
     chunk_id?: string; // Reference to the specific chunk (Corrected: UUID as string)
+    chunk_index?: number; // Added: Index of the chunk within its file
 }
 
 interface SuccessResponse {
@@ -82,6 +88,24 @@ const VECTOR_MATCH_THRESHOLD = 0.5; // Similarity threshold for vector search (L
 const VECTOR_MATCH_COUNT = 5;     // Max number of chunks to retrieve via vector search
 const FALLBACK_MATCH_COUNT = 10; // Added fallback match count
 const STORAGE_REFERENCE_DATE = new Date('2025-04-06T12:00:00Z'); // Fixed reference for storing test data
+
+// Simple list of common English stop words
+const STOP_WORDS = new Set([
+    'a', 'about', 'above', 'after', 'again', 'against', 'all', 'am', 'an', 'and', 'any', 'are', 'aren\'t', 'as', 'at',
+    'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both', 'but', 'by', 'can\'t', 'cannot',
+    'could', 'couldn\'t', 'did', 'didn\'t', 'do', 'does', 'doesn\'t', 'doing', 'don\'t', 'down', 'during', 'each',
+    'few', 'for', 'from', 'further', 'had', 'hadn\'t', 'has', 'hasn\'t', 'have', 'haven\'t', 'having', 'he', 'he\'d',
+    'he\'ll', 'he\'s', 'her', 'here', 'here\'s', 'hers', 'herself', 'him', 'himself', 'his', 'how', 'how\'s', 'i', 'i\'d',
+    'i\'ll', 'i\'m', 'i\'ve', 'if', 'in', 'into', 'is', 'isn\'t', 'it', 'it\'s', 'its', 'itself', 'let\'s', 'me',
+    'more', 'most', 'mustn\'t', 'my', 'myself', 'no', 'nor', 'not', 'of', 'off', 'on', 'once', 'only', 'or', 'other',
+    'ought', 'our', 'ours', 'ourselves', 'out', 'over', 'own', 'same', 'shan\'t', 'she', 'she\'d', 'she\'ll', 'she\'s',
+    'should', 'shouldn\'t', 'so', 'some', 'such', 'than', 'that', 'that\'s', 'the', 'their', 'theirs', 'them',
+    'themselves', 'then', 'there', 'there\'s', 'these', 'they', 'they\'d', 'they\'ll', 'they\'re', 'they\'ve', 'this',
+    'those', 'through', 'to', 'too', 'under', 'until', 'up', 'very', 'was', 'wasn\'t', 'we', 'we\'d', 'we\'ll', 'we\'re',
+    'we\'ve', 'were', 'weren\'t', 'what', 'what\'s', 'when', 'when\'s', 'where', 'where\'s', 'which', 'while', 'who',
+    'who\'s', 'whom', 'why', 'why\'s', 'with', 'won\'t', 'would', 'wouldn\'t', 'you', 'you\'d', 'you\'ll', 'you\'re',
+    'you\'ve', 'your', 'yours', 'yourself', 'yourselves'
+]);
 
 // --- Environment Variables ---
 const supabaseUrl = process.env.SUPABASE_URL || '';
@@ -314,6 +338,39 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             // Use the processedMetadata which now contains normalized dates
             const fileMetadata = processedMetadata;
 
+            // --> Enhancement: Add Due Date Normalization
+            if (payload.extracted_entities.due_date) {
+                const normalizedDueDate = normalizeDateString(payload.extracted_entities.due_date, STORAGE_REFERENCE_DATE);
+                if (normalizedDueDate.normalized) {
+                    fileMetadata.normalized_due_date = normalizedDueDate.normalized;
+                    console.log(`Stored normalized due date: ${fileMetadata.normalized_due_date}`);
+                } else {
+                    console.warn(`Could not normalize provided due date: ${payload.extracted_entities.due_date}`);
+                    // Optionally store the original string anyway, or just omit
+                }
+            }
+
+            // --> Enhancement: Add Priority
+            if (payload.extracted_entities.priority && typeof payload.extracted_entities.priority === 'number') {
+                fileMetadata.priority = payload.extracted_entities.priority;
+                console.log(`Stored priority: ${fileMetadata.priority}`);
+            }
+
+            // --> Enhancement: Add Language
+            fileMetadata.language = payload.extracted_entities.language || 'en'; // Default to 'en'
+            console.log(`Stored language: ${fileMetadata.language}`);
+
+            // --> Enhancement: Add Auto-Keywords
+            try {
+                const words = textToStore.toLowerCase().match(/\b(\w+)\b/g) || [];
+                const keywords = words.filter(word => !STOP_WORDS.has(word));
+                // Optional: Limit number of keywords, apply stemming, etc.
+                fileMetadata.auto_keywords = [...new Set(keywords)]; // Store unique keywords
+                console.log(`Stored ${fileMetadata.auto_keywords.length} auto-keywords.`);
+            } catch (kwError) {
+                console.error("Error generating auto-keywords:", kwError);
+            }
+
             // a. Insert into 'files' table
             console.log("Preparing to insert into files table with processed metadata:", JSON.stringify(fileMetadata));
             const fileInsertData: { [key: string]: any } = {
@@ -321,6 +378,9 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                 file_metadata: fileMetadata, // Store processed metadata with normalized dates
                 title: textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : ''),
                 file_type: 'gpt_interaction',
+                // --> Enhancement: Add Conversation/Thread IDs
+                conversation_id: payload.extracted_entities.conversation_id || null,
+                thread_id: payload.extracted_entities.thread_id || null,
             };
 
             /*
@@ -378,6 +438,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             ...fileMetadata, // Spread all file-level metadata
                             created_at: timestamp, // Add chunk creation timestamp
                             // Optionally add chunk-specific details later if needed
+                            chunk_index: index, // --> Enhancement: Store chunk index
                         };
 
                         return {
@@ -442,8 +503,18 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             const searchParams = {
                 query_embedding: queryEmbedding,
                 match_threshold: VECTOR_MATCH_THRESHOLD,
-                match_count: VECTOR_MATCH_COUNT
+                match_count: VECTOR_MATCH_COUNT,
                 // No user_id included here as it was removed from payload and function logic
+                // --> Enhancement: Add Metadata Filters to Vector Search Call
+                filter_topics: queryMetadata.topics || null,
+                filter_people: queryMetadata.people || null,
+                filter_locations: queryMetadata.locations || null,
+                filter_type: queryMetadata.type || null,
+                filter_sentiment: queryMetadata.sentiment || null,
+                // Pass normalized date range (assuming queryDates is already normalized array)
+                filter_date_start: queryDates.length > 0 ? queryDates[0].normalized : null, // Basic: Use first date as start
+                filter_date_end: queryDates.length > 1 ? queryDates[queryDates.length - 1].normalized : (queryDates.length === 1 ? queryDates[0].normalized : null) // Basic: Use last date as end
+                // TODO: More robust date range extraction might be needed if multiple disjoint dates are provided
             };
 
             const { data: searchResults, error: searchError } = await supabase.rpc(
@@ -470,6 +541,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                     timestamp: typeof result.metadata === 'object' && result.metadata !== null && 'created_at' in result.metadata
                                ? String(result.metadata.created_at)
                                : new Date(0).toISOString(),
+                    chunk_index: typeof result === 'object' && result !== null && 'chunk_index' in result ? Number(result.chunk_index) : undefined, // --> Enhancement: Map chunk_index
                     // Extract entities from chunk metadata (which should mirror file metadata now)
                     entities_in_chunk: typeof result.metadata === 'object' && result.metadata !== null
                                ? { // Reconstruct entities from metadata, expecting normalized dates
@@ -494,105 +566,150 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                     .from('files')
                     .select('id, transcript_text, created_at, file_metadata'); // Select needed columns
 
+                let appliedFilter = false;
+                const filters: string[] = [];
 
-                // ** Filter by Dates **
-                // Basic approach: Check if any normalized query date *exactly matches*
-                // any normalized date stored in the file's metadata.
-                // TODO: Implement more robust range overlap checks if needed.
+                // --> Enhancement: Filter by created_at in Fallback
+                let fallbackQueryWithDate = fallbackQuery; // Start chaining from original query
                 if (queryDates.length > 0) {
-                    const normalizedQueryDateStrings = queryDates.map(d => d.normalized).filter(d => d !== null);
-                    if (normalizedQueryDateStrings.length > 0) {
-                         console.log(`Applying fallback date filter for: ${normalizedQueryDateStrings.join(', ')}`);
-                         // This uses Supabase JSONB operators. Checks if the 'dates' array in file_metadata
-                         // contains any object ({}) whose 'normalized' property matches any of the query dates.
-                         // Syntax: column->'key' @> 'json_value'::jsonb
-                         // We need to check if any element in the array matches.
-                         // Using `contains` (`@>`) on the array level with a specific object structure.
-                         // Example check: Does file_metadata->'dates' contain an object like {"normalized": "2025-04-06T00:00:00Z"}?
-                         const dateFilters = normalizedQueryDateStrings.map(nqds =>
-                            `file_metadata->dates::jsonb @> '[{"normalized": "${nqds}"}]'::jsonb`
-                         ).join(' or ');
-                        // Note: This exact match is limited. Range overlaps would be better.
-                        // Another approach: Use jsonb_path_exists
-                        // const dateFilters = `jsonb_path_exists(file_metadata->'dates', '$[*] ? (@.normalized == any($queryDates))', jsonb_build_object('queryDates', normalizedQueryDateStrings))` - Requires PG12+ features and might be complex to implement correctly via the JS client's .filter() or .or()
+                    const startDate = queryDates[0].normalized;
+                    // Use end of day for the end date if only one date is provided or dates are the same
+                    const endDate = queryDates.length > 1 && queryDates[queryDates.length - 1].normalized !== startDate ? queryDates[queryDates.length - 1].normalized : startDate;
 
-                         console.log(`Fallback Date Filter Condition (simplified exact match): ${dateFilters}`);
-                         // Applying as OR condition for now, assuming any date match is relevant
-                          fallbackQuery = fallbackQuery.or(dateFilters);
-                          // If we need AND logic (file must match ALL query dates), this needs rework.
+                    if (startDate) {
+                        try {
+                            // Assume startDate is start of day. Find end of the endDate.
+                            let endOfDayDate = startDate;
+                            if(endDate && endDate !== startDate) {
+                                endOfDayDate = endDate;
+                            }
+                            const endOfDayISO = formatISO(endOfDay(parseISO(endOfDayDate)));
+
+                            console.log(`Applying fallback created_at filter: >= ${startDate} AND < ${endOfDayISO}`);
+                            // Chain filters directly
+                            fallbackQueryWithDate = fallbackQueryWithDate.gte('created_at', startDate);
+                            fallbackQueryWithDate = fallbackQueryWithDate.lt('created_at', endOfDayISO);
+                            appliedFilter = true;
+                        } catch (dateParseError) {
+                            console.error(`Fallback: Error parsing dates for created_at filter: ${startDate}, ${endDate}`, dateParseError);
+                        }
                     }
                 }
 
-
-                // ** Filter by Topics (ILIKE on stemmed topics) **
-                if (topics && topics.length > 0) {
-                    console.log(`Using extracted topics for fallback search: ${topics.join(', ')}`);
-                    const orFilter = topics
-                        .map(topic => `transcript_text.ilike.%${stemmer(topic)}%`)
-                        .join(',');
-                    console.log(`Stemmed topics OR filter: ${orFilter}`);
-                    // Chain the topic filter. Use .and() if date filter was applied, .or() otherwise?
-                    // Let's make them additive for now (match date OR topic) - easily changed to AND if needed.
-                    fallbackQuery = fallbackQuery.or(orFilter);
-                } else if (queryDates.length === 0) { // Only use full text if no dates or topics provided
-                    console.log("No specific topics or dates extracted, falling back to ILIKE on full query text.");
-                    const fallbackPattern = `%${queryText}%`;
-                    fallbackQuery = fallbackQuery.ilike('transcript_text', fallbackPattern);
+                // Collect other filters
+                if (queryMetadata.priority) {
+                    filters.push(`file_metadata->>priority.eq.${queryMetadata.priority}`);
+                }
+                if (queryMetadata.language) {
+                    filters.push(`file_metadata->>language.eq.${queryMetadata.language}`);
+                }
+                if (queryMetadata.due_date) { // Assuming due_date in query means we check normalized_due_date
+                    const normalizedDueDate = normalizeDateString(queryMetadata.due_date, new Date());
+                    if (normalizedDueDate.normalized) {
+                        // Simple equality check for now, range could be added
+                        filters.push(`file_metadata->>normalized_due_date.eq.${normalizedDueDate.normalized}`);
+                    }
                 }
 
+                // ** Filter by Topics/Keywords (ILIKE on stemmed topics or Auto-Keywords) **
+                const queryKeywords = queryMetadata.topics ? queryMetadata.topics.map(stemmer) : [];
+                if (queryKeywords.length > 0) {
+                    console.log(`Using extracted/stemmed topics for fallback search: ${queryKeywords.join(', ')}`);
+                    // Option 1: Search in transcript_text (existing)
+                    const topicTextFilter = queryKeywords.map(kw => `transcript_text.ilike.%${kw}%`).join(',');
+                    // Option 2: Search in auto_keywords (new)
+                    // Supabase syntax for checking if JSONB array contains any element from a list:
+                    // column.cs.{value1,value2} - Use comma-separated values in curly braces
+                    const keywordMetadataFilter = `file_metadata->auto_keywords.cs.{${queryKeywords.join(',')}}`;
+                    // Combine: search EITHER in text OR in keywords metadata
+                    filters.push(`or(${topicTextFilter},${keywordMetadataFilter})`);
+                } else if (!appliedFilter && queryText) { // Only use full text if no dates or topics/keywords provided
+                    console.log("No specific filters applied, falling back to ILIKE on full query text.");
+                    fallbackQueryWithDate = fallbackQueryWithDate.ilike('transcript_text', `%${queryText}%`);
+                    appliedFilter = true; // Mark that a text filter was applied
+                }
 
-                // Add limit and execute
-                fallbackQuery = fallbackQuery.limit(FALLBACK_MATCH_COUNT);
-                console.log("Executing Fallback Query...");
-                const { data: fallbackResults, error: fallbackError } = await fallbackQuery;
+                // Apply collected filters as AND condition
+                let finalFallbackQuery = fallbackQueryWithDate;
+                if (filters.length > 0) {
+                    const andFilterString = `and(${filters.join(',')})`;
+                    console.log(`Applying fallback metadata/keyword filters: ${andFilterString}`);
+                    finalFallbackQuery = finalFallbackQuery.filter('and', '', andFilterString); // Use .filter() for complex AND/OR
+                    appliedFilter = true;
+                }
 
-                // Explicitly type the fallback results
-                const typedFallbackResults = fallbackResults as FallbackResultItem[] | null;
+                // If no filters were applied at all, use full text search as last resort
+                if (!appliedFilter && queryText) {
+                    console.log("No specific filters applied, falling back to ILIKE on full query text.");
+                    finalFallbackQuery = finalFallbackQuery.ilike('transcript_text', `%${queryText}%`);
+                    appliedFilter = true; // Mark that a filter was applied
+                }
 
-                if (fallbackError) {
-                    console.error("Error during fallback search on files table:", fallbackError);
-                    // If vector search also failed, report combined errors. Otherwise, just report fallback error.
-                    if (query_source === 'error') {
-                        message_for_gpt += ` Fallback search also failed: ${fallbackError.message}`;
+                // Only run fallback if some filter criteria were actually applied
+                if (appliedFilter) {
+                    // Add limit and execute
+                    finalFallbackQuery = finalFallbackQuery.limit(FALLBACK_MATCH_COUNT);
+                    console.log("Executing Fallback Query...");
+                    const { data: fallbackResults, error: fallbackError } = await finalFallbackQuery;
+
+                    // Explicitly type the fallback results
+                    const typedFallbackResults = fallbackResults as FallbackResultItem[] | null;
+
+                    if (fallbackError) {
+                        console.error("Error during fallback search on files table:", fallbackError);
+                        // If vector search also failed, report combined errors. Otherwise, just report fallback error.
+                        if (query_source === 'error') {
+                            message_for_gpt += ` Fallback search also failed: ${fallbackError.message}`;
+                        } else {
+                             query_source = 'error'; // Mark as error state
+                             message_for_gpt = `Vector search found nothing. Fallback search failed: ${fallbackError.message}`;
+                        }
+                    } else if (typedFallbackResults && typedFallbackResults.length > 0) {
+                        console.log(`Found ${typedFallbackResults.length} potentially relevant files via fallback search.`);
+                         // If vector search was okay but found nothing, set source to fallback.
+                         // If vector search errored, keep source as error but add fallback results.
+                         if (query_source !== 'error') {
+                            query_source = 'postgres_fallback';
+                        }
+                        message_for_gpt = message_for_gpt ? message_for_gpt + ` Found ${typedFallbackResults.length} file(s) via fallback.` : `Found ${typedFallbackResults.length} file(s) via fallback search (full text match).`;
+
+                        // Map fallback results to ContextObject format, using the defined type for 'file'
+                        const fallbackContext: ContextObject[] = typedFallbackResults.map((file: FallbackResultItem) => ({
+                            file_id: file.id,
+                            chunk: file.transcript_text, // Entire transcript for fallback
+                            timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
+                            chunk_index: undefined, // Fallback operates on whole files, no chunk index
+                            // Extract entities from file_metadata, expecting normalized dates
+                            entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
+                                ? { // Reconstruct based on expected structure
+                                    people: file.file_metadata.people,
+                                    dates: file.file_metadata.dates || [], // Ensure dates array exists
+                                    locations: file.file_metadata.locations,
+                                    topics: file.file_metadata.topics,
+                                    type: file.file_metadata.type,
+                                    sentiment: file.file_metadata.sentiment
+                                  }
+                                : {},
+                        }));
+                        retrieved_context.push(...fallbackContext); // Append fallback results
                     } else {
-                         query_source = 'error'; // Mark as error state
-                         message_for_gpt = `Vector search found nothing. Fallback search failed: ${fallbackError.message}`;
+                        console.log("Fallback search on 'files' table also found no results.");
+                         // If vector search already errored, message_for_gpt is set. Otherwise...
+                         if (query_source !== 'error') {
+                            query_source = 'none'; // No results from either method
+                            message_for_gpt = "I couldn't find any relevant information using vector search or direct text search.";
+                        } else {
+                             message_for_gpt += " Fallback search also found nothing.";
+                        }
                     }
-                } else if (typedFallbackResults && typedFallbackResults.length > 0) {
-                    console.log(`Found ${typedFallbackResults.length} potentially relevant files via fallback search.`);
-                     // If vector search was okay but found nothing, set source to fallback.
-                     // If vector search errored, keep source as error but add fallback results.
-                     if (query_source !== 'error') {
-                        query_source = 'postgres_fallback';
-                    }
-                    message_for_gpt = message_for_gpt ? message_for_gpt + ` Found ${typedFallbackResults.length} file(s) via fallback.` : `Found ${typedFallbackResults.length} file(s) via fallback search (full text match).`;
-
-                    // Map fallback results to ContextObject format, using the defined type for 'file'
-                    const fallbackContext: ContextObject[] = typedFallbackResults.map((file: FallbackResultItem) => ({
-                        file_id: file.id,
-                        chunk: file.transcript_text, // Entire transcript for fallback
-                        timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
-                        // Extract entities from file_metadata, expecting normalized dates
-                        entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
-                            ? { // Reconstruct based on expected structure
-                                people: file.file_metadata.people,
-                                dates: file.file_metadata.dates || [], // Ensure dates array exists
-                                locations: file.file_metadata.locations,
-                                topics: file.file_metadata.topics,
-                                type: file.file_metadata.type,
-                                sentiment: file.file_metadata.sentiment
-                              }
-                            : {},
-                    }));
-                    retrieved_context.push(...fallbackContext); // Append fallback results
                 } else {
-                    console.log("Fallback search on 'files' table also found no results.");
+                    console.log("No filters applied for fallback search.");
                      // If vector search already errored, message_for_gpt is set. Otherwise...
                      if (query_source !== 'error') {
                         query_source = 'none'; // No results from either method
                         message_for_gpt = "I couldn't find any relevant information using vector search or direct text search.";
                     } else {
-                         message_for_gpt += " Fallback search also found nothing.";
+                         message_for_gpt += " No filters applied for fallback search.";
                     }
                 }
             }
