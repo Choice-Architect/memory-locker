@@ -5,6 +5,7 @@
 -- =================================
 CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS "pg_trgm" WITH SCHEMA public;
 
 
 -- PART 1: TABLE DEFINITIONS
@@ -158,6 +159,7 @@ CREATE INDEX idx_files_conversation_id ON files(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_files_metadata_gin ON public.files USING gin (file_metadata jsonb_path_ops);
 CREATE INDEX IF NOT EXISTS idx_files_thread_id ON public.files (thread_id);
 CREATE INDEX IF NOT EXISTS idx_files_created_at ON public.files (created_at);
+CREATE INDEX idx_gin_trgm_files_transcript ON public.files USING gin (transcript_text gin_trgm_ops);
 
 -- Indexes for queries table
 -- CREATE INDEX idx_queries_user_id ON queries(user_id); (Removed)

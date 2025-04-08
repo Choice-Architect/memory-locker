@@ -25,7 +25,7 @@
 2.  **Database Schema Definition:**
     *   Task: Define PostgreSQL table structures (e.g., `memories` renamed to `files`, `transcript_embeddings`, `queries`, etc. based on `schema.sql`). Columns include content, embeddings (`vector(1536)`), timestamps, source, metadata (`JSONB` for file-level in `files`, chunk-level in `transcript_embeddings`).
     *   Task: Define vector storage strategy (1536 dimensions for `text-embedding-3-small`, plan for HNSW index creation after initial setup).
-    *   Comment: *Schema largely defined in `schema.sql`. Key decisions made: Use `text-embedding-3-small`. File-level metadata (summary, all entities, including **normalized dates**) in `files.file_metadata`. Chunk-level metadata (essentially a copy of file-level metadata plus chunk timestamp) in `transcript_embeddings.metadata`.*
+    *   Comment: *Schema largely defined in `schema.sql`. Key decisions made: Use `text-embedding-3-small`. File-level metadata (summary, all entities, including **date/time components**) in `files.file_metadata`. Chunk-level metadata (essentially a copy of file-level metadata plus chunk timestamp) in `transcript_embeddings.metadata`.*
     *   Deliverable: SQL script for schema creation (`schema.sql` updated), documented schema design (partially covered by README and this roadmap).
     *   **Note (Apr 4):** `users.id` and related foreign keys changed from UUID to TEXT post-Phase 1 to handle GPT user ID format. **Subsequently removed entirely.**
 3.  **Netlify Project Setup:**
@@ -59,7 +59,8 @@
     *   Task: Define expected input JSON (e.g., `{ query_text: string, extracted_entities: object, user_id?: string, mode: 'store' | 'query' | 'combined' }`).
     *   Task: Define output JSON (e.g., success: `{ retrieved_context: [{chunk: string, timestamp: string, entities_in_chunk: object}], storage_status: string, query_source: string, message_for_gpt?: string, error: null }`, error: `{ error: string }`).
     *   **Decision:** A single action (`memory-action`) will handle different operations via the `mode` parameter, rather than creating multiple separate actions.
-    *   **Status:** **Completed**. Final API contract defined in `openapi.json`. **Input no longer includes `user_id`**. Output includes `query_source` enum. `ContextObject` includes `file_id` and `chunk_id`. `ExtractedEntities` handles `NormalizedDate` objects.
+    *   **Status:** **Completed**. Final API contract defined in `openapi.json`. **Input no longer includes `user_id`**. Output includes `query_source` enum. `ContextObject` includes `file_id` and `chunk_index`. Input `ExtractedEntities` uses string dates; Output entities use `NormalizedDate` objects.
+    *   **Authentication:** Uses `x-api-key` header matched against `ACTION_SECRET_KEY` environment variable.
     *   Deliverable: API contract specification (`openapi.json`).
 2.  **Supabase Integration:**
     *   Task: Implement Supabase client initialization within the function using environment variables.
@@ -71,11 +72,11 @@
         *   Fallback: Structured query on `files` table when vector search returns no results. Filters based on exact match of normalized dates in `file_metadata` and/or `ILIKE` search using **stemmed** topics against `transcript_text`. Uses `@stdlib/nlp-porter-stemmer`. Limits results (currently `10`).
     *   Task: Implement function(s) for storing/upserting data:
         *   Generate `text-embedding-3-small` (1536 dimensions) embeddings within the function using OpenAI API.
-        *   Store/update file-level info and **processed metadata (including normalized dates)** in `files` table.
+        *   Store/update file-level info and **processed metadata (including extracted date/time components)** in `files` table.
         *   Store chunks (`CHUNK_SIZE=1000`, `CHUNK_OVERLAP=200`), embeddings, and **chunk-level metadata (copy of file-level metadata + timestamp)** in `transcript_embeddings`.
-        *   **Implement date normalization** using `date-fns` to handle relative terms and various formats, storing `{ original: string, normalized: string | null }` objects.
+        *   **Implement date/time component extraction:** Use logic (e.g., `date-fns` or similar) to parse various date/time formats from the input text. Extract numerical components (`year`, `month`, `day`, `hour`, `minute`, `second`, `day_of_week`) and optional timezone information. Normalize relative terms (e.g., "today", "next week") into components based on the function's invocation timestamp. Store results within a structured `dates` array in `file_metadata`, like `[{ original: "...", components: { year: ..., month: ..., ... } }]`. Allow partial extraction (e.g., date without time).
     *   Task: Combine query and storage logic based on the input `mode` or inferred intent, using Supabase service role key (bypassing RLS). **`user_id` logic removed.**
-    *   Comment: *Embeddings generated in the function using `text-embedding-3-small`. Sequential search (vector filter -> table filter fallback). Differentiated metadata storage confirmed (chunk metadata mirrors file metadata). Date normalization implemented.*
+    *   Comment: *Embeddings generated in the function using `text-embedding-3-small`. Sequential search (vector filter -> table filter fallback). Differentiated metadata storage confirmed (chunk metadata mirrors file metadata). Date handling updated to component extraction.*
     *   Deliverable: Core database interaction logic within the function (`memory-action.ts`).
 4.  **Error Handling & Logging:**
     *   Task: Implement robust try/catch blocks for API calls and database operations.
@@ -140,6 +141,7 @@
 *   Removed `user_id` dependency throughout the stack.
 *   Re-enabled RLS in 'default deny' mode (bypassed by service key).
 *   Core functionality (`store`, `query` via vector search, `query` via original keyword/date fallback) is working.
+*   **Refined Date Handling:** Replaced single ISO string normalization with extraction of numerical date/time components (`year`, `month`, `day`, `hour`, etc.) stored in `file_metadata.dates`. Relative dates are normalized to components at store time. Query logic adapted.
 *   **Phase 4 is considered complete.**
 
 **Note (Apr 4, 2025):** Encountered foreign key constraint errors related to `user_id` during initial testing. Decided to refactor to remove `user_id` entirely for the single-user scope. Refactoring involved schema changes (removing `users` table, `user_id` columns, RLS policies), Netlify function updates, OpenAPI schema modification, and GPT instruction adjustments. **Subsequently (Apr 4), RLS was re-enabled on all tables without specific ALLOW policies ('default deny') as a defense-in-depth measure, as the Netlify function uses the `service_role` key which bypasses RLS anyway.**
@@ -153,6 +155,15 @@
 **Status (Apr 6, 2025 - Updated):**
 *   Implemented fallback search using `ILIKE` on `files.transcript_text`. Refined to use an `.or()` filter based on **stemmed** topics extracted by the GPT (e.g., `payload.extracted_entities.topics`) using `@stdlib/nlp-porter-stemmer`. Also added basic date filtering.
 *   Implemented date normalization.
+*   **Date Handling Strategy:** Implemented date normalization using `date-fns` within the Netlify function. The `normalizeDateString` function attempts to parse various user inputs (e.g., "tomorrow", "next Friday at 3 PM", "2024-07-20") relative to a reference date. It outputs a structured `NormalizedDate` object: `{ original: string, normalized: string | null, note?: string }`. The `normalized` field holds the date/time in ISO 8601 format if successful, otherwise it's `null`. The `note` field provides context on failures (e.g., vague input, parsing error). These `NormalizedDate` objects are stored in the `files.file_metadata.dates` JSONB array. This allows storing both the user's original term and the standardized ISO string for querying.
+*   **Vector Store:** Populated `transcript_embeddings` table.
+*   **Priority:** Added support for user-assigned priority (1-10) stored in `files.file_metadata`. GPT instructions updated.
+*   **Language:** Added support for detecting language (en, fr, ar), storing in `files.file_metadata.language`. GPT instructions updated. **Note: Query filtering by language is NOT implemented.**
+*   **Conversation/Thread Linking:** Added columns `conversation_id`, `thread_id` to `files` table and fields to API/function. GPT instructions updated to extract if available (experimental).
+*   **Chunk Index:** `transcript_embeddings.chunk_index` is now stored and returned by `search_memory_chunks` function, included in `ContextObject`.
+*   **Enhanced Vector Search Filtering:** `search_memory_chunks` RPC call now utilizes metadata filters (topics, people, dates, type, sentiment).
+*   **Enhanced Fallback Search Filtering:** Fallback search now filters by `files.created_at` based on query dates, and filters `file_metadata` for priority. **Note: Filtering by language and due date was removed/not implemented.**
+*   **Database Indexes:** Added GIN index on `files.file_metadata`, and indexes on `files.thread_id` and `files.created_at`.
 *   **Phase 4 is considered functionally complete.**
 
 1.  **End-to-End Testing:**
@@ -195,20 +206,21 @@
 *   **Conversation/Thread Linking:** Added columns `conversation_id`, `thread_id` to `files` table and fields to API/function. GPT instructions updated to extract if available (experimental).
 *   **Chunk Index:** `transcript_embeddings.chunk_index` is now stored and returned by `search_memory_chunks` function, included in `ContextObject`.
 *   **Enhanced Vector Search Filtering:** `search_memory_chunks` RPC call now utilizes metadata filters (topics, people, dates, type, sentiment).
-*   **Enhanced Fallback Search Filtering:** Fallback search now filters by `files.created_at` based on query dates, and filters `file_metadata` for priority. **Note: Filtering by language, due date, and auto-keywords was removed/not implemented.**
+*   **Enhanced Fallback Search Filtering:** Fallback search now filters by `files.created_at` based on query dates, and filters `file_metadata` for priority. **Note: Filtering by language and due date was removed/not implemented.**
 *   **Database Indexes:** Added GIN index on `files.file_metadata`, and indexes on `files.thread_id` and `files.created_at`.
 
 **Update (Apr 9, 2025 - Fallback Refinement):**
-*   **Auto-Keywords Removed:** Eliminated the generation and storage of `auto_keywords` in `file_metadata` and `transcript_embeddings.metadata` to improve efficiency and reduce storage.
+*   **Auto-Keywords Removed:** Eliminated the generation and storage of `auto_keywords` in `file_metadata` and `transcript_embeddings.metadata`.
 *   **Tiered Fallback Implemented:** Refactored the query fallback logic in the Netlify function (`memory-action.ts`) into a sequential process:
     1.  **Vector Search:** (Primary) Uses `search_memory_chunks` RPC with metadata filters.
     2.  **Metadata Fallback:** (If Vector fails) Queries `files` table, filtering by `created_at` range and using JSONB operators (`@>` contains, `->>` equals) on `file_metadata` fields (people, locations, topics, priority). **Note: Filtering by language is NOT implemented.**
-    3.  **Text Fallback:** (If Metadata fails) Queries `files` table, filtering by `created_at` range and using `ILIKE` on `transcript_text` based on query terms (entities or full text).
-*   **Fallback Query Source Tracking:** Updated the `query_source` in the response to indicate the specific fallback method used (`postgres_fallback_metadata`, `postgres_fallback_text`).
+    3.  **Text Fallback:** (If Metadata fails) Performs a full-text search on `files.transcript_text` using **all entities** extracted from the current query. Ranks results based on relevance (most matching entities) and returns the top matches. **Does not search the raw query text.**
+*   **Query Source Tracking:** Updated the `query_source` in the response to indicate the specific fallback method used (`postgres_fallback_metadata`, `postgres_fallback_text`).
 *   **Database Index Requirements:** Confirmed/added necessary indexes in Supabase to support the new fallback queries:
     *   GIN index on `files.file_metadata` (using `jsonb_path_ops` recommended).
     *   B-tree index on `files.created_at`.
-    *   GIN index on `files.transcript_text` (using `pg_trgm`).
+    *   **Text Search Index:** Implementation requires an appropriate FTS index (e.g., GIN on a `tsvector` column) on `files.transcript_text`. (Previous `pg_trgm` index existed but is not ideal for FTS relevance ranking).
+    *   HNSW index on `transcript_embeddings.embedding` for vector search.
 
 1.  **Advanced Retrieval:** Implement more sophisticated search strategies (e.g., hybrid search, filtering by metadata, time-based decay).
 2.  **Context Management:** Improve how the GPT handles multi-turn conversations related to memories.

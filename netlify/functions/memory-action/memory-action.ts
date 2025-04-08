@@ -440,18 +440,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             fileMetadata.language = payload.extracted_entities.language || 'en'; // Default to 'en'
             console.log(`Stored language: ${fileMetadata.language}`);
 
-            // --> Enhancement: Add Auto-Keywords -- REMOVED
-            /*
-            try {
-                const words = textToStore.toLowerCase().match(/\b(\w+)\b/g) || [];
-                const keywords = words.filter(word => !STOP_WORDS.has(word));
-                // Optional: Limit number of keywords, apply stemming, etc.
-                fileMetadata.auto_keywords = [...new Set(keywords)]; // Store unique keywords
-                console.log(`Stored ${fileMetadata.auto_keywords.length} auto-keywords.`);
-            } catch (kwError) {
-                console.error("Error generating auto-keywords:", kwError);
-            }
-            */
 
             // a. Insert into 'files' table
             console.log("Preparing to insert into files table with processed metadata:", JSON.stringify(fileMetadata));
@@ -465,14 +453,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                 thread_id: payload.extracted_entities.thread_id || null,
             };
 
-            /*
-            if (payload.user_id) {
-                console.log(`Inserting with user_id: ${payload.user_id}`);
-                fileInsertData.user_id = payload.user_id;
-            } else {
-                console.log("No user_id provided in payload, inserting without it.");
-            }
-            */
 
             const { data: fileData, error: fileError } = await supabase
                 .from('files')
@@ -540,10 +520,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
                         if (embeddingError) {
                             console.error("Error inserting into transcript_embeddings table:", embeddingError);
-                            // Potentially attempt to delete the file record for consistency? Or report partial success.
-                            // storage_status = `Stored file record (ID: ${fileId}) but failed to store embeddings: ${embeddingError.message}`;
-                            // Optionally throw error instead: throw new Error(`Failed to store embeddings: ${embeddingError.message}`);
-                            // THROW the error to ensure the function reports failure
                             throw new Error(`Failed to store embeddings: ${embeddingError.message}`);
                         } else {
                              console.log("Embedding records inserted successfully.");

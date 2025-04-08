@@ -90,6 +90,29 @@
   },
   "components": {
     "schemas": {
+      "NormalizedDate": {
+        "type": "object",
+        "properties": {
+          "original": {
+            "type": "string",
+            "description": "The original date string provided by the user or extracted."
+          },
+          "normalized": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The date string normalized to ISO 8601 format.",
+            "nullable": true
+          },
+          "note": {
+            "type": "string",
+            "description": "An optional note indicating why normalization might have failed (e.g., 'vague', 'parse_error').",
+            "nullable": true
+          }
+        },
+        "required": [
+          "original"
+        ]
+      },
       "ExtractedEntities": {
         "type": "object",
         "properties": {
@@ -155,7 +178,37 @@
             "type": "string"
           }
         },
-        "description": "Flexible container for entities extracted from text, including inferred type/sentiment."
+        "description": "Flexible container for entities extracted from text, including inferred type/sentiment. Used in RequestPayload."
+      },
+      "OutputExtractedEntities": {
+        "type": "object",
+        "properties": {
+          "people": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "dates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NormalizedDate"
+            }
+          },
+          "locations": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "topics": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "type": { "type": "string" },
+          "sentiment": { "type": "string" },
+          "priority": { "type": "integer", "nullable": true },
+          "conversation_id": { "type": "string", "nullable": true },
+          "thread_id": { "type": "string", "nullable": true },
+          "language": { "type": "string", "enum": ["en", "fr", "ar"], "nullable": true }
+        },
+        "description": "Structure of entities as returned within a ContextObject, using NormalizedDate objects."
       },
       "RequestPayload": {
         "type": "object",
@@ -196,12 +249,23 @@
             "description": "Timestamp associated with the chunk or original file."
           },
           "entities_in_chunk": {
-            "$ref": "#/components/schemas/ExtractedEntities",
-            "description": "Entities identified within this specific chunk (Note: function currently uses file-level entities)."
+            "$ref": "#/components/schemas/OutputExtractedEntities",
+            "description": "Entities identified within this specific chunk, using NormalizedDate objects."
+          },
+          "file_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The UUID of the original file this chunk belongs to."
+          },
+          "chunk_index": {
+            "type": "integer",
+            "description": "The index (position) of this chunk within the original file (0-based). Present for vector search results.",
+            "nullable": true
           }
         },
         "required": [
-          "chunk"
+          "chunk",
+          "file_id"
         ]
       },
       "SuccessResponse": {
@@ -222,12 +286,12 @@
             "type": "string",
             "enum": [
               "vector_store",
-              "postgres_fallback",
+              "postgres_fallback_metadata",
+              "postgres_fallback_text",
               "none",
-              "combined",
               "error"
             ],
-            "description": "Indicates the source of the retrieved context."
+            "description": "Indicates the source of the retrieved context (vector search, specific postgres fallbacks, or none/error)."
           },
           "message_for_gpt": {
             "type": "string",

@@ -21,7 +21,8 @@
 **Update 2 (Apr 8):** `CREATE OR REPLACE` failed due to return type change (Error 42P13). Provided necessary `DROP FUNCTION` followed by `CREATE FUNCTION` sequence to user. Status pending user confirmation of update.
 **Update 3 (Apr 8):** User confirmed successful execution of `DROP` and `CREATE`. Function `search_memory_chunks` is now updated.
 *   **Step 2 (Apply Indexes):** SQL provided to user for execution. Status pending user confirmation.
-**Update (Apr 8):** User confirmed successful execution (no rows returned), indexes are now applied.
+    *   **Update (Apr 8):** User confirmed successful execution (no rows returned), indexes are now applied.
+    *   **Rationale:** Improve query performance for metadata and date range filtering.
 
 **Phase 1 Status: Completed (Apr 8, 2025)**
 
@@ -53,7 +54,6 @@
         *   `priority`: Optional integer (1-10) for user-assigned priority.
         *   `conversation_id`: Optional string for conversation linking.
         *   `thread_id`: Optional string for thread linking.
-        *   `due_date`: Optional string for task/reminder deadlines (raw extracted string).
         *   `language`: Optional string enum (`"en"`, `"fr"`, `"ar"`) for detected input language.
     *   **Example Snippet (to be inserted within `ExtractedEntities.properties`):**
         ```json
@@ -73,11 +73,6 @@
            "type": "string",
            "description": "Identifier for a specific topic thread within a conversation (if available and distinct)",
            "nullable": true
-        },
-        "due_date": {
-          "type": "string",
-          "description": "Specific due date/deadline associated with the memory (extracted as string, normalized by function)",
-          "nullable": true
         },
         "language": {
           "type": "string",
@@ -102,18 +97,13 @@
 
 1.  **Modify `memory-action.ts`:**
     *   **Update TypeScript Interfaces:**
-        *   Add the new optional fields (`priority?`, `conversation_id?`, `thread_id?`, `due_date?`, `language?`) to the `ExtractedEntities` interface.
+        *   Add the new optional fields (`priority?`, `conversation_id?`, `thread_id?`, `language?`) to the `ExtractedEntities` interface.
         *   Add `chunk_index?: number;` to the `ContextObject` interface.
     *   **Enhance Storage Logic (`store`/`combined` modes):**
-        *   Retrieve `priority`, `language`, `due_date`, `conversation_id`, `thread_id` from `payload.extracted_entities`.
-        *   Normalize the `due_date` string using `normalizeDateString` and store the *normalized ISO string* in `fileMetadata.normalized_due_date`.
+        *   Retrieve `priority`, `language`, `conversation_id`, `thread_id` from `payload.extracted_entities`.
+        *   Retrieve any date/time strings identified by the GPT (including those previously considered `due_date`).
+        *   Process these date/time strings using the component extraction logic (parsing to `year`, `month`, `day`, etc.) and store the results in the `fileMetadata.dates` array (structure: `{ original: string, normalized: string | null, note?: string }`). Relative dates are normalized to ISO strings.
         *   Store `priority` and `language` directly in `fileMetadata`.
-        *   Implement basic auto-keyword generation:
-            *   Take `payload.query_text`.
-            *   Split into words.
-            *   Convert to lowercase.
-            *   Filter out common English stop words (need to define a simple list).
-            *   Store the resulting array as `fileMetadata.auto_keywords`.
         *   Add `conversation_id` and `thread_id` to the main `fileInsertData` object for the `files` table insert (map to `files.conversation_id` and `files.thread_id` columns).
         *   Ensure the `chunk_index` (loop variable `index`) is included in the `embeddingRecords` object creation before inserting into `transcript_embeddings`. **Verification:** Check if `chunk_index: index` is already being added; `schema.sql` shows the column exists.
     *   **Enhance Query Logic (`query`/`combined` modes):**
@@ -123,63 +113,14 @@
             *   Pass these values as arguments to the `supabase.rpc('search_memory_chunks', { ..., filter_topics: topics, filter_people: people, filter_date_start: startDateISO, filter_date_end: endDateISO, ... })` call.
         *   **Fallback Search Logic:**
             *   **`created_at` Filter:** If `queryMetadata` contains normalized dates, calculate `startDateISO` and `endDateISO`. Add `.gte('created_at', startDateISO)` and `.lt('created_at', endDateISO)` filters to the `fallbackQuery`.
-            *   **`file_metadata` Filters:** Add `.filter()` or `.or()` conditions to `fallbackQuery` for:
-                *   `priority`: `file_metadata->>priority', 'eq', queryMetadata.priority` (if priority is queried).
-                *   `language`: `file_metadata->>language', 'eq', queryMetadata.language` (if language is specified).
-                *   `normalized_due_date`: `file_metadata->>normalized_due_date', 'gte'/'lte', dateISO` (for date range queries on due date).
-                *   `auto_keywords`: `file_metadata->auto_keywords', 'cs', '{"keyword1", "keyword2"}'` (contains `cs` operator for array).
+            *   **Metadata Date Filter:**
+                *   Modify the fallback query to filter based on the `normalized` ISO dates stored in the `file_metadata->'dates'` array. This might involve JSONB operators to check if *any* date object in the array falls within the `startDateISO` / `endDateISO` range derived from the query.
     *   **Populate `chunk_index` in Results:** When mapping `searchResults` or `fallbackResults` to `ContextObject`, ensure the `chunk_index` field is populated if available from the data returned by Supabase.
     *   **Rationale:** Implement the core logic changes needed to store, process, and query using the new metadata fields and improve search relevance/filtering.
     *   **Reference:** `learnings/05_metadata_enhance_suggestions.md`, `learnings/06_netlify_function_suggestions.md`, `memory-action.ts`.
 
 **Implementation Notes (Apr 8, 2025 - Phase 3):**
 *   **Step 1 (Interfaces):** Completed. `ExtractedEntities` and `ContextObject` updated.
-*   **Step 2 (Storage Logic):** Completed. Handling for `priority`, `due_date`, `language`, `conversation_id`, `thread_id`, `auto_keywords`, and `chunk_index` added.
-*   **Step 3 (Query Logic):** Completed. Vector search RPC call now includes metadata filters. Fallback search logic enhanced with `created_at` and new metadata filters (`priority`, `language`, `normalized_due_date`, `auto_keywords`).
-*   **Step 4 (Result Mapping):** Completed. `chunk_index` mapped from vector search results.
-
-**Phase 3 Status: Completed (Apr 8, 2025)**
-
----
-
-## Phase 4: GPT Guidance Update
-
-**Objective:** Instruct the Custom GPT on how to extract and provide the new metadata fields.
-
-1.  **Update GPT Instructions (`learnings/02_gpt_instructions.md`):**
-    *   **Action:** Add instructions within the "How to Call `memory-action` (Payload Requirements)" section, specifically under point 3 (`extracted_entities`).
-    *   **Instructions:**
-        *   "Look for explicit priority mentions (e.g., 'priority 8') and include as `priority: <number>`."
-        *   "Identify deadline mentions (e.g., 'due next Friday') and include as `due_date: <string>`."
-        *   "Detect the primary language (en, fr, ar) and include as `language: <code>` (default 'en')."
-        *   "If possible, retrieve the current `conversation_id` and `thread_id` from the chat context and include them." (Acknowledge this might not be feasible depending on the platform).
-    *   **Update Examples:** Modify example payloads to include these new optional fields where relevant.
-    *   **Rationale:** Guide the GPT to correctly extract and format the new information for the API call.
-    *   **Reference:** `learnings/05_metadata_enhance_suggestions.md`, `learnings/02_gpt_instructions.md`.
-
-**Implementation Notes (Apr 8, 2025 - Phase 4):**
-*   **Step 1 (Instructions):** Completed. Added extraction rules and examples for new metadata fields.
-
-**Phase 4 Status: Completed (Apr 8, 2025)**
-
----
-
-## Phase 5: Documentation Update
-
-**Objective:** Keep project documentation consistent with the implemented changes.
-
-1.  **Update Roadmap (`learnings/00_new_gpt_roadmap.md`):**
-    *   **Action:** Review Phase 4 (Integration/Iteration) and Phase 5 (Enhancements).
-    *   **Update:** Mark the implemented enhancements as completed or in progress. Add specific notes about the introduction of priority, due dates, language support, conversation linking (if successful), auto-keywords, and improved search filtering.
-    *   **Rationale:** Maintain an accurate record of project progress.
-    *   **Reference:** `learnings/00_new_gpt_roadmap.md`.
-
-**Implementation Notes (Apr 8, 2025 - Phase 5):**
-*   **Step 1 (Roadmap Update):** Completed. Added notes about implemented enhancements to Phase 5 section.
-
-**Phase 5 Status: Completed (Apr 8, 2025)**
-
----
-
-This plan provides a structured approach to implementing the enhancements. Each phase builds upon the previous one, starting with the database foundation and moving through the API, function logic, GPT guidance, and finally documentation. 
-**Overall Status: All phases completed (Apr 8, 2025).** 
+*   **Step 2 (Storage Logic):** Completed. Handling for `priority`, `language`, `conversation_id`, `thread_id`, and `chunk_index` added. The `normalizeDateString` function handles date processing into the `{original, normalized, note?}` structure within the `dates` array.
+*   **Step 3 (Query Logic):** Completed. Vector search (`search_memory_chunks`) and fallback query filters updated for dates (`created_at`, metadata->'dates'->>'normalized'), priority, people, locations, topics. **Text fallback logic to be revised for FTS entity search.**
+*   **Step 4 (Result Mapping):** Completed. `
