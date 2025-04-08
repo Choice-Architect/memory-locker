@@ -401,9 +401,8 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
         // 1. Normalize Dates if present
         if (processedMetadata.dates && Array.isArray(processedMetadata.dates)) {
-            const referenceDateForNormalization = (payload.mode === 'store' || payload.mode === 'combined')
-                ? STORAGE_REFERENCE_DATE // Use fixed date for storing test data
-                : new Date(); // Use current date for queries
+            // Always use the current time as the reference for normalization
+            const referenceDateForNormalization = new Date();
 
             console.log(`Normalizing dates with reference: ${referenceDateForNormalization.toISOString()}`);
             processedMetadata.dates = processedMetadata.dates
@@ -721,7 +720,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             });
                         } else if (typeof queryMetadata[key] === 'string') {
                             // Include top-level string entities like 'type' or 'sentiment' if desired
-                            // entityValues.push(queryMetadata[key]);
+                            entityValues.push(queryMetadata[key]);
                         }
                     }
                     // Remove duplicates and empty strings

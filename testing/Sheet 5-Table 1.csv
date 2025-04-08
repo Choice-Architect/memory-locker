@@ -1,0 +1,225 @@
+Test code;Action mode;Input all dictated by iPhone voice recording;Actual response;Netlify log snippet;Notes (these dates, even when parsed, do not seem to be correct)
+S1;Store;Remember that my favorite color is blue;Got it — your favorite color is blue. Noted!;"Apr 8, 02:37:00 PM: 7afa45cc INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 26,
+  entities: {
+    topics: [ 'favorite color' ],
+    type: 'note',
+    sentiment: 'neutral',
+    priority: 5,
+    people: [],
+    dates: [],
+    locations: [],
+    language: 'en',
+    conversation_id: '',
+    thread_id: ''
+  }
+}
+Apr 8, 02:37:00 PM: 7afa45cc INFO   Normalizing dates with reference: 2025-04-06T12:00:00.000Z
+Apr 8, 02:37:00 PM: 7afa45cc INFO   Processing 'store' mode...
+Apr 8, 02:37:00 PM: 7afa45cc INFO   Stored priority: 5
+Apr 8, 02:37:00 PM: 7afa45cc INFO   Stored language: en
+Apr 8, 02:37:00 PM: 7afa45cc INFO   Preparing to insert into files table with processed metadata: {""topics"":[""favorite color""],""type"":""note"",""sentiment"":""neutral"",""priority"":5,""people"":[],""dates"":[],""locations"":[],""language"":""en"",""conversation_id"":"""",""thread_id"":""""}
+Apr 8, 02:37:00 PM: 7afa45cc INFO   File record created with ID: 43b4dddf-3ce8-41af-97ec-cbc86c9bcf0e
+Apr 8, 02:37:00 PM: 7afa45cc INFO   Chunking text...
+Apr 8, 02:37:00 PM: 7afa45cc INFO   Generated 1 chunks.
+Apr 8, 02:37:00 PM: 7afa45cc INFO   Generating embeddings...
+Apr 8, 02:37:01 PM: 7afa45cc INFO   Inserting 1 embedding records...
+Apr 8, 02:37:02 PM: 7afa45cc INFO   Embedding records inserted successfully.
+Apr 8, 02:37:02 PM: 7afa45cc INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
+Apr 8, 02:37:02 PM: 7afa45cc Duration: 2042.35 ms	Memory Usage: 117 MB";Good
+S2;Store;I had a meeting with Jane about the budget today.;Noted — I’ve saved that you had a meeting with Jane about the budget today.;"Apr 8, 02:37:47 PM: afee2bb6 INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 49,
+  entities: {
+    people: [ 'Jane' ],
+    dates: [ 'today' ],
+    topics: [ 'budget' ],
+    type: 'encounter_note',
+    sentiment: 'neutral',
+    priority: 5,
+    locations: [],
+    language: 'en',
+    conversation_id: '',
+    thread_id: ''
+  }
+}
+Apr 8, 02:37:47 PM: afee2bb6 INFO   Normalizing dates with reference: 2025-04-06T12:00:00.000Z
+Apr 8, 02:37:47 PM: afee2bb6 INFO   Normalization Result for 'today': 2025-04-06T00:00:00Z
+Apr 8, 02:37:47 PM: afee2bb6 INFO   Processing 'store' mode...
+Apr 8, 02:37:47 PM: afee2bb6 INFO   Stored priority: 5
+Apr 8, 02:37:47 PM: afee2bb6 INFO   Stored language: en
+Apr 8, 02:37:47 PM: afee2bb6 INFO   Preparing to insert into files table with processed metadata: {""people"":[""Jane""],""dates"":[{""original"":""today"",""normalized"":""2025-04-06T00:00:00Z""}],""topics"":[""budget""],""type"":""encounter_note"",""sentiment"":""neutral"",""priority"":5,""locations"":[],""language"":""en"",""conversation_id"":"""",""thread_id"":""""}
+Apr 8, 02:37:47 PM: afee2bb6 INFO   File record created with ID: 8eda5c4b-5b01-49a2-816d-1d5146b1f5b2
+Apr 8, 02:37:47 PM: afee2bb6 INFO   Chunking text...
+Apr 8, 02:37:47 PM: afee2bb6 INFO   Generated 1 chunks.
+Apr 8, 02:37:47 PM: afee2bb6 INFO   Generating embeddings...
+Apr 8, 02:37:48 PM: afee2bb6 INFO   Inserting 1 embedding records...
+Apr 8, 02:37:48 PM: afee2bb6 INFO   Embedding records inserted successfully.
+Apr 8, 02:37:48 PM: afee2bb6 INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
+Apr 8, 02:37:48 PM: afee2bb6 Duration: 1342.6 ms	Memory Usage: 117 MB";
+S3;Store;Remind me that I sent the report to marketing yesterday;Noted — I’ve saved that you sent the report to marketing yesterday.;"Apr 8, 02:39:51 PM: a4b0960b INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 41,
+  entities: {
+    topics: [ 'report' ],
+    organizations: [ 'marketing' ],
+    dates: [ 'yesterday' ],
+    type: 'note',
+    sentiment: 'neutral',
+    priority: 5,
+    people: [],
+    locations: [],
+    language: 'en',
+    conversation_id: '',
+    thread_id: ''
+  }
+}
+Apr 8, 02:39:51 PM: a4b0960b INFO   Normalizing dates with reference: 2025-04-06T12:00:00.000Z
+Apr 8, 02:39:51 PM: a4b0960b INFO   Normalization Result for 'yesterday': 2025-04-05T00:00:00Z
+Apr 8, 02:39:51 PM: a4b0960b INFO   Processing 'store' mode...
+Apr 8, 02:39:51 PM: a4b0960b INFO   Stored priority: 5
+Apr 8, 02:39:51 PM: a4b0960b INFO   Stored language: en
+Apr 8, 02:39:51 PM: a4b0960b INFO   Preparing to insert into files table with processed metadata: {""topics"":[""report""],""organizations"":[""marketing""],""dates"":[{""original"":""yesterday"",""normalized"":""2025-04-05T00:00:00Z""}],""type"":""note"",""sentiment"":""neutral"",""priority"":5,""people"":[],""locations"":[],""language"":""en"",""conversation_id"":"""",""thread_id"":""""}
+Apr 8, 02:39:51 PM: a4b0960b INFO   File record created with ID: 87126f0b-d6a3-4767-8712-33921036ac24
+Apr 8, 02:39:51 PM: a4b0960b INFO   Chunking text...
+Apr 8, 02:39:51 PM: a4b0960b INFO   Generated 1 chunks.
+Apr 8, 02:39:51 PM: a4b0960b INFO   Generating embeddings...
+Apr 8, 02:39:51 PM: a4b0960b INFO   Inserting 1 embedding records...
+Apr 8, 02:39:51 PM: a4b0960b INFO   Embedding records inserted successfully.
+Apr 8, 02:39:51 PM: a4b0960b INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
+Apr 8, 02:39:51 PM: a4b0960b Duration: 806.85 ms	Memory Usage: 117 MB";
+S4;Store;Store this note: Project Alpha kickoff meeting is scheduled for July 15th, 2024 at 2 PM.;Got it — the Project Alpha kickoff meeting is set for July 15th, 2024 at 2 p.m. I’ve stored that for you. Let me know if you’d like a reminder closer to the date.;"Apr 8, 02:38:56 PM: 69a1d5b2 INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 72,
+  entities: {
+    topics: [ 'Project Alpha', 'kickoff meeting' ],
+    dates: [ 'July 15th, 2024 at 2 p.m.' ],
+    type: 'note',
+    sentiment: 'neutral',
+    priority: 5,
+    people: [],
+    locations: [],
+    language: 'en',
+    conversation_id: '',
+    thread_id: ''
+  }
+}
+Apr 8, 02:38:56 PM: 69a1d5b2 INFO   Normalizing dates with reference: 2025-04-06T12:00:00.000Z
+Apr 8, 02:38:56 PM: 69a1d5b2 INFO   Extracted time: 2:0, remaining date part: 'july 15th, 2024 p.m.'
+Apr 8, 02:38:56 PM: 69a1d5b2 WARN   Could not parse date part: ""july 15th, 2024 p.m."" with known patterns.
+Apr 8, 02:38:56 PM: 69a1d5b2 INFO   Normalization Result for 'July 15th, 2024 at 2 p.m.': Failed (Could not parse this date format.)
+Apr 8, 02:38:56 PM: 69a1d5b2 INFO   Processing 'store' mode...
+Apr 8, 02:38:56 PM: 69a1d5b2 INFO   Stored priority: 5
+Apr 8, 02:38:56 PM: 69a1d5b2 INFO   Stored language: en
+Apr 8, 02:38:56 PM: 69a1d5b2 INFO   Preparing to insert into files table with processed metadata: {""topics"":[""Project Alpha"",""kickoff meeting""],""dates"":[{""original"":""July 15th, 2024 at 2 p.m."",""normalized"":null,""note"":""Could not parse this date format.""}],""type"":""note"",""sentiment"":""neutral"",""priority"":5,""people"":[],""locations"":[],""language"":""en"",""conversation_id"":"""",""thread_id"":""""}
+Apr 8, 02:38:57 PM: 69a1d5b2 INFO   File record created with ID: b333b59c-8556-4ff6-8f2f-738e7e6daae0
+Apr 8, 02:38:57 PM: 69a1d5b2 INFO   Chunking text...
+Apr 8, 02:38:57 PM: 69a1d5b2 INFO   Generated 1 chunks.
+Apr 8, 02:38:57 PM: 69a1d5b2 INFO   Generating embeddings...
+Apr 8, 02:38:57 PM: 69a1d5b2 INFO   Inserting 1 embedding records...
+Apr 8, 02:38:57 PM: 69a1d5b2 INFO   Embedding records inserted successfully.
+Apr 8, 02:38:57 PM: 69a1d5b2 INFO   Appending date normalization failure message: I couldn't determine a specific date/time for 'July 15th, 2024 at 2 p.m.'. Please try providing a clearer date if needed.
+Apr 8, 02:38:57 PM: 69a1d5b2 INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
+Apr 8, 02:38:57 PM: 69a1d5b2 Duration: 1112.32 ms	Memory Usage: 117 MB";Error normalising date
+S5;Store;I need to follow up with Alex sometime next week please.;Alright, I’ve noted that you need to follow up with Alex sometime next week. Let me know if you want to set a specific date for that.;"Apr 8, 02:40:43 PM: 646e0f8e INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 49,
+  entities: {
+    people: [ 'Alex' ],
+    dates: [ 'next week' ],
+    type: 'task',
+    sentiment: 'neutral',
+    priority: 5,
+    locations: [],
+    topics: [ 'follow up' ],
+    language: 'en',
+    conversation_id: '',
+    thread_id: ''
+  }
+}
+Apr 8, 02:40:43 PM: 646e0f8e INFO   Normalizing dates with reference: 2025-04-06T12:00:00.000Z
+Apr 8, 02:40:43 PM: 646e0f8e INFO   Normalization Result for 'next week': 2025-04-07T00:00:00Z
+Apr 8, 02:40:43 PM: 646e0f8e INFO   Processing 'store' mode...
+Apr 8, 02:40:43 PM: 646e0f8e INFO   Stored priority: 5
+Apr 8, 02:40:43 PM: 646e0f8e INFO   Stored language: en
+Apr 8, 02:40:43 PM: 646e0f8e INFO   Preparing to insert into files table with processed metadata: {""people"":[""Alex""],""dates"":[{""original"":""next week"",""normalized"":""2025-04-07T00:00:00Z""}],""type"":""task"",""sentiment"":""neutral"",""priority"":5,""locations"":[],""topics"":[""follow up""],""language"":""en"",""conversation_id"":"""",""thread_id"":""""}
+Apr 8, 02:40:43 PM: 646e0f8e INFO   File record created with ID: d55b1c59-8a61-4ad5-9884-edaf8775ad61
+Apr 8, 02:40:43 PM: 646e0f8e INFO   Chunking text...
+Apr 8, 02:40:43 PM: 646e0f8e INFO   Generated 1 chunks.
+Apr 8, 02:40:43 PM: 646e0f8e INFO   Generating embeddings...
+Apr 8, 02:40:44 PM: 646e0f8e INFO   Inserting 1 embedding records...
+Apr 8, 02:40:44 PM: 646e0f8e INFO   Embedding records inserted successfully.
+Apr 8, 02:40:44 PM: 646e0f8e INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
+Apr 8, 02:40:44 PM: 646e0f8e Duration: 930.42 ms	Memory Usage: 117 MB";The normalised dates are wrong
+S6;Store;Remember this, priority 8: Discuss the London marketing campaign results with Sarah and Tom tomorrow.;Got it — I’ve saved your priority 8 task to discuss the London Marketing Campaign results with Sarah and Tom tomorrow.;"Apr 8, 02:42:00 PM: 284bdf30 INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 86,
+  entities: {
+    people: [ 'Sarah', 'Tom' ],
+    dates: [ 'tomorrow' ],
+    locations: [ 'London' ],
+    topics: [ 'Marketing Campaign results' ],
+    type: 'task',
+    sentiment: 'neutral',
+    priority: 8,
+    language: 'en',
+    conversation_id: '',
+    thread_id: ''
+  }
+}
+Apr 8, 02:42:00 PM: 284bdf30 INFO   Normalizing dates with reference: 2025-04-06T12:00:00.000Z
+Apr 8, 02:42:00 PM: 284bdf30 INFO   Normalization Result for 'tomorrow': 2025-04-07T00:00:00Z
+Apr 8, 02:42:00 PM: 284bdf30 INFO   Processing 'store' mode...
+Apr 8, 02:42:00 PM: 284bdf30 INFO   Stored priority: 8
+Apr 8, 02:42:00 PM: 284bdf30 INFO   Stored language: en
+Apr 8, 02:42:00 PM: 284bdf30 INFO   Preparing to insert into files table with processed metadata: {""people"":[""Sarah"",""Tom""],""dates"":[{""original"":""tomorrow"",""normalized"":""2025-04-07T00:00:00Z""}],""locations"":[""London""],""topics"":[""Marketing Campaign results""],""type"":""task"",""sentiment"":""neutral"",""priority"":8,""language"":""en"",""conversation_id"":"""",""thread_id"":""""}
+Apr 8, 02:42:00 PM: 284bdf30 INFO   File record created with ID: ea97ecf4-22c8-4099-b399-ebaf1293adcd
+Apr 8, 02:42:00 PM: 284bdf30 INFO   Chunking text...
+Apr 8, 02:42:00 PM: 284bdf30 INFO   Generated 1 chunks.
+Apr 8, 02:42:00 PM: 284bdf30 INFO   Generating embeddings...
+Apr 8, 02:42:01 PM: 284bdf30 INFO   Inserting 1 embedding records...
+Apr 8, 02:42:01 PM: 284bdf30 INFO   Embedding records inserted successfully.
+Apr 8, 02:42:01 PM: 284bdf30 INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
+Apr 8, 02:42:01 PM: 284bdf30 Duration: 967.93 ms	Memory Usage: 117 MB";Why are these normalisations presuming “date with reference” is 6th of April when it today is the 8th of April?
+S7;Store;Store this meeting summary: The team discussed the Q3 roadmap. Key decisions included focusing on user acquisition (led by Marketing) and platform stability (led by Engineering). Marketing needs to finalize the campaign brief by next Friday. Engineering will deploy the stability patch EOD Wednesday. We also reviewed the budget variance report, noting a slight overspend in T&E, which Finance will investigate. Action items: [AI-1] Marketing to share brief draft. [AI-2] Engineering to confirm patch deployment. [AI-3] Finance to report on T&E variance.;All noted — the Q3 roadmap discussion, key decisions, deadlines, and action items are saved. Let me know if you’d like individual reminders set for any of those tasks or deadlines.;"Apr 8, 02:44:24 PM: 6f376d5c INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 523,
+  entities: {
+    topics: [
+      'Q3 roadmap',
+      'user acquisition',
+      'platform stability',
+      'campaign brief',
+      'stability patch',
+      'budget variance report',
+      'T&E'
+    ],
+    organizations: [ 'marketing', 'engineering', 'finance' ],
+    dates: [ 'next Friday', 'end of day Wednesday' ],
+    type: 'note',
+    sentiment: 'neutral',
+    priority: 6,
+    people: [],
+    locations: [],
+    language: 'en',
+    conversation_id: '',
+    thread_id: ''
+  }
+}
+Apr 8, 02:44:24 PM: 6f376d5c INFO   Normalizing dates with reference: 2025-04-06T12:00:00.000Z
+Apr 8, 02:44:24 PM: 6f376d5c INFO   Normalization Result for 'next Friday': 2025-04-11T00:00:00Z
+Apr 8, 02:44:24 PM: 6f376d5c INFO   Date normalization skipped for 'end of day Wednesday': Could not normalize due to vague phrasing.
+Apr 8, 02:44:24 PM: 6f376d5c INFO   Processing 'store' mode...
+Apr 8, 02:44:24 PM: 6f376d5c INFO   Stored priority: 6
+Apr 8, 02:44:24 PM: 6f376d5c INFO   Stored language: en
+Apr 8, 02:44:24 PM: 6f376d5c INFO   Preparing to insert into files table with processed metadata: {""topics"":[""Q3 roadmap"",""user acquisition"",""platform stability"",""campaign brief"",""stability patch"",""budget variance report"",""T&E""],""organizations"":[""marketing"",""engineering"",""finance""],""dates"":[{""original"":""next Friday"",""normalized"":""2025-04-11T00:00:00Z""},{""original"":""end of day Wednesday"",""normalized"":null,""note"":""Could not normalize due to vague phrasing.""}],""type"":""note"",""sentiment"":""neutral"",""priority"":6,""people"":[],""locations"":[],""language"":""en"",""conversation_id"":"""",""thread_id"":""""}
+Apr 8, 02:44:24 PM: 6f376d5c INFO   File record created with ID: 5346727f-f921-494a-9b33-776b8abfd8a1
+Apr 8, 02:44:24 PM: 6f376d5c INFO   Chunking text...
+Apr 8, 02:44:24 PM: 6f376d5c INFO   Generated 1 chunks.
+Apr 8, 02:44:24 PM: 6f376d5c INFO   Generating embeddings...
+Apr 8, 02:44:25 PM: 6f376d5c INFO   Inserting 1 embedding records...
+Apr 8, 02:44:25 PM: 6f376d5c INFO   Embedding records inserted successfully.
+Apr 8, 02:44:25 PM: 6f376d5c INFO   Appending date normalization failure message: I couldn't determine a specific date/time for 'end of day Wednesday'. Please try providing a clearer date if needed.
+Apr 8, 02:44:25 PM: 6f376d5c INFO   DEBUG: Final retrieved_context before returning: []... (0 items)
+Apr 8, 02:44:25 PM: 6f376d5c Duration: 1315.22 ms	Memory Usage: 117 MB";
