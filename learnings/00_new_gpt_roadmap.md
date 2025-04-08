@@ -219,7 +219,7 @@
 *   **Database Index Requirements:** Confirmed/added necessary indexes in Supabase to support the new fallback queries:
     *   GIN index on `files.file_metadata` (using `jsonb_path_ops` recommended).
     *   B-tree index on `files.created_at`.
-    *   **Text Search Index:** Implementation requires an appropriate FTS index (e.g., GIN on a `tsvector` column) on `files.transcript_text`. (Previous `pg_trgm` index existed but is not ideal for FTS relevance ranking).
+    *   **Text Search Index:** FTS implemented using a GIN index (`files_transcript_tsv_idx`) on a dedicated `tsvector` column (`transcript_tsv`) in the `files` table. (Removed old `pg_trgm` index).
     *   HNSW index on `transcript_embeddings.embedding` for vector search.
 
 1.  **Advanced Retrieval:** Implement more sophisticated search strategies (e.g., hybrid search, filtering by metadata, time-based decay).

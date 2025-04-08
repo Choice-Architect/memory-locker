@@ -51,6 +51,12 @@
 *   To ensure performance:
     *   **Metadata Index:** Ensure the GIN index on `files.file_metadata` exists (using `jsonb_path_ops`).
     *   **Timestamp Index:** Ensure B-tree index exists on `files.created_at`.
-    *   **Text Search Index (FTS):** For the planned FTS approach, creating a GIN index on a dedicated `tsvector` column for `files.transcript_text` is highly recommended for performance.
+    *   **Text Search Index (FTS):** FTS is implemented using a GIN index (`files_transcript_tsv_idx`) on the dedicated `transcript_tsv` column.
 
-## 4. Component Responsibilities Summary
+## 4. Implementation Considerations (FTS Fallback)
+
+*   **Performance:** The FTS implementation in `memory-action.ts` now targets the pre-computed `transcript_tsv` column, leveraging the `files_transcript_tsv_idx` GIN index for efficient searching.
+*   **Error Handling:** Basic error handling for the FTS query is included, but may need enhancement based on testing and requirements.
+*   **Result Typing/Rank:** The FTS query selects the relevance `rank`. If this rank value needs to be used directly within the Netlify function, the `FallbackResultItem` interface and mapping logic may need adjustment to accommodate the extra `rank` field in the results.
+
+## 5. Component Responsibilities Summary

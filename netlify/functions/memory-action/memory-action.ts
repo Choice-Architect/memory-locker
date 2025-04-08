@@ -445,6 +445,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             console.log("Preparing to insert into files table with processed metadata:", JSON.stringify(fileMetadata));
             const fileInsertData: { [key: string]: any } = {
                 transcript_text: textToStore,
+                // transcript_tsv: supabase.sql`to_tsvector('english', ${textToStore})`, // Removed - Handled by DB trigger/backfill
                 file_metadata: fileMetadata, // Store processed metadata with normalized dates
                 title: textToStore.substring(0, 50) + (textToStore.length > 50 ? '...' : ''),
                 file_type: 'gpt_interaction',
@@ -704,105 +705,122 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
                 // Attempt Text Search Fallback ONLY if Metadata Search found nothing
                 if (retrieved_context.length === 0) {
-                    console.log("Attempt 3: Fallback - Text Search on 'files' table...");
-                    let fallbackQueryText = supabase
-                        .from('files')
-                        .select('id, transcript_text, created_at, file_metadata')
-                        .order('created_at', { ascending: false })
-                        .limit(FALLBACK_MATCH_COUNT);
+                    console.log("Attempt 3: Fallback - Full-Text Search on 'files' table using query entities...");
 
-                    let textFiltersApplied = false;
-
-                     // Apply Date Filter again for text search
-                    if (queryDates.length > 0) {
-                        const startDate = queryDates[0].normalized;
-                         const endDate = queryDates.length > 1 && queryDates[queryDates.length - 1].normalized !== startDate ? queryDates[queryDates.length - 1].normalized : startDate;
-                         if (startDate) {
-                            try {
-                                const endOfDayISO = formatISO(endOfDay(parseISO(endDate || startDate)));
-                                 console.log(`Fallback Text: Applying created_at filter: >= ${startDate} AND < ${endOfDayISO}`);
-                                 fallbackQueryText = fallbackQueryText.gte('created_at', startDate);
-                                 fallbackQueryText = fallbackQueryText.lt('created_at', endOfDayISO);
-                                textFiltersApplied = true; // Date counts as a filter
-                            } catch (dateParseError) { /* ... error handling ... */ }
-                         }
+                    // 1. Gather all string entities from the query metadata
+                    const entityValues: string[] = [];
+                    for (const key in queryMetadata) {
+                        if (Array.isArray(queryMetadata[key])) {
+                            queryMetadata[key].forEach((item: any) => {
+                                if (typeof item === 'string') {
+                                    entityValues.push(item);
+                                } else if (typeof item === 'object' && item !== null && 'original' in item && typeof item.original === 'string') {
+                                    // Handle NormalizedDate objects - use original string
+                                    entityValues.push(item.original);
+                                }
+                            });
+                        } else if (typeof queryMetadata[key] === 'string') {
+                            // Include top-level string entities like 'type' or 'sentiment' if desired
+                            // entityValues.push(queryMetadata[key]);
+                        }
                     }
+                    // Remove duplicates and empty strings
+                    const uniqueEntities = [...new Set(entityValues)].filter(e => e.trim() !== '');
 
-                    // Apply Text Filter (ILIKE)
-                    const termsToSearch = (queryMetadata.people || []).concat(queryMetadata.locations || []).concat(queryMetadata.topics || []);
-                    if (termsToSearch.length > 0) {
-                         console.log(`Fallback Text: Applying ILIKE filter for terms: ${termsToSearch.join(', ')}`);
-                         // Combine ILIKE for each term with AND using .filter syntax
-                         const ilikeFilters = termsToSearch.map(term => `transcript_text.ilike.%${term}%`).join(',');
-                         fallbackQueryText = fallbackQueryText.or(ilikeFilters, { foreignTable: undefined }); // Use OR to match any term? Or AND? Plan said AND.
-                         // Let's assume AND: Requires multiple filters or complex .filter() string
-                         // Simplification: Use textSearch with specific configuration if available, or loop .ilike?
-                         // Sticking to .filter for AND:
-                         const andIlikeFilters = termsToSearch.map(term => `transcript_text.ilike.%${term}%`).join(',');
-                         fallbackQueryText = fallbackQueryText.filter('and', '', `(${andIlikeFilters})`); // Syntax might need adjustment
-                         textFiltersApplied = true;
-                    } else if (queryText && !textFiltersApplied) { // Only use full text if NO date filter AND no entity terms
-                         console.log("Fallback Text: Applying ILIKE filter on full query text.");
-                         fallbackQueryText = fallbackQueryText.ilike('transcript_text', `%${queryText}%`);
-                         textFiltersApplied = true;
-                    }
+                    if (uniqueEntities.length > 0) {
+                        // 2. Construct the FTS query string (terms separated by OR '|' for websearch type)
+                        // Escape special characters for to_tsquery
+                        const ftsQueryString = uniqueEntities
+                            .map(term => term.replace(/['&|!():*]/g, '')) // Basic escaping
+                            .filter(term => term.trim() !== '')
+                            .join(' | ');
 
-                    // Execute Text Fallback only if some filter was applicable
-                    if (textFiltersApplied) {
-                         console.log("Executing Fallback Text Query...");
-                         const { data: textResults, error: textError } = await fallbackQueryText;
-                         const typedTextResults = textResults as FallbackResultItem[] | null;
+                        console.log(`Fallback FTS: Searching for entities: ${ftsQueryString}`);
 
-                         if (textError) {
-                             console.error("Error during fallback text search:", textError);
-                              if (!vectorSearchFailed && query_source !== 'error') message_for_gpt = `Vector/Metadata search found nothing. Fallback text search failed: ${textError.message}`;
-                              else message_for_gpt += ` Fallback text search also failed: ${textError.message}`;
-                              if (query_source !== 'error') query_source = 'error'; // Mark error if not already marked
-                         } else if (typedTextResults && typedTextResults.length > 0) {
-                             console.log(`Found ${typedTextResults.length} files via fallback text search.`);
-                              const previousQuerySource = query_source; // Store the state before update
-                              query_source = 'postgres_fallback_text'; // Set specific source
+                        // 3. Build the Supabase query with FTS and optional date filter
+                        let ftsQueryBuilder = supabase
+                            .from('files')
+                            .select('id, transcript_text, created_at, file_metadata, ts_rank_cd(transcript_tsv, to_tsquery(\'english\', $1)) as rank')
+                            .textSearch('transcript_tsv', ftsQueryString, {
+                                config: 'english',
+                                type: 'websearch'
+                            })
+                            .order('rank', { ascending: false })
+                            .limit(FALLBACK_MATCH_COUNT);
 
-                              // Check previous state for message construction
-                              if (vectorSearchFailed || previousQuerySource === 'error') {
-                                  message_for_gpt += ` Found ${typedTextResults.length} file(s) via text fallback.`;
-                              } else {
-                                  message_for_gpt = `Found ${typedTextResults.length} file(s) via text search.`;
-                              }
+                        // Apply Date Filter again if present
+                        if (queryDates.length > 0) {
+                            const startDate = queryDates[0].normalized;
+                            const endDate = queryDates.length > 1 && queryDates[queryDates.length - 1].normalized !== startDate ? queryDates[queryDates.length - 1].normalized : startDate;
+                            if (startDate) {
+                                try {
+                                    const endOfDayISO = formatISO(endOfDay(parseISO(endDate || startDate)));
+                                    console.log(`Fallback FTS: Applying created_at filter: >= ${startDate} AND < ${endOfDayISO}`);
+                                    ftsQueryBuilder = ftsQueryBuilder.gte('created_at', startDate);
+                                    ftsQueryBuilder = ftsQueryBuilder.lt('created_at', endOfDayISO);
+                                } catch (dateParseError) {
+                                    console.error(`Fallback FTS: Error parsing dates for created_at filter: ${startDate}, ${endDate}`, dateParseError);
+                                    // Decide if you want to proceed without date filter or throw error
+                                }
+                            }
+                        }
 
-                             retrieved_context = typedTextResults.map((file: FallbackResultItem) => ({
-                                 file_id: file.id,
-                                 chunk: file.transcript_text,
-                                 timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
-                                 chunk_index: undefined,
-                                  entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
-                                     ? { /* Reconstruction logic */
-                                         people: file.file_metadata.people,
-                                         dates: file.file_metadata.dates || [],
-                                         locations: file.file_metadata.locations,
-                                         topics: file.file_metadata.topics,
-                                         type: file.file_metadata.type,
-                                         sentiment: file.file_metadata.sentiment
-                                       }
-                                     : {},
-                             }));
-                         } else {
-                              console.log("Fallback text search also found no results.");
-                               if (query_source !== 'error') { // Only update if no prior errors
-                                   query_source = 'none';
-                                   message_for_gpt = "I couldn't find any relevant information using vector, metadata, or text search.";
-                               } else {
-                                    message_for_gpt += " Fallback text search also found nothing.";
-                               }
-                         }
+                        // 4. Execute the FTS query
+                        console.log("Executing Fallback FTS Query...");
+                        const { data: ftsResults, error: ftsError } = await ftsQueryBuilder;
+                        // Note: The type needs adjustment if ts_rank is selected directly
+                        const typedTextResults = ftsResults as FallbackResultItem[] | null; 
+
+                        if (ftsError) {
+                            console.error("Error during fallback FTS search:", ftsError);
+                            if (!vectorSearchFailed && query_source !== 'error') message_for_gpt = `Vector/Metadata search found nothing. Fallback text search failed: ${ftsError.message}`;
+                            else message_for_gpt += ` Fallback text search also failed: ${ftsError.message}`;
+                            if (query_source !== 'error') query_source = 'error';
+                        } else if (typedTextResults && typedTextResults.length > 0) {
+                            console.log(`Found ${typedTextResults.length} files via fallback FTS search.`);
+                            const previousQuerySource = query_source;
+                            query_source = 'postgres_fallback_text';
+
+                            if (vectorSearchFailed || previousQuerySource === 'error') {
+                                message_for_gpt += ` Found ${typedTextResults.length} potential match(es) via text fallback.`;
+                            } else {
+                                message_for_gpt = `Found ${typedTextResults.length} potential match(es) via text search.`;
+                            }
+
+                            // Map results (same mapping logic as before)
+                            retrieved_context = typedTextResults.map((file: FallbackResultItem) => ({
+                                file_id: file.id,
+                                chunk: file.transcript_text,
+                                timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
+                                chunk_index: undefined, 
+                                entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
+                                    ? { 
+                                        people: file.file_metadata.people,
+                                        dates: file.file_metadata.dates || [],
+                                        locations: file.file_metadata.locations,
+                                        topics: file.file_metadata.topics,
+                                        type: file.file_metadata.type,
+                                        sentiment: file.file_metadata.sentiment
+                                      }
+                                    : {},
+                            }));
+                        } else {
+                            console.log("Fallback FTS search also found no results.");
+                            if (query_source !== 'error') {
+                                query_source = 'none';
+                                message_for_gpt = "I couldn't find any relevant information using vector, metadata, or text search.";
+                            } else {
+                                message_for_gpt += " Fallback text search also found nothing.";
+                            }
+                        }
                     } else {
-                         console.log("No applicable filters for fallback text search, skipping.");
-                          if (query_source !== 'error') { // Only update if no prior errors
-                               query_source = 'none';
-                               message_for_gpt = "I couldn't find any relevant information based on the query filters.";
-                          } else {
-                               message_for_gpt += " No filters applied for text fallback.";
-                          }
+                        console.log("No valid entities found in the query to perform FTS fallback, skipping.");
+                        if (query_source !== 'error') {
+                            query_source = 'none';
+                            message_for_gpt = "I couldn't find any relevant information based on the query filters, and no specific entities were provided for text search.";
+                        } else {
+                            message_for_gpt += " No specific entities provided for text fallback.";
+                        }
                     }
                 } // End Text Search Fallback attempt
 

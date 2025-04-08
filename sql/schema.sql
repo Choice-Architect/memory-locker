@@ -34,6 +34,7 @@ CREATE TABLE files (
     conversation_id UUID,                       -- Links to a specific conversation
     thread_id UUID,                             -- Links to a specific thread in a conversation
     parent_message_id UUID,                     -- Links to a parent message (for replies)
+    transcript_tsv tsvector,                    -- Pre-computed tsvector for FTS (Added)
     created_at TIMESTAMPTZ DEFAULT now(),       -- When the file record was created
     updated_at TIMESTAMPTZ,                     -- When the file record was last modified
     processed_at TIMESTAMPTZ                    -- When the file was processed by the system
@@ -159,7 +160,7 @@ CREATE INDEX idx_files_conversation_id ON files(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_files_metadata_gin ON public.files USING gin (file_metadata jsonb_path_ops);
 CREATE INDEX IF NOT EXISTS idx_files_thread_id ON public.files (thread_id);
 CREATE INDEX IF NOT EXISTS idx_files_created_at ON public.files (created_at);
-CREATE INDEX idx_gin_trgm_files_transcript ON public.files USING gin (transcript_text gin_trgm_ops);
+CREATE INDEX files_transcript_tsv_idx ON public.files USING GIN (transcript_tsv);
 
 -- Indexes for queries table
 -- CREATE INDEX idx_queries_user_id ON queries(user_id); (Removed)
