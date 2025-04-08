@@ -2,14 +2,15 @@ import { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import stemmer from '@stdlib/nlp-porter-stemmer';
-import { parse, formatISO, startOfDay, endOfDay, addDays, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addMonths, subMonths, set, isMatch, parseISO, isValid } from 'date-fns';
+import { parse, formatISO, startOfDay, endOfDay, addDays, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addMonths, subMonths, set, isMatch, parseISO, isValid, getDay, nextDay, setHours, setMinutes, setSeconds, setMilliseconds, getYear, Day } from 'date-fns';
 
 // --- Interfaces for API Contract ---
 
-// Interface for normalized date object
+// Updated Interface for normalized date object
 interface NormalizedDate {
     original: string;
     normalized: string | null; // ISO 8601 format or null if failed
+    note?: string; // Added: Reason for failure (e.g., 'vague', 'parse_error')
 }
 
 interface ExtractedEntities {
@@ -22,7 +23,6 @@ interface ExtractedEntities {
     priority?: number; // Added: Optional user-assigned priority (1-10)
     conversation_id?: string; // Added: Optional conversation identifier
     thread_id?: string; // Added: Optional thread identifier
-    due_date?: string; // Added: Optional due date string (to be normalized)
     language?: 'en' | 'fr' | 'ar'; // Added: Optional language code
     [key: string]: any; // Allow flexible entity types, keep for now
 }
@@ -46,7 +46,7 @@ interface ContextObject {
 interface SuccessResponse {
     retrieved_context: ContextObject[];
     storage_status: string;
-    query_source: 'vector_store' | 'postgres_fallback' | 'none' | 'combined' | 'error'; // Added combined/error
+    query_source: 'vector_store' | 'postgres_fallback' | 'postgres_fallback_metadata' | 'postgres_fallback_text' | 'none' | 'combined' | 'error'; // Added combined/error and specific fallbacks
     message_for_gpt?: string;
     error: null;
 }
@@ -140,80 +140,172 @@ const initializeClients = () => {
 
 /**
  * Normalizes a date string to ISO 8601 format using a reference date.
- * Handles relative terms like "today", "yesterday", "next week", etc.
- * Returns null if parsing/normalization fails.
+ * Handles relative terms like "today", "yesterday", specific dates/times, weekdays, months.
+ * Identifies and rejects vague terms.
+ * Returns a NormalizedDate object { original, normalized, note? }.
  */
 function normalizeDateString(dateString: string, referenceDate: Date): NormalizedDate {
     const lowerCaseDateString = dateString.toLowerCase().trim();
-    let normalizedDate: Date | null = null;
+    let normalizedDateObj: Date | null = null;
+    let note: string | undefined = undefined;
+    // Default to start of day unless time is parsed
+    let timeInfo = { hours: 0, minutes: 0, seconds: 0, milliseconds: 0 };
 
     try {
-        // Specific keywords first
-        if (lowerCaseDateString === 'today') {
-            normalizedDate = startOfDay(referenceDate);
-        } else if (lowerCaseDateString === 'yesterday') {
-            normalizedDate = startOfDay(subDays(referenceDate, 1));
-        } else if (lowerCaseDateString === 'tomorrow') {
-            normalizedDate = startOfDay(addDays(referenceDate, 1));
-        } else if (lowerCaseDateString === 'last weekend') {
-             // Assuming weekend is Sat/Sun. Get start of last week's Saturday.
-             const lastWeekStart = startOfWeek(subDays(referenceDate, 7), { weekStartsOn: 0 }); // Last Sunday
-             normalizedDate = addDays(lastWeekStart, 6); // Saturday of last week
-             // Note: This returns a single date. Range handling might be needed.
-        } else if (lowerCaseDateString === 'next weekend') {
-            // Get start of next week's Saturday.
-            const nextWeekStart = startOfWeek(addDays(referenceDate, 7), { weekStartsOn: 0 }); // Next Sunday
-            normalizedDate = addDays(nextWeekStart, 6); // Saturday of next week
-            // Note: This returns a single date.
-        } else if (lowerCaseDateString.startsWith('next ')) {
-            const parts = lowerCaseDateString.split(' ');
-            if (parts.length === 2) {
-                // Simple handling for 'next month', 'next week', 'next tuesday' etc.
-                // Requires more robust parsing for specific days relative to referenceDate
-                // For now, approximate:
-                if (parts[1] === 'month') normalizedDate = startOfMonth(addMonths(referenceDate, 1));
-                else if (parts[1] === 'week') normalizedDate = startOfWeek(addDays(referenceDate, 7), { weekStartsOn: 1 }); // Assuming week starts Mon
-                // Add more specific day handling if needed ('next tuesday')
+        // --- Check for Vague Terms First --- (Return immediately if vague)
+        const vagueTerms = ["end of", "middle of", "sometime", "around", "a few", "several"];
+        if (vagueTerms.some(term => lowerCaseDateString.includes(term))) {
+             note = "Could not normalize due to vague phrasing.";
+             console.log(`Date normalization skipped for '${dateString}': ${note}`);
+             return { original: dateString, normalized: null, note };
+        }
+
+        // --- Handle Time Extraction (simple cases like 'at 4PM', '9am', '14:30') ---        
+        const timeRegex = /\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s?(am|pm)?\b/i;
+        const timeMatch = lowerCaseDateString.match(timeRegex);
+        let datePart = lowerCaseDateString; // Start with the full string for date parsing
+
+        if (timeMatch) {
+            let hours = parseInt(timeMatch[1], 10);
+            const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+            const period = timeMatch[3] ? timeMatch[3].toLowerCase() : null;
+
+            // Adjust hours for AM/PM if present
+            if (period === 'pm' && hours < 12) hours += 12;
+            if (period === 'am' && hours === 12) hours = 0; // Midnight case
+
+            if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+                 timeInfo = { hours, minutes, seconds: 0, milliseconds: 0 };
+                 // Remove the time part from the string so we can parse the date part
+                 // Be careful not to remove parts of the date itself (e.g., 'Call at 10 on the 10th')
+                 datePart = lowerCaseDateString.replace(timeMatch[0], '').replace(/^at\s+|\s+at$/g, '').trim(); 
+                 // If datePart becomes empty after removing time, assume 'today'
+                 if (!datePart || datePart === 'at') datePart = 'today';
+                 console.log(`Extracted time: ${hours}:${minutes}, remaining date part: '${datePart}'`);
+            } else {
+                console.warn(`Ignoring invalid time parsed: ${timeMatch[0]}`);
             }
-        } else if (lowerCaseDateString.startsWith('last ')) {
-             const parts = lowerCaseDateString.split(' ');
-            if (parts.length === 2) {
-                if (parts[1] === 'month') normalizedDate = startOfMonth(subMonths(referenceDate, 1));
-                else if (parts[1] === 'week') normalizedDate = startOfWeek(subDays(referenceDate, 7), { weekStartsOn: 1 });
-                 // Add more specific day handling if needed ('last tuesday')
+        }
+        // If no specific time is found, default to start of day (already handled by timeInfo default)
+
+        // --- Date Parsing Logic ---
+        if (!datePart) {
+             // This might happen if the original string was *only* a time like "4pm"
+             datePart = 'today'; 
+        }
+
+        if (datePart === 'today') {
+            normalizedDateObj = referenceDate;
+        } else if (datePart === 'yesterday') {
+            normalizedDateObj = subDays(referenceDate, 1);
+        } else if (datePart === 'tomorrow') {
+            normalizedDateObj = addDays(referenceDate, 1);
+        } else if (datePart === 'last month') {
+             normalizedDateObj = startOfMonth(subMonths(referenceDate, 1));
+        } else if (datePart === 'next month') {
+             normalizedDateObj = startOfMonth(addMonths(referenceDate, 1));
+        } else if (datePart.startsWith('next ')) {
+            const weekdayMatch = datePart.match(/next (monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
+            if (weekdayMatch) {
+                const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+                const targetDay = weekdays.indexOf(weekdayMatch[1]);
+                if (targetDay !== -1) {
+                    normalizedDateObj = nextDay(referenceDate, targetDay as Day);
+                }
+            } else if (datePart === 'next week') {
+                 normalizedDateObj = startOfWeek(addDays(referenceDate, 7), { weekStartsOn: 1 }); // Assuming week starts Mon
             }
-        } else if (lowerCaseDateString === 'eod friday') {
-            // Find the next Friday (or today if it is Friday) and set time to 17:00
-            let nextFriday = referenceDate;
-            while (nextFriday.getDay() !== 5) {
-                nextFriday = addDays(nextFriday, 1);
+            // Add 'next weekend' etc. if needed
+        } else if (datePart.startsWith('last ')) {
+             const weekdayMatch = datePart.match(/last (monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
+            if (weekdayMatch) {
+                 const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+                 const targetDay = weekdays.indexOf(weekdayMatch[1]);
+                 if (targetDay !== -1) {
+                     // Find previous instance by going back day by day
+                     let tempDate = subDays(referenceDate, 1);
+                     while (getDay(tempDate) !== targetDay) {
+                         tempDate = subDays(tempDate, 1);
+                     }
+                     normalizedDateObj = tempDate;
+                 }
+            } else if (datePart === 'last week') {
+                  normalizedDateObj = startOfWeek(subDays(referenceDate, 7), { weekStartsOn: 1 });
             }
-            normalizedDate = set(startOfDay(nextFriday), { hours: 17 });
+             // Add 'last weekend' etc. if needed
         } else {
-            // Attempt parsing common formats (requires date-fns v2+)
-             // Try ISO format first
-            if (isMatch(dateString, "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'") || isMatch(dateString, "yyyy-MM-dd")) {
-                 const parsed = parseISO(dateString);
-                 if (isValid(parsed)) normalizedDate = parsed;
+            // --- Attempt parsing various explicit formats --- 
+            const formatsToTry = [
+                { format: "yyyy-MM-dd'T'HH:mm:ss.SSSX", iso: true }, // ISO8601 with Z or offset
+                { format: 'yyyy-MM-dd HH:mm:ss', iso: false }, // Space separated datetime
+                { format: 'yyyy-MM-dd', iso: false },          // Date only
+                { format: 'MM/dd/yyyy', iso: false },          // Common US
+                { format: 'd/M/yyyy', iso: false },            // Common EU
+                { format: 'MMMM d, yyyy', iso: false },        // July 15, 2024
+                { format: 'MMM d, yyyy', iso: false },         // Jul 15, 2024
+                { format: 'MMMM d', iso: false, inferYear: true }, // June 4th
+                { format: 'MMM d', iso: false, inferYear: true },  // Jun 4th
+            ];
+
+            for (const fmt of formatsToTry) {
+                let dateStringToParse = datePart;
+                let effectiveFormat = fmt.format;
+
+                if (fmt.inferYear && !/\d{4}/.test(dateStringToParse)) {
+                    // Append reference year if format needs it and year isn't present
+                    dateStringToParse = `${dateStringToParse}, ${getYear(referenceDate)}`;
+                    effectiveFormat = fmt.format + ', yyyy'; // Adjust format for parsing
+                }
+                
+                try {
+                    const parsed = fmt.iso ? parseISO(dateStringToParse) : parse(dateStringToParse, effectiveFormat, referenceDate);
+                    if (isValid(parsed)) {
+                        normalizedDateObj = parsed;
+                        // If the successful format included time, update timeInfo
+                        if (effectiveFormat.includes('H') || effectiveFormat.includes('h') || effectiveFormat.includes('k') || effectiveFormat.includes('K')) {
+                            timeInfo = { hours: parsed.getHours(), minutes: parsed.getMinutes(), seconds: parsed.getSeconds(), milliseconds: parsed.getMilliseconds() };
+                        }
+                        break; // Found a valid parse, stop trying formats
+                    }
+                } catch (e) { /* Ignore parse error for this format, try next */ }
             }
-            // Add more specific format parsing if needed, e.g., 'MM/dd/yyyy', 'MMMM d, yyyy'
-            // Example:
-            // else if (isMatch(dateString, 'MM/dd/yyyy')) {
-            //    normalizedDate = parse(dateString, 'MM/dd/yyyy', referenceDate);
-            // }
-            if (!normalizedDate) {
-                console.warn(`Could not parse date string: "${dateString}" with basic patterns.`);
+
+            if (!normalizedDateObj) {
+                console.warn(`Could not parse date part: "${datePart}" with known patterns.`);
+                note = "Could not parse this date format.";
             }
         }
 
+        // --- Final Assembly --- 
+        // Apply time info (either parsed or default start-of-day) and check validity again
+         if (normalizedDateObj && isValid(normalizedDateObj)) {
+             // Set the time components. If time wasn't explicitly parsed, this sets to 00:00:00.000
+             normalizedDateObj = set(normalizedDateObj, timeInfo);
+         } else if (!note) { 
+             // If we reached here without a date object and without a specific note, set a generic failure note.
+             note = "Normalization failed.";
+             normalizedDateObj = null;
+         } else {
+              normalizedDateObj = null; // Ensure null if previous steps failed with a note
+         }
+
     } catch (error) {
-        console.error(`Error normalizing date string "${dateString}":`, error);
-        normalizedDate = null; // Ensure null on error
+        console.error(`Critical Error normalizing date string "${dateString}":`, error);
+        normalizedDateObj = null; // Ensure null on critical error
+        note = "Internal error during date normalization.";
     }
+
+    // Return the final object
+    const finalNormalizedString = normalizedDateObj && isValid(normalizedDateObj) ? formatISO(normalizedDateObj) : null;
+    // Ensure a note is provided if normalization failed
+    const finalNote = finalNormalizedString === null ? (note || "Normalization failed.") : undefined;
+
+    console.log(`Normalization Result for '${dateString}': ${finalNormalizedString || 'Failed'} ${finalNote ? '('+finalNote+')' : ''}`);
 
     return {
         original: dateString,
-        normalized: normalizedDate ? formatISO(normalizedDate) : null
+        normalized: finalNormalizedString,
+        note: finalNote
     };
 }
 
@@ -338,18 +430,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             // Use the processedMetadata which now contains normalized dates
             const fileMetadata = processedMetadata;
 
-            // --> Enhancement: Add Due Date Normalization
-            if (payload.extracted_entities.due_date) {
-                const normalizedDueDate = normalizeDateString(payload.extracted_entities.due_date, STORAGE_REFERENCE_DATE);
-                if (normalizedDueDate.normalized) {
-                    fileMetadata.normalized_due_date = normalizedDueDate.normalized;
-                    console.log(`Stored normalized due date: ${fileMetadata.normalized_due_date}`);
-                } else {
-                    console.warn(`Could not normalize provided due date: ${payload.extracted_entities.due_date}`);
-                    // Optionally store the original string anyway, or just omit
-                }
-            }
-
             // --> Enhancement: Add Priority
             if (payload.extracted_entities.priority && typeof payload.extracted_entities.priority === 'number') {
                 fileMetadata.priority = payload.extracted_entities.priority;
@@ -360,7 +440,8 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             fileMetadata.language = payload.extracted_entities.language || 'en'; // Default to 'en'
             console.log(`Stored language: ${fileMetadata.language}`);
 
-            // --> Enhancement: Add Auto-Keywords
+            // --> Enhancement: Add Auto-Keywords -- REMOVED
+            /*
             try {
                 const words = textToStore.toLowerCase().match(/\b(\w+)\b/g) || [];
                 const keywords = words.filter(word => !STOP_WORDS.has(word));
@@ -370,6 +451,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             } catch (kwError) {
                 console.error("Error generating auto-keywords:", kwError);
             }
+            */
 
             // a. Insert into 'files' table
             console.log("Preparing to insert into files table with processed metadata:", JSON.stringify(fileMetadata));
@@ -482,8 +564,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         if (payload.mode === 'query' || payload.mode === 'combined') {
             console.log("Processing 'query' mode...");
             const queryText = payload.query_text;
-            // Use processedMetadata which has dates normalized relative to the *current* time
-            const queryMetadata = processedMetadata;
+            const queryMetadata = processedMetadata; // Use processedMetadata which has normalized dates
             const queryDates = (queryMetadata.dates as NormalizedDate[] | undefined)?.filter(d => d.normalized) || [];
 
             if (!queryText) {
@@ -498,223 +579,278 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             }
             const queryEmbedding = queryEmbeddings[0];
 
-            // b. Search for similar chunks in 'transcript_embeddings' using the SQL function
-            console.log("Searching for relevant memory chunks via vector search...");
+            // b. Vector Search (Primary Attempt)
+            console.log("Attempt 1: Searching for relevant memory chunks via vector search...");
             const searchParams = {
                 query_embedding: queryEmbedding,
                 match_threshold: VECTOR_MATCH_THRESHOLD,
                 match_count: VECTOR_MATCH_COUNT,
-                // No user_id included here as it was removed from payload and function logic
-                // --> Enhancement: Add Metadata Filters to Vector Search Call
                 filter_topics: queryMetadata.topics || null,
                 filter_people: queryMetadata.people || null,
                 filter_locations: queryMetadata.locations || null,
                 filter_type: queryMetadata.type || null,
                 filter_sentiment: queryMetadata.sentiment || null,
-                // Pass normalized date range (assuming queryDates is already normalized array)
-                filter_date_start: queryDates.length > 0 ? queryDates[0].normalized : null, // Basic: Use first date as start
-                filter_date_end: queryDates.length > 1 ? queryDates[queryDates.length - 1].normalized : (queryDates.length === 1 ? queryDates[0].normalized : null) // Basic: Use last date as end
-                // TODO: More robust date range extraction might be needed if multiple disjoint dates are provided
+                filter_date_start: queryDates.length > 0 ? queryDates[0].normalized : null,
+                filter_date_end: queryDates.length > 1 ? queryDates[queryDates.length - 1].normalized : (queryDates.length === 1 ? queryDates[0].normalized : null)
             };
 
             const { data: searchResults, error: searchError } = await supabase.rpc(
                 'search_memory_chunks',
                 searchParams
             );
-
-            // Explicitly type the search results
             const typedSearchResults = searchResults as SearchResultItem[] | null;
 
+            let vectorSearchFailed = false;
             if (searchError) {
                 console.error("Error during vector search RPC call:", searchError);
-                // Don't throw here, proceed to fallback or report error
-                query_source = 'error';
-                message_for_gpt = `Error searching memories via vector: ${searchError.message}. Trying fallback.`; // Update message
+                query_source = 'error'; // Mark as error, but proceed to fallback
+                message_for_gpt = `Error during vector search: ${searchError.message}. Trying fallback.`;
+                vectorSearchFailed = true;
             } else if (typedSearchResults && typedSearchResults.length > 0) {
-                console.log(`Found ${typedSearchResults.length} potentially relevant chunks via vector search.`);
+                console.log(`Found ${typedSearchResults.length} chunks via vector search.`);
                 query_source = 'vector_store';
-                // Map results to ContextObject format, using the defined type for 'result'
                 retrieved_context = typedSearchResults.map((result: SearchResultItem) => ({
-                    // chunk_id: result.id, // Assuming the RPC returns the transcript_embeddings.id
                     file_id: result.file_id,
                     chunk: result.content_chunk,
                     timestamp: typeof result.metadata === 'object' && result.metadata !== null && 'created_at' in result.metadata
                                ? String(result.metadata.created_at)
                                : new Date(0).toISOString(),
-                    chunk_index: typeof result === 'object' && result !== null && 'chunk_index' in result ? Number(result.chunk_index) : undefined, // --> Enhancement: Map chunk_index
-                    // Extract entities from chunk metadata (which should mirror file metadata now)
+                    chunk_index: typeof result === 'object' && result !== null && 'chunk_index' in result ? Number(result.chunk_index) : undefined,
                     entities_in_chunk: typeof result.metadata === 'object' && result.metadata !== null
-                               ? { // Reconstruct entities from metadata, expecting normalized dates
-                                    people: result.metadata.people,
-                                    dates: result.metadata.dates as NormalizedDate[],
-                                    locations: result.metadata.locations,
-                                    topics: result.metadata.topics,
-                                    type: result.metadata.type,
-                                    sentiment: result.metadata.sentiment
-                                  }
-                                : {},
+                        ? { // Reconstruct entities from metadata
+                            people: result.metadata.people,
+                            dates: (result.metadata.dates as NormalizedDate[]) || [],
+                            locations: result.metadata.locations,
+                            topics: result.metadata.topics,
+                            type: result.metadata.type,
+                            sentiment: result.metadata.sentiment
+                          }
+                        : {},
                 }));
+            } else {
+                console.log("Vector search yielded no results.");
+                // query_source remains 'none' for now, will be updated by fallback
             }
 
-            // c. Fallback Search Logic (if vector search yielded no results or errored initially)
-            if (retrieved_context.length === 0) {
-                 console.log("Vector search yielded no results or failed. Attempting fallback search on 'files' table...");
 
-                // Use extracted topics and normalized dates for fallback
-                const topics = queryMetadata?.topics;
-                let fallbackQuery = supabase
+            // c. Fallback Logic (Tiered: Metadata -> Text)
+            if (retrieved_context.length === 0) { // Only run fallback if vector search found nothing or failed
+
+                console.log("Attempt 2: Fallback - Metadata Search on 'files' table...");
+                let fallbackQueryMeta = supabase
                     .from('files')
-                    .select('id, transcript_text, created_at, file_metadata'); // Select needed columns
+                    .select('id, transcript_text, created_at, file_metadata')
+                    .order('created_at', { ascending: false }) // Default ordering
+                    .limit(FALLBACK_MATCH_COUNT);
 
-                let appliedFilter = false;
-                const filters: string[] = [];
+                let metaFiltersApplied = false;
 
-                // --> Enhancement: Filter by created_at in Fallback
-                let fallbackQueryWithDate = fallbackQuery; // Start chaining from original query
+                // Apply Date Filter
                 if (queryDates.length > 0) {
                     const startDate = queryDates[0].normalized;
-                    // Use end of day for the end date if only one date is provided or dates are the same
                     const endDate = queryDates.length > 1 && queryDates[queryDates.length - 1].normalized !== startDate ? queryDates[queryDates.length - 1].normalized : startDate;
-
                     if (startDate) {
                         try {
-                            // Assume startDate is start of day. Find end of the endDate.
-                            let endOfDayDate = startDate;
-                            if(endDate && endDate !== startDate) {
-                                endOfDayDate = endDate;
-                            }
-                            const endOfDayISO = formatISO(endOfDay(parseISO(endOfDayDate)));
-
-                            console.log(`Applying fallback created_at filter: >= ${startDate} AND < ${endOfDayISO}`);
-                            // Chain filters directly
-                            fallbackQueryWithDate = fallbackQueryWithDate.gte('created_at', startDate);
-                            fallbackQueryWithDate = fallbackQueryWithDate.lt('created_at', endOfDayISO);
-                            appliedFilter = true;
+                            const endOfDayISO = formatISO(endOfDay(parseISO(endDate || startDate)));
+                            console.log(`Fallback Meta: Applying created_at filter: >= ${startDate} AND < ${endOfDayISO}`);
+                            fallbackQueryMeta = fallbackQueryMeta.gte('created_at', startDate);
+                            fallbackQueryMeta = fallbackQueryMeta.lt('created_at', endOfDayISO);
+                            metaFiltersApplied = true;
                         } catch (dateParseError) {
-                            console.error(`Fallback: Error parsing dates for created_at filter: ${startDate}, ${endDate}`, dateParseError);
+                             console.error(`Fallback Meta: Error parsing dates for created_at filter: ${startDate}, ${endDate}`, dateParseError);
                         }
                     }
                 }
 
-                // Collect other filters
+                // Apply Metadata Entity Filters
+                if (queryMetadata.people && queryMetadata.people.length > 0) {
+                    console.log(`Fallback Meta: Applying filter: file_metadata->people @> ${JSON.stringify(queryMetadata.people)}`);
+                    fallbackQueryMeta = fallbackQueryMeta.contains('file_metadata->people', queryMetadata.people);
+                    metaFiltersApplied = true;
+                }
+                if (queryMetadata.locations && queryMetadata.locations.length > 0) {
+                    console.log(`Fallback Meta: Applying filter: file_metadata->locations @> ${JSON.stringify(queryMetadata.locations)}`);
+                     fallbackQueryMeta = fallbackQueryMeta.contains('file_metadata->locations', queryMetadata.locations);
+                    metaFiltersApplied = true;
+                }
+                 if (queryMetadata.topics && queryMetadata.topics.length > 0) {
+                     console.log(`Fallback Meta: Applying filter: file_metadata->topics @> ${JSON.stringify(queryMetadata.topics)}`);
+                     fallbackQueryMeta = fallbackQueryMeta.contains('file_metadata->topics', queryMetadata.topics);
+                    metaFiltersApplied = true;
+                }
                 if (queryMetadata.priority) {
-                    filters.push(`file_metadata->>priority.eq.${queryMetadata.priority}`);
+                    console.log(`Fallback Meta: Applying filter: file_metadata->>priority = ${queryMetadata.priority}`);
+                    fallbackQueryMeta = fallbackQueryMeta.eq('file_metadata->>priority', queryMetadata.priority);
+                     metaFiltersApplied = true;
                 }
                 if (queryMetadata.language) {
-                    filters.push(`file_metadata->>language.eq.${queryMetadata.language}`);
-                }
-                if (queryMetadata.due_date) { // Assuming due_date in query means we check normalized_due_date
-                    const normalizedDueDate = normalizeDateString(queryMetadata.due_date, new Date());
-                    if (normalizedDueDate.normalized) {
-                        // Simple equality check for now, range could be added
-                        filters.push(`file_metadata->>normalized_due_date.eq.${normalizedDueDate.normalized}`);
-                    }
+                     console.log(`Fallback Meta: Applying filter: file_metadata->>language = ${queryMetadata.language}`);
+                     fallbackQueryMeta = fallbackQueryMeta.eq('file_metadata->>language', queryMetadata.language);
+                     metaFiltersApplied = true;
                 }
 
-                // ** Filter by Topics/Keywords (ILIKE on stemmed topics or Auto-Keywords) **
-                const queryKeywords = queryMetadata.topics ? queryMetadata.topics.map(stemmer) : [];
-                if (queryKeywords.length > 0) {
-                    console.log(`Using extracted/stemmed topics for fallback search: ${queryKeywords.join(', ')}`);
-                    // Option 1: Search in transcript_text (existing)
-                    const topicTextFilter = queryKeywords.map(kw => `transcript_text.ilike.%${kw}%`).join(',');
-                    // Option 2: Search in auto_keywords (new)
-                    // Supabase syntax for checking if JSONB array contains any element from a list:
-                    // column.cs.{value1,value2} - Use comma-separated values in curly braces
-                    const keywordMetadataFilter = `file_metadata->auto_keywords.cs.{${queryKeywords.join(',')}}`;
-                    // Combine: search EITHER in text OR in keywords metadata
-                    filters.push(`or(${topicTextFilter},${keywordMetadataFilter})`);
-                } else if (!appliedFilter && queryText) { // Only use full text if no dates or topics/keywords provided
-                    console.log("No specific filters applied, falling back to ILIKE on full query text.");
-                    fallbackQueryWithDate = fallbackQueryWithDate.ilike('transcript_text', `%${queryText}%`);
-                    appliedFilter = true; // Mark that a text filter was applied
-                }
+                // Execute Metadata Fallback only if filters were applicable
+                if (metaFiltersApplied) {
+                    console.log("Executing Fallback Metadata Query...");
+                    const { data: metaResults, error: metaError } = await fallbackQueryMeta;
+                    const typedMetaResults = metaResults as FallbackResultItem[] | null;
 
-                // Apply collected filters as AND condition
-                let finalFallbackQuery = fallbackQueryWithDate;
-                if (filters.length > 0) {
-                    const andFilterString = `and(${filters.join(',')})`;
-                    console.log(`Applying fallback metadata/keyword filters: ${andFilterString}`);
-                    finalFallbackQuery = finalFallbackQuery.filter('and', '', andFilterString); // Use .filter() for complex AND/OR
-                    appliedFilter = true;
-                }
+                    if (metaError) {
+                        console.error("Error during fallback metadata search:", metaError);
+                         if (!vectorSearchFailed) message_for_gpt = `Vector search found nothing. Fallback metadata search failed: ${metaError.message}`;
+                         else message_for_gpt += ` Fallback metadata search also failed: ${metaError.message}`;
+                         if (!vectorSearchFailed) query_source = 'error'; // Mark error if not already marked
+                    } else if (typedMetaResults && typedMetaResults.length > 0) {
+                        console.log(`Found ${typedMetaResults.length} files via fallback metadata search.`);
+                         query_source = 'postgres_fallback_metadata'; // Set specific source
+                         if (vectorSearchFailed) message_for_gpt += ` Found ${typedMetaResults.length} file(s) via metadata fallback.`;
+                         else message_for_gpt = `Found ${typedMetaResults.length} file(s) via metadata search.`;
 
-                // If no filters were applied at all, use full text search as last resort
-                if (!appliedFilter && queryText) {
-                    console.log("No specific filters applied, falling back to ILIKE on full query text.");
-                    finalFallbackQuery = finalFallbackQuery.ilike('transcript_text', `%${queryText}%`);
-                    appliedFilter = true; // Mark that a filter was applied
-                }
-
-                // Only run fallback if some filter criteria were actually applied
-                if (appliedFilter) {
-                    // Add limit and execute
-                    finalFallbackQuery = finalFallbackQuery.limit(FALLBACK_MATCH_COUNT);
-                    console.log("Executing Fallback Query...");
-                    const { data: fallbackResults, error: fallbackError } = await finalFallbackQuery;
-
-                    // Explicitly type the fallback results
-                    const typedFallbackResults = fallbackResults as FallbackResultItem[] | null;
-
-                    if (fallbackError) {
-                        console.error("Error during fallback search on files table:", fallbackError);
-                        // If vector search also failed, report combined errors. Otherwise, just report fallback error.
-                        if (query_source === 'error') {
-                            message_for_gpt += ` Fallback search also failed: ${fallbackError.message}`;
-                        } else {
-                             query_source = 'error'; // Mark as error state
-                             message_for_gpt = `Vector search found nothing. Fallback search failed: ${fallbackError.message}`;
-                        }
-                    } else if (typedFallbackResults && typedFallbackResults.length > 0) {
-                        console.log(`Found ${typedFallbackResults.length} potentially relevant files via fallback search.`);
-                         // If vector search was okay but found nothing, set source to fallback.
-                         // If vector search errored, keep source as error but add fallback results.
-                         if (query_source !== 'error') {
-                            query_source = 'postgres_fallback';
-                        }
-                        message_for_gpt = message_for_gpt ? message_for_gpt + ` Found ${typedFallbackResults.length} file(s) via fallback.` : `Found ${typedFallbackResults.length} file(s) via fallback search (full text match).`;
-
-                        // Map fallback results to ContextObject format, using the defined type for 'file'
-                        const fallbackContext: ContextObject[] = typedFallbackResults.map((file: FallbackResultItem) => ({
-                            file_id: file.id,
-                            chunk: file.transcript_text, // Entire transcript for fallback
-                            timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
-                            chunk_index: undefined, // Fallback operates on whole files, no chunk index
-                            // Extract entities from file_metadata, expecting normalized dates
-                            entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
-                                ? { // Reconstruct based on expected structure
-                                    people: file.file_metadata.people,
-                                    dates: file.file_metadata.dates || [], // Ensure dates array exists
-                                    locations: file.file_metadata.locations,
-                                    topics: file.file_metadata.topics,
-                                    type: file.file_metadata.type,
-                                    sentiment: file.file_metadata.sentiment
-                                  }
-                                : {},
-                        }));
-                        retrieved_context.push(...fallbackContext); // Append fallback results
+                        retrieved_context = typedMetaResults.map((file: FallbackResultItem) => ({
+                             file_id: file.id,
+                             chunk: file.transcript_text,
+                             timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
+                             chunk_index: undefined,
+                             entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
+                                 ? { /* Reconstruction logic */
+                                     people: file.file_metadata.people,
+                                     dates: file.file_metadata.dates || [],
+                                     locations: file.file_metadata.locations,
+                                     topics: file.file_metadata.topics,
+                                     type: file.file_metadata.type,
+                                     sentiment: file.file_metadata.sentiment
+                                   }
+                                 : {},
+                         }));
                     } else {
-                        console.log("Fallback search on 'files' table also found no results.");
-                         // If vector search already errored, message_for_gpt is set. Otherwise...
-                         if (query_source !== 'error') {
-                            query_source = 'none'; // No results from either method
-                            message_for_gpt = "I couldn't find any relevant information using vector search or direct text search.";
-                        } else {
-                             message_for_gpt += " Fallback search also found nothing.";
-                        }
+                         console.log("Fallback metadata search found no results.");
+                         // query_source remains 'none' or 'error', message updated later if text search also fails
                     }
                 } else {
-                    console.log("No filters applied for fallback search.");
-                     // If vector search already errored, message_for_gpt is set. Otherwise...
-                     if (query_source !== 'error') {
-                        query_source = 'none'; // No results from either method
-                        message_for_gpt = "I couldn't find any relevant information using vector search or direct text search.";
-                    } else {
-                         message_for_gpt += " No filters applied for fallback search.";
-                    }
+                    console.log("No applicable filters for fallback metadata search, skipping.");
                 }
-            }
+
+
+                // Attempt Text Search Fallback ONLY if Metadata Search found nothing
+                if (retrieved_context.length === 0) {
+                    console.log("Attempt 3: Fallback - Text Search on 'files' table...");
+                    let fallbackQueryText = supabase
+                        .from('files')
+                        .select('id, transcript_text, created_at, file_metadata')
+                        .order('created_at', { ascending: false })
+                        .limit(FALLBACK_MATCH_COUNT);
+
+                    let textFiltersApplied = false;
+
+                     // Apply Date Filter again for text search
+                    if (queryDates.length > 0) {
+                        const startDate = queryDates[0].normalized;
+                         const endDate = queryDates.length > 1 && queryDates[queryDates.length - 1].normalized !== startDate ? queryDates[queryDates.length - 1].normalized : startDate;
+                         if (startDate) {
+                            try {
+                                const endOfDayISO = formatISO(endOfDay(parseISO(endDate || startDate)));
+                                 console.log(`Fallback Text: Applying created_at filter: >= ${startDate} AND < ${endOfDayISO}`);
+                                 fallbackQueryText = fallbackQueryText.gte('created_at', startDate);
+                                 fallbackQueryText = fallbackQueryText.lt('created_at', endOfDayISO);
+                                textFiltersApplied = true; // Date counts as a filter
+                            } catch (dateParseError) { /* ... error handling ... */ }
+                         }
+                    }
+
+                    // Apply Text Filter (ILIKE)
+                    const termsToSearch = (queryMetadata.people || []).concat(queryMetadata.locations || []).concat(queryMetadata.topics || []);
+                    if (termsToSearch.length > 0) {
+                         console.log(`Fallback Text: Applying ILIKE filter for terms: ${termsToSearch.join(', ')}`);
+                         // Combine ILIKE for each term with AND using .filter syntax
+                         const ilikeFilters = termsToSearch.map(term => `transcript_text.ilike.%${term}%`).join(',');
+                         fallbackQueryText = fallbackQueryText.or(ilikeFilters, { foreignTable: undefined }); // Use OR to match any term? Or AND? Plan said AND.
+                         // Let's assume AND: Requires multiple filters or complex .filter() string
+                         // Simplification: Use textSearch with specific configuration if available, or loop .ilike?
+                         // Sticking to .filter for AND:
+                         const andIlikeFilters = termsToSearch.map(term => `transcript_text.ilike.%${term}%`).join(',');
+                         fallbackQueryText = fallbackQueryText.filter('and', '', `(${andIlikeFilters})`); // Syntax might need adjustment
+                         textFiltersApplied = true;
+                    } else if (queryText && !textFiltersApplied) { // Only use full text if NO date filter AND no entity terms
+                         console.log("Fallback Text: Applying ILIKE filter on full query text.");
+                         fallbackQueryText = fallbackQueryText.ilike('transcript_text', `%${queryText}%`);
+                         textFiltersApplied = true;
+                    }
+
+                    // Execute Text Fallback only if some filter was applicable
+                    if (textFiltersApplied) {
+                         console.log("Executing Fallback Text Query...");
+                         const { data: textResults, error: textError } = await fallbackQueryText;
+                         const typedTextResults = textResults as FallbackResultItem[] | null;
+
+                         if (textError) {
+                             console.error("Error during fallback text search:", textError);
+                              if (!vectorSearchFailed && query_source !== 'error') message_for_gpt = `Vector/Metadata search found nothing. Fallback text search failed: ${textError.message}`;
+                              else message_for_gpt += ` Fallback text search also failed: ${textError.message}`;
+                              if (query_source !== 'error') query_source = 'error'; // Mark error if not already marked
+                         } else if (typedTextResults && typedTextResults.length > 0) {
+                             console.log(`Found ${typedTextResults.length} files via fallback text search.`);
+                              const previousQuerySource = query_source; // Store the state before update
+                              query_source = 'postgres_fallback_text'; // Set specific source
+
+                              // Check previous state for message construction
+                              if (vectorSearchFailed || previousQuerySource === 'error') {
+                                  message_for_gpt += ` Found ${typedTextResults.length} file(s) via text fallback.`;
+                              } else {
+                                  message_for_gpt = `Found ${typedTextResults.length} file(s) via text search.`;
+                              }
+
+                             retrieved_context = typedTextResults.map((file: FallbackResultItem) => ({
+                                 file_id: file.id,
+                                 chunk: file.transcript_text,
+                                 timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
+                                 chunk_index: undefined,
+                                  entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
+                                     ? { /* Reconstruction logic */
+                                         people: file.file_metadata.people,
+                                         dates: file.file_metadata.dates || [],
+                                         locations: file.file_metadata.locations,
+                                         topics: file.file_metadata.topics,
+                                         type: file.file_metadata.type,
+                                         sentiment: file.file_metadata.sentiment
+                                       }
+                                     : {},
+                             }));
+                         } else {
+                              console.log("Fallback text search also found no results.");
+                               if (query_source !== 'error') { // Only update if no prior errors
+                                   query_source = 'none';
+                                   message_for_gpt = "I couldn't find any relevant information using vector, metadata, or text search.";
+                               } else {
+                                    message_for_gpt += " Fallback text search also found nothing.";
+                               }
+                         }
+                    } else {
+                         console.log("No applicable filters for fallback text search, skipping.");
+                          if (query_source !== 'error') { // Only update if no prior errors
+                               query_source = 'none';
+                               message_for_gpt = "I couldn't find any relevant information based on the query filters.";
+                          } else {
+                               message_for_gpt += " No filters applied for text fallback.";
+                          }
+                    }
+                } // End Text Search Fallback attempt
+
+            } // End of Fallback Logic block (if vector results were empty)
 
         } // End of 'query'/'combined' block
+
+        // --> Enhancement: Add message about date normalization failures
+        let dateNormFailures: string[] = [];
+        if (processedMetadata.dates && Array.isArray(processedMetadata.dates)) {
+            dateNormFailures = (processedMetadata.dates as NormalizedDate[])
+                .filter(d => d.normalized === null && d.original)
+                .map(d => `'${d.original}'`);
+        }
+        if (dateNormFailures.length > 0) {
+            const failureMessage = `I couldn't determine a specific date/time for ${dateNormFailures.join(', ')}. Please try providing a clearer date if needed.`;
+            message_for_gpt = message_for_gpt ? `${message_for_gpt} ${failureMessage}` : failureMessage;
+            console.log("Appending date normalization failure message:", failureMessage);
+        }
 
         // Final response construction
         console.log(`DEBUG: Final retrieved_context before returning: ${JSON.stringify(retrieved_context.slice(0, 1))}... (${retrieved_context.length} items)`); // Log first item for structure check

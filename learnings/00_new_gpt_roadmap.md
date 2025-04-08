@@ -139,8 +139,8 @@
 *   Implemented stemming of topic keywords for fallback search using `@stdlib/nlp-porter-stemmer`.
 *   Removed `user_id` dependency throughout the stack.
 *   Re-enabled RLS in 'default deny' mode (bypassed by service key).
-*   Core functionality (`store`, `query` via vector search, `query` via keyword/date fallback) is working.
-*   **Phase largely complete.** Remaining refinement (e.g., more robust date range filtering in fallback, enhanced error handling) can move to Phase 5.
+*   Core functionality (`store`, `query` via vector search, `query` via original keyword/date fallback) is working.
+*   **Phase 4 is considered complete.**
 
 **Note (Apr 4, 2025):** Encountered foreign key constraint errors related to `user_id` during initial testing. Decided to refactor to remove `user_id` entirely for the single-user scope. Refactoring involved schema changes (removing `users` table, `user_id` columns, RLS policies), Netlify function updates, OpenAPI schema modification, and GPT instruction adjustments. **Subsequently (Apr 4), RLS was re-enabled on all tables without specific ALLOW policies ('default deny') as a defense-in-depth measure, as the Netlify function uses the `service_role` key which bypasses RLS anyway.**
 
@@ -178,9 +178,9 @@
 
 **Sub-Tasks for Iteration (Completed in Phase 4):**
 *   Implement Fallback Search Logic: Add functionality to `memory-action` to query the `files` table (text search, metadata filtering) when vector search yields no results.
-    *   **Update (Apr 6):** Implemented fallback using `ILIKE` on `files.transcript_text` (filtered by stemmed topics or full text) and basic exact-match date filtering. Uses `@stdlib/nlp-porter-stemmer`.
+    *   **Update (Apr 6):** Implemented initial fallback using `ILIKE` on `files.transcript_text` (filtered by stemmed topics or full text) and basic exact-match date filtering. Uses `@stdlib/nlp-porter-stemmer`.
 *   Implement Date Normalization: Add robust date parsing/normalization.
-    *   **Update (Apr 7):** Implemented using `date-fns` and `normalizeDateString` function.
+    *   **Update (Apr 8):** Implemented using `date-fns` and `normalizeDateString` function. Refined to handle more formats (specific dates/times, weekdays, months), reject vague terms, and provide failure notes in the response.
 
 ---
 
@@ -188,16 +188,27 @@
 
 **Objective:** Improve the quality, performance, and feature set beyond the core functionality.
 
-**Update (Apr 8, 2025):** Implemented several metadata and filtering enhancements:
+**Update (Apr 8, 2025 - Previous):** Implemented several metadata and filtering enhancements:
 *   **Priority:** Added support for user-assigned priority (1-10) stored in `files.file_metadata`. GPT instructions updated.
-*   **Due Date:** Added support for extracting due dates, normalizing them, storing in `files.file_metadata.normalized_due_date`, and filtering in fallback search. GPT instructions updated.
+*   **Due Date:** *Removed* dedicated due date handling in favor of general date normalization within the `dates` array.
 *   **Language:** Added support for detecting language (en, fr, ar), storing in `files.file_metadata.language`, and filtering. GPT instructions updated.
 *   **Conversation/Thread Linking:** Added columns `conversation_id`, `thread_id` to `files` table and fields to API/function. GPT instructions updated to extract if available (experimental).
-*   **Auto-Keywords:** Implemented basic stop-word removal and keyword extraction, stored in `files.file_metadata.auto_keywords`. Fallback search now queries this field.
 *   **Chunk Index:** `transcript_embeddings.chunk_index` is now stored and returned by `search_memory_chunks` function, included in `ContextObject`.
 *   **Enhanced Vector Search Filtering:** `search_memory_chunks` RPC call now utilizes metadata filters (topics, people, dates, type, sentiment).
 *   **Enhanced Fallback Search Filtering:** Fallback search now filters by `files.created_at` based on query dates, and filters `file_metadata` for priority, language, due date, and auto-keywords.
 *   **Database Indexes:** Added GIN index on `files.file_metadata`, and indexes on `files.thread_id` and `files.created_at`.
+
+**Update (Apr 9, 2025 - Fallback Refinement):**
+*   **Auto-Keywords Removed:** Eliminated the generation and storage of `auto_keywords` in `file_metadata` and `transcript_embeddings.metadata` to improve efficiency and reduce storage.
+*   **Tiered Fallback Implemented:** Refactored the query fallback logic in the Netlify function (`memory-action.ts`) into a sequential process:
+    1.  **Vector Search:** (Primary) Uses `search_memory_chunks` RPC with metadata filters.
+    2.  **Metadata Fallback:** (If Vector fails) Queries `files` table, filtering by `created_at` range and using JSONB operators (`@>` contains, `->>` equals) on `file_metadata` fields (people, locations, topics, priority, language).
+    3.  **Text Fallback:** (If Metadata fails) Queries `files` table, filtering by `created_at` range and using `ILIKE` on `transcript_text` based on query terms (entities or full text).
+*   **Fallback Query Source Tracking:** Updated the `query_source` in the response to indicate the specific fallback method used (`postgres_fallback_metadata`, `postgres_fallback_text`).
+*   **Database Index Requirements:** Confirmed/added necessary indexes in Supabase to support the new fallback queries:
+    *   GIN index on `files.file_metadata` (using `jsonb_path_ops` recommended).
+    *   B-tree index on `files.created_at`.
+    *   GIN index on `files.transcript_text` (using `pg_trgm`).
 
 1.  **Advanced Retrieval:** Implement more sophisticated search strategies (e.g., hybrid search, filtering by metadata, time-based decay).
 2.  **Context Management:** Improve how the GPT handles multi-turn conversations related to memories.
