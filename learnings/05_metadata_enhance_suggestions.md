@@ -68,7 +68,8 @@
         *   Include these IDs in the main `fileInsertData` object for the `files` table insert (e.g., `fileInsertData.conversation_id = payload.extracted_entities.conversation_id;`).
     *   In the `query` / `combined` mode logic:
         *   Update vector search (`search_memory_chunks` RPC): Does it need modification to accept/filter by these IDs? If not possible via RPC, filtering must happen *after* retrieval or in the fallback.
-        *   Update fallback search: If the user asks to "find other notes from this conversation", the GPT needs to provide the *current* conversation ID in the query payload. The function then adds a `WHERE conversation_id = '...'` clause to the fallback query.
+        *   Update fallback search: If the user asks to "find other notes from this conversation", the GPT needs to provide the *current* conversation ID in the query payload. The function then adds a `WHERE conversation_id = \'...\'` clause to the fallback query.
+        *   **Note (Apr 9, 2025): Implementation of querying logic for conversation/thread IDs is postponed until after further testing.**
 *   **Database (`files` table):**
     *   **Verify:** Confirm that columns named `conversation_id` and `thread_id` (or similar) already exist in the `files` table as text or appropriate types. If not, add them:
         ```sql
@@ -108,38 +109,6 @@
 
 ---
 
-## 4. Due Date
-
-**Objective:** Allow users to associate a specific due date with a memory (likely for tasks/reminders).
-
-**Implementation Steps:**
-
-*   **GPT Instructions (`learnings/02_gpt_instructions.md`):**
-    *   Instruct GPT to identify specific deadline phrases (e.g., "due tomorrow", "deadline next Friday", "needs to be done by 2024-12-31").
-    *   Specify that if a due date is identified, it should be extracted as a string and included in `extracted_entities.due_date`. Differentiate this from general `dates` mentioned.
-*   **OpenAPI Schema (`openapi.json`):**
-    *   Modify `ExtractedEntities` schema.
-    *   Add an optional `due_date` field:
-        ```json
-        "due_date": {
-          "type": "string",
-          "description": "Specific due date/deadline associated with the memory (extracted as string)"
-        }
-        ```
-*   **Netlify Function (`memory-action.ts`):**
-    *   In the `store` / `combined` mode logic:
-        *   Check for `payload.extracted_entities.due_date`.
-        *   If present, use the `normalizeDateString` function (or a slightly adapted version if needed for deadlines) to convert it to an ISO 8601 string. Handle potential normalization failures.
-        *   Store the normalized ISO date string in `fileMetadata` (e.g., `fileMetadata.normalized_due_date = normalizedDueDate;`).
-    *   In the `query` / `combined` mode logic (Fallback Search):
-        *   Modify the fallback query builder.
-        *   Allow filtering by the `normalized_due_date` field in `file_metadata`. This will likely involve date comparisons (e.g., `=`, `<`, `>`) against the stored ISO string. Example: `file_metadata->>'normalized_due_date' >= '2024-01-01T00:00:00Z'`
-*   **Database (`files` table):**
-    *   No schema change needed (using JSONB `file_metadata`).
-    *   The GIN index on `file_metadata` might offer some benefit, but direct date range queries on JSONB strings can be less performant than dedicated `TIMESTAMP` columns. If due date queries are critical and slow, consider adding a dedicated, indexed `due_date TIMESTAMPTZ NULL` column later.
-
----
-
 ## 5. Language Support (en, fr, ar)
 
 **Objective:** Store the language of the input text to potentially allow for language-specific filtering or processing.
@@ -163,10 +132,9 @@
 *   **Netlify Function (`memory-action.ts`):**
     *   In the `store` / `combined` mode logic:
         *   Check for `payload.extracted_entities.language`.
-        *   Include the language code in `fileMetadata` (e.g., `fileMetadata.language = payload.extracted_entities.language || 'en';`).
+        *   Include the language code in `fileMetadata` (e.g., `fileMetadata.language = payload.extracted_entities.language || \'en\';`).
     *   In the `query` / `combined` mode logic (Fallback Search):
-        *   Modify the fallback query builder.
-        *   Allow filtering by the `language` field in `file_metadata`. Example: `file_metadata->>'language' = 'fr'`
+        *   **Note (Apr 9, 2025): Filtering by language during queries is NOT implemented.**
 *   **Database (`files` table):**
     *   No schema change needed (using JSONB `file_metadata`).
     *   The GIN index will help index this field within the JSONB.

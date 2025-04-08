@@ -142,11 +142,6 @@
              "description": "Identifier for a specific topic thread within a conversation (if available and distinct)",
              "nullable": true
           },
-          "due_date": {
-            "type": "string",
-            "description": "Specific due date/deadline associated with the memory (extracted as string, normalized by function)",
-            "nullable": true
-          },
           "language": {
             "type": "string",
             "enum": ["en", "fr", "ar"],

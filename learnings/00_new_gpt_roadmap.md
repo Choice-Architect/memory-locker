@@ -191,18 +191,18 @@
 **Update (Apr 8, 2025 - Previous):** Implemented several metadata and filtering enhancements:
 *   **Priority:** Added support for user-assigned priority (1-10) stored in `files.file_metadata`. GPT instructions updated.
 *   **Due Date:** *Removed* dedicated due date handling in favor of general date normalization within the `dates` array.
-*   **Language:** Added support for detecting language (en, fr, ar), storing in `files.file_metadata.language`, and filtering. GPT instructions updated.
+*   **Language:** Added support for detecting language (en, fr, ar), storing in `files.file_metadata.language`. GPT instructions updated. **Note: Query filtering by language is NOT implemented.**
 *   **Conversation/Thread Linking:** Added columns `conversation_id`, `thread_id` to `files` table and fields to API/function. GPT instructions updated to extract if available (experimental).
 *   **Chunk Index:** `transcript_embeddings.chunk_index` is now stored and returned by `search_memory_chunks` function, included in `ContextObject`.
 *   **Enhanced Vector Search Filtering:** `search_memory_chunks` RPC call now utilizes metadata filters (topics, people, dates, type, sentiment).
-*   **Enhanced Fallback Search Filtering:** Fallback search now filters by `files.created_at` based on query dates, and filters `file_metadata` for priority, language, due date, and auto-keywords.
+*   **Enhanced Fallback Search Filtering:** Fallback search now filters by `files.created_at` based on query dates, and filters `file_metadata` for priority. **Note: Filtering by language, due date, and auto-keywords was removed/not implemented.**
 *   **Database Indexes:** Added GIN index on `files.file_metadata`, and indexes on `files.thread_id` and `files.created_at`.
 
 **Update (Apr 9, 2025 - Fallback Refinement):**
 *   **Auto-Keywords Removed:** Eliminated the generation and storage of `auto_keywords` in `file_metadata` and `transcript_embeddings.metadata` to improve efficiency and reduce storage.
 *   **Tiered Fallback Implemented:** Refactored the query fallback logic in the Netlify function (`memory-action.ts`) into a sequential process:
     1.  **Vector Search:** (Primary) Uses `search_memory_chunks` RPC with metadata filters.
-    2.  **Metadata Fallback:** (If Vector fails) Queries `files` table, filtering by `created_at` range and using JSONB operators (`@>` contains, `->>` equals) on `file_metadata` fields (people, locations, topics, priority, language).
+    2.  **Metadata Fallback:** (If Vector fails) Queries `files` table, filtering by `created_at` range and using JSONB operators (`@>` contains, `->>` equals) on `file_metadata` fields (people, locations, topics, priority). **Note: Filtering by language is NOT implemented.**
     3.  **Text Fallback:** (If Metadata fails) Queries `files` table, filtering by `created_at` range and using `ILIKE` on `transcript_text` based on query terms (entities or full text).
 *   **Fallback Query Source Tracking:** Updated the `query_source` in the response to indicate the specific fallback method used (`postgres_fallback_metadata`, `postgres_fallback_text`).
 *   **Database Index Requirements:** Confirmed/added necessary indexes in Supabase to support the new fallback queries:

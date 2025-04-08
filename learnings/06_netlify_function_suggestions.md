@@ -9,6 +9,7 @@ This document outlines potential improvements and refinements for the `memory-ac
     *   Modify the `embeddingRecords` object creation in `memory-action.ts` to include `chunk_index: index`.
     *   Ensure the `search_memory_chunks` SQL function is updated to return this `chunk_index` (it might need altering or already implicitly return columns not explicitly listed if using `SELECT te.*`).
     *   Update the `ContextObject` interface in TypeScript to include an optional `chunk_index?: number;`.
+    *   **Note (Apr 9, 2025): The OpenAPI schema (`openapi.json`) for `ContextObject` is currently outdated and needs to be updated to include `chunk_index`, `file_id`, and `chunk_id` after further testing.**
 *   **Rationale:** Knowing the original order allows for better reconstruction of context when multiple chunks from the same file are returned by a query. Aids debugging and analysis.
 
 ## 2. Utilize Metadata Filters in Vector Search (`search_memory_chunks`)

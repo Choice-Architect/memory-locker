@@ -683,11 +683,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                     fallbackQueryMeta = fallbackQueryMeta.eq('file_metadata->>priority', queryMetadata.priority);
                      metaFiltersApplied = true;
                 }
-                if (queryMetadata.language) {
-                     console.log(`Fallback Meta: Applying filter: file_metadata->>language = ${queryMetadata.language}`);
-                     fallbackQueryMeta = fallbackQueryMeta.eq('file_metadata->>language', queryMetadata.language);
-                     metaFiltersApplied = true;
-                }
 
                 // Execute Metadata Fallback only if filters were applicable
                 if (metaFiltersApplied) {
