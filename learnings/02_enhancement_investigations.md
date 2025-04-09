@@ -66,11 +66,11 @@
 
 ## Phase 3: Core Logic Implementation (Netlify Function - `memory-action.ts`)
 
-**Objective:** Update the Netlify function to handle new metadata during storage and implement the tiered query logic.
+**Objective:** Update the Netlify function to handle new metadata during storage and implement the revised query logic.
 
 1.  **Update TypeScript Interfaces:**
-    *   **Action:** Align interfaces (`ExtractedEntities`, `ContextObject`, `SearchResultItem`, `FallbackResultItem`, etc.) with the updated `openapi.json` schema and database function return types.
-    *   **Status (Apr 8):** Completed (further refinements in Phase 6).
+    *   **Action:** Align interfaces (`ExtractedEntities`, `ContextObject`, `SearchResultItem`, `FallbackResultItem`, etc.) with the updated `openapi.json` schema and database function return types. Use internal `ScoredContextObject` for re-ranking.
+    *   **Status (Apr 8):** Completed (further refinements in Phase 6, internal interface needed for re-ranking).
 
 2.  **Enhance Date Normalization Logic:**
     *   **Action:** Modify the `referenceDateForNormalization` assignment.
@@ -89,31 +89,29 @@
         *   Copy the full `fileMetadata` (including normalized dates, priority, language etc.) into each chunk's `metadata` field in `transcript_embeddings`. **Note:** This includes `conversation_id` and `thread_id` within the JSONB, duplicating the top-level columns but allowing easy propagation of this context to individual chunks if needed later.
     *   **Status (Apr 8):** Completed (Date processing updated in Phase 6).
 
-4.  **Implement Tiered Query Logic (`query`/`combined` modes) - Modified for Boosting:**
-    *   **Orchestration:** Manage the sequence: Vector Search -> Metadata Fallback -> FTS Fallback for *initial candidate retrieval*.
+4.  **Implement Revised Query Logic (`query`/`combined` modes) - v1.2:**
+    *   **Orchestration:** Manage the sequence: Vector Search -> FTS Fallback (with conditional date filter) -> Re-ranking.
     *   **Step 4.1: Vector Search (Primary Attempt):**
         *   **Action:** Execute `search_memory_chunks` RPC call.
         *   **Enhancements:** Pass query embedding. Optional filters (`topics`, `people`, etc.) likely passed as NULL initially. Fetch `similarity` score and `metadata`.
-        *   **Status:** Completed (Code removes date filter arg).
-    *   **Step 4.2: Fallback 1 - Metadata Search:**
+        *   **Retrieval Count:** Use `VECTOR_MATCH_COUNT = 15`.
+        *   **Status:** Completed (Code removes date filter arg, constant needs update).
+    *   **Step 4.2: Fallback - Full-Text Search (FTS) with Conditional Date Filter:**
         *   **Trigger:** Vector search returns 0 results or errors.
-        *   **Action:** Construct and execute a `SELECT` query on the `files` table.
-        *   **Filtering:** Apply non-date metadata filters (`@>`, `->>`) as before. Fetch `file_metadata`.
-        *   **Status:** Completed (Code removes date filter).
-    *   **Step 4.3: Fallback 2 - Full-Text Search (FTS):**
-        *   **Trigger:** Metadata Search (Fallback 1) returns 0 results.
-        *   **Action:** Construct and execute an FTS query on the `files` table. Fetch `rank` and `file_metadata`.
-        *   **Status:** Completed (Code removes date filter).
-    *   **Step 4.4: Application Layer Re-ranking (NEW - See Plan in `05_relevance_boosting_plans.md`):**
-        *   **Trigger:** After any successful retrieval step (4.1, 4.2, or 4.3).
+        *   **Action:** Construct and execute an FTS query on the `files` table against `transcript_tsv`.
+        *   **Conditional Date Filtering:** Before executing, analyze `queryMetadata.dates`. If a usable past date range (`startDate`, `endDate`) is derived, add `.gte('created_at', startDate)` and `.lte('created_at', endDate)` clauses to the query.
+        *   **Retrieval Count:** Use `FALLBACK_MATCH_COUNT = 20`.
+        *   **Status:** Planned (Requires significant logic change from previous tiered approach).
+    *   **Step 4.3: Application Layer Re-ranking (See Plan v1.2 in `03_relevance_boosting_plans.md`):**
+        *   **Trigger:** After successful retrieval from Step 4.1 or 4.2.
         *   **Action:** Implement the `rerankResults` function in `memory-action.ts`.
-        *   **Logic:** Compare query metadata with candidate metadata, calculate boost, combine with initial score (similarity/rank/fixed), sort, and trim the list.
+        *   **Logic:** Map candidates to internal `ScoredContextObject`. Calculate `initial_score` (similarity or fixed 0.5 for FTS). Calculate `metadata_boost_score` (sum of +0.05 for each overlap: people, locations, topics, type, sentiment, dates). Calculate `final_score = initial_score + metadata_boost_score`. Sort by `final_score` (desc), trim to `FINAL_MATCH_COUNT = 5`. Map back to `ContextObject`.
         *   **Status:** Planned.
-    *   **Step 4.5: Response Formulation:**
-        *   **Action:** Map results from the *re-ranked* list to the `ContextObject` format.
+    *   **Step 4.4: Response Formulation:**
+        *   **Action:** Map results from the *re-ranked* list (top `FINAL_MATCH_COUNT`) to the `ContextObject` format.
         *   **Status:** Minor modification needed to use the re-ranked list.
 
-**Phase 3 Status: Partially Complete (Core retrieval logic updated, Re-ranking step pending)**
+**Phase 3 Status: Partially Complete (Core retrieval logic updated from v1.0, Revised Fallback and Re-ranking pending implementation as per v1.2)**
 
 ---
 
@@ -128,8 +126,8 @@
 ## Phase 5: Component Responsibilities Summary
 
 *   **GPT:** Extracts entities (including new ones like priority, language), determines `mode`, calls the action, synthesizes final answers from `retrieved_context`.
-*   **Netlify Function:** Authenticates, validates payload, normalizes dates, orchestrates tiered query logic (Vector -> Metadata -> FTS), interacts with Supabase (RPC & direct queries), formats the response.
-*   **Supabase:** Stores data (`files`, `transcript_embeddings`), provides DB functions (`search_memory_chunks`), executes queries with appropriate indexing.
+*   **Netlify Function:** Authenticates, validates payload, normalizes dates, orchestrates query logic (Vector -> FTS with conditional date filter), performs application-layer re-ranking, interacts with Supabase (RPC & direct queries), formats the response.
+*   **Supabase:** Stores data (`files`, `transcript_embeddings`), provides DB functions (`search_memory_chunks`), executes vector and FTS queries with appropriate indexing (including `created_at` for conditional filtering).
 
 ---
 
@@ -192,4 +190,4 @@
 
 ## Overall Status
 
-Core retrieval logic updated to remove date filtering. Next step is implementing the Application Layer Re-ranking enhancement as specified in `learnings/05_relevance_boosting_plans.md`. 
+Core retrieval logic updated to remove date filtering (Phase 6). Next step is implementing the simplified fallback (FTS only with conditional date filtering) and Application Layer Re-ranking enhancement as specified in `learnings/03_relevance_boosting_plans.md` (v1.2). 

@@ -50,13 +50,12 @@
         *   Uses `chrono-node` library within `parseDateStringToEnhanced` function to parse various date/time formats relative to the current timestamp.
         *   Outputs `EnhancedNormalizedDate` objects containing components (year, month, day, hour, etc.) and potentially a normalized ISO string.
         *   These `EnhancedNormalizedDate` objects are stored in the `dates` array within metadata JSONB columns (`files.file_metadata` and `transcript_embeddings.metadata`).
-    *   **Query (`query`/`combined`):**
-        *   Implements a **Tiered Query Strategy**:
-            1.  **Primary - Vector Search:** Calls `search_memory_chunks` RPC, passing query embedding. Optional metadata filters (topics, people, locations, type, sentiment) *can* be passed, but the current plan is to retrieve broadly first. *Date components are NOT used for filtering.*
-            2.  **Fallback 1 - Metadata Search:** If Vector Search fails, queries `files` table. Filters `file_metadata` using JSONB operators (`@>`, `->>`) based on query entities (people, locations, topics, priority). *Date components are NOT used for filtering.*
-            3.  **Fallback 2 - Full-Text Search (FTS):** If Metadata Search fails, queries `files` table using `textSearch` against the `transcript_tsv` column. The search uses *all* relevant string entities extracted from the query. Results are ranked by relevance (`ts_rank_cd`). *Date components are NOT used for filtering.*
-        *   The source of the result (`vector_store`, `postgres_fallback_metadata`, `postgres_fallback_text`, `none`) is tracked in the response (`query_source`).
-        *   **Relevance Boosting:** After initial retrieval, relevance is enhanced in the application layer using metadata comparison (See Phase 5).
+    *   **Query (`query`/`combined`) - Revised Strategy v1.2:**
+        *   Implements a **Simplified Query Strategy with Re-ranking**:
+            1.  **Primary - Vector Search:** Calls `search_memory_chunks` RPC, passing query embedding. Retrieves top `VECTOR_MATCH_COUNT` (e.g., 15) candidates based on similarity. Optional metadata filters (topics, people, etc.) can be passed but likely omitted for broad initial retrieval. *Date components are NOT used for filtering here.*
+            2.  **Fallback - Full-Text Search (FTS):** If Vector Search fails, queries `files` table using `textSearch` against `transcript_tsv` column, using entities from the query. *Crucially, includes conditional `created_at` filtering:* If the Netlify function derives a specific past date range from the query, a `WHERE created_at BETWEEN ...` clause is added. Retrieves top `FALLBACK_MATCH_COUNT` (e.g., 20) candidates ranked by FTS relevance (`ts_rank_cd`).
+            3.  **Application-Layer Re-ranking:** After initial retrieval (Vector or FTS), the Netlify function performs re-ranking. It calculates a `final_score` for each candidate based on its `initial_score` (similarity or fixed score for FTS) plus a `metadata_boost_score` (sum of +0.05 for each overlapping metadata entity: people, locations, topics, type, sentiment, dates). The top `FINAL_MATCH_COUNT` (e.g., 5) results based on `final_score` are selected.
+        *   The source of the result (`vector_store`, `postgres_fallback_text`, `none`) is tracked in the response (`query_source`).
 4.  **Error Handling & Logging:** Implemented try/catch blocks, basic Netlify function logging, and consistent error responses.
 5.  **Deployment & Initial Testing:** Function deployed and tested via endpoint.
 
@@ -106,10 +105,16 @@
     *   **Rationale:** Retains detailed date information *for potential post-retrieval processing* (like relevance boosting) rather than strict filtering.
     *   **Status:** Completed.
 
-2.  **Implement Relevance Boosting (Application Layer) (Next Step):**
-    *   **Goal:** Improve relevance ranking of query results using stored metadata *after* initial broad retrieval.
-    *   **Approach:** Implement re-ranking logic within the Netlify function (`memory-action.ts`) based on Plan 1 in `learnings/05_relevance_boosting_plans.md`. This involves retrieving a larger candidate set, calculating a metadata boost score based on entity/type/sentiment overlap, combining scores, and returning the top K results.
-    *   **Rationale:** Provides a flexible way to leverage metadata context without overly restricting initial results.
+2.  **Implement Relevance Boosting (Application Layer) (Next Step - Plan v1.2):**
+    *   **Goal:** Improve relevance ranking of query results using stored metadata *after* initial broad retrieval, using the simplified fallback.
+    *   **Approach:** Implement re-ranking logic within the Netlify function (`memory-action.ts`) based on **Plan v1.2 in `learnings/03_relevance_boosting_plans.md`**. This involves:
+        *   Removing the metadata fallback tier.
+        *   Implementing conditional `created_at` filtering in the FTS fallback.
+        *   Retrieving a larger candidate set (e.g., 15/20).
+        *   Implementing the `rerankResults` function with purely additive scoring (`final_score = initial_score + metadata_boost_score`).
+        *   Calculating `metadata_boost_score` based on entity overlap (+0.05 per type).
+        *   Returning the top K (e.g., 5) results.
+    *   **Rationale:** Simplifies fallback logic while providing flexible metadata-driven ranking and correct time-based filtering.
     *   **Status:** Planned.
 
 3.  **Future Considerations (Backlog):**
