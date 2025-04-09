@@ -83,28 +83,28 @@
     *   **Details:**
         *   Retrieve `priority`, `language`, `conversation_id`, `thread_id` from `payload.extracted_entities`.
         *   Store `priority` and `language` within the `file_metadata` JSONB object.
-        *   Store `conversation_id` and `thread_id` in the corresponding columns of the `files` table.
-        *   Process `dates` using `normalizeDateString` and store the array of `NormalizedDate` objects in `file_metadata`.
+        *   Store `conversation_id` and `thread_id` in the corresponding top-level columns of the `files` table for efficient filtering.
+        *   Process `dates` using `parseDateStringToEnhanced` and store the array of `EnhancedNormalizedDate` objects in `file_metadata`.
         *   Include the `chunk_index` when creating records for `transcript_embeddings`.
-        *   Copy the full `fileMetadata` (including normalized dates, priority, language etc.) into each chunk's `metadata` field in `transcript_embeddings`.
+        *   Copy the full `fileMetadata` (including normalized dates, priority, language etc.) into each chunk's `metadata` field in `transcript_embeddings`. **Note:** This includes `conversation_id` and `thread_id` within the JSONB, duplicating the top-level columns but allowing easy propagation of this context to individual chunks if needed later.
     *   **Status (Apr 8):** Completed.
 
 4.  **Implement Tiered Query Logic (`query`/`combined` modes):**
     *   **Orchestration:** Manage the sequence: Vector Search -> Metadata Fallback -> FTS Fallback.
     *   **Step 4.1: Vector Search (Primary Attempt):**
         *   **Action:** Execute `search_memory_chunks` RPC call.
-        *   **Enhancements:** Pass extracted filter values (`topics`, `people`, `locations`, `type`, `sentiment`) and normalized date range (`filter_date_start`, `filter_date_end`) derived from the query's `processedMetadata` as arguments to the RPC call.
+        *   **Enhancements:** Pass extracted filter values (`topics`, `people`, `locations`, `type`, `sentiment`) and *date components (`filter_date_components`)* derived from the query's `processedMetadata` as arguments to the RPC call.
         *   **Result:** If results > 0, proceed to Response Formulation (Step 4.4).
-        *   **Status (Apr 8):** Completed.
+        *   **Status:** Completed.
     *   **Step 4.2: Fallback 1 - Metadata Search:**
         *   **Trigger:** Vector search returns 0 results or errors.
         *   **Action:** Construct and execute a `SELECT` query on the `files` table.
         *   **Filtering:**
             *   Apply filters based on `processedMetadata` against `file_metadata` using JSONB operators (`@>`, `->>`, etc.) for entities like people, locations, topics, priority.
-            *   If normalized `queryDates` exist, apply a date range filter on the `files.created_at` column.
+            *   *Date Filtering:* Apply JSONB containment (`cs`) filter on `file_metadata->dates` based on parsed query date components.
         *   **Ordering/Limit:** Apply `.order('created_at', { ascending: false })` and `.limit(FALLBACK_MATCH_COUNT)`.
         *   **Result:** If results > 0, store in `retrieved_context`, set `query_source = 'postgres_fallback_metadata'`, proceed to Response Formulation (Step 4.4).
-        *   **Status (Apr 8):** Completed.
+        *   **Status:** Completed.
     *   **Step 4.3: Fallback 2 - Full-Text Search (FTS):**
         *   **Trigger:** Metadata Search (Fallback 1) returns 0 results.
         *   **Action:** Construct and execute an FTS query on the `files` table.
@@ -114,15 +114,15 @@
             *   Perform search using `.textSearch('transcript_tsv', ftsQueryString, { config: 'english', type: 'websearch' })`.
             *   Include `ts_rank_cd(...)` in `SELECT` for relevance.
             *   Order results by `rank DESC`.
-            *   If normalized `queryDates` exist, apply a date range filter on the `files.created_at` column.
+            *   *Date Filtering:* Apply JSONB containment (`cs`) filter on `file_metadata->dates` based on parsed query date components.
             *   Limit results using `FALLBACK_MATCH_COUNT`.
         *   **Result:** Store results (if any) in `retrieved_context`. Set `query_source` appropriately (`postgres_fallback_text` or `none`). Proceed to Response Formulation (Step 4.4).
-        *   **Status (Apr 8):** Completed. (Includes using all string entities).
+        *   **Status:** Completed.
     *   **Step 4.4: Response Formulation:**
         *   **Action:** Map results from whichever step succeeded (Vector, Metadata, FTS) to the `ContextObject` format.
-        *   **Details:** Populate `chunk` (full `transcript_text` for fallbacks), `timestamp` (`created_at`), `file_id`, `chunk_index` (if available from vector search), and reconstruct `entities_in_chunk` from the retrieved `file_metadata`.
+        *   **Details:** Populate `chunk` (full `transcript_text` for fallbacks), `timestamp` (`created_at`), `file_id`, `chunk_index` (if available from vector search), and reconstruct `entities_in_chunk` (using `EnhancedNormalizedDate` for dates) from the retrieved `metadata` or `file_metadata`.
         *   Construct the final `SuccessResponse`.
-        *   **Status (Apr 8):** Completed.
+        *   **Status:** Completed.
 
 **Phase 3 Status: Completed (Apr 8, 2025)**
 
@@ -148,58 +148,48 @@
 
 ---
 
-## Phase 6: Enhanced Date Handling Implementation (Next Steps)
+## Phase 6: Enhanced Date Handling Implementation (Implementation Completed)
 
 **Objective:** Refactor the date handling mechanism to parse, store, and query date information using structured components for greater flexibility and accuracy, replacing the sole reliance on normalized ISO strings.
 
+**Detailed Plan:** See `learnings/04_date_refactor_plan.md` for specific implementation steps, code snippets, and conflict analysis.
+
+**Key Decisions:**
+*   No backward compatibility required for old data formats.
+*   Timezone handling aims to preserve local context via `chrono-node` and `formatISO`.
+
+**Status:** Implementation Completed. Testing Pending (Step 8 in Plan).
+
 1.  **Add Dependencies:**
-    *   **Action:** Install `chrono-node` library in the Netlify function project (`netlify/functions`).
-    *   **Command:** `npm install chrono-node` or `yarn add chrono-node`.
-    *   **Rationale:** Provides robust natural language date parsing capabilities.
+    *   **Action:** Install `chrono-node` library.
+    *   **Status:** Completed.
 
 2.  **Database Indexing:**
-    *   **Action:** Create the missing GIN index on the `transcript_embeddings.metadata` column.
-    *   **SQL:**
-        ```sql
-        CREATE INDEX IF NOT EXISTS idx_transcript_embeddings_metadata_gin ON public.transcript_embeddings USING gin (metadata jsonb_path_ops);
-        ```
-    *   **Rationale:** Enables efficient querying of date components stored within the chunk metadata JSONB during vector search filtering. The corresponding index on `files.file_metadata` already exists.
+    *   **Action:** Create the missing GIN index on `transcript_embeddings.metadata`.
+    *   **Status:** Completed (`idx_transcript_embeddings_metadata_gin`).
 
 3.  **Update Code Interfaces & Schema:**
-    *   **Action:** Define the `EnhancedNormalizedDate` structure and update relevant interfaces/schemas.
-    *   **Details:**
-        *   Define `EnhancedNormalizedDate` in `memory-action.ts` (including `original`, `normalized?`, `note?`, `year?`, `month?`, `day?`, `day_of_week?`, `time_hour?`, `time_minute?`, `period?`, `relative_marker?`, `relative_unit?`).
-        *   Update `OutputExtractedEntities`, `ContextObject`, `SearchResultItem`, `FallbackResultItem` in `memory-action.ts` to use `EnhancedNormalizedDate[]`.
-        *   Update `openapi.json`: Define `EnhancedNormalizedDate` schema and update references in `OutputExtractedEntities` and `ContextObject`.
-    *   **Rationale:** Align code and API contract with the new data structure.
-    *   **Status: Completed**
+    *   **Action:** Define `EnhancedNormalizedDate` and update relevant interfaces (`memory-action.ts`) / schemas (`openapi.json`).
+    *   **Status:** Completed.
 
 4.  **Refactor Date Parsing Logic (`memory-action.ts`):**
-    *   **Action:** Replace or modify the existing `normalizeDateString` function.
-    *   **Details:** Use `chrono.parse()` to process input date strings. Map `chrono` results to the `EnhancedNormalizedDate` structure, using `new Date()` as the reference time.
-    *   **Rationale:** Leverage `chrono-node` for complex parsing, extracting components even for partial or relative dates.
+    *   **Action:** Replace `normalizeDateString` with `chrono-node` logic in `parseDateStringToEnhanced`.
+    *   **Status:** Completed.
 
 5.  **Update Storage Logic (`memory-action.ts`):**
-    *   **Action:** Ensure the array of `EnhancedNormalizedDate` objects is correctly saved to the `file_metadata` (in `files`) and `metadata` (in `transcript_embeddings`) columns during `store`/`combined` operations.
-    *   **Rationale:** Persist the structured date information.
+    *   **Action:** Ensure `EnhancedNormalizedDate[]` is saved to `file_metadata` and `metadata` JSONB columns.
+    *   **Status:** Completed.
 
 6.  **Modify Database Function (`search_memory_chunks` - SQL):**
-    *   **Action:** Update the function signature and filtering logic.
-    *   **Details:**
-        *   Remove `filter_date_start`, `filter_date_end` parameters.
-        *   Add `filter_date_components JSONB DEFAULT NULL` parameter.
-        *   Replace the date `WHERE` clause with logic using `jsonb_array_elements` and JSONB operators (`->>`, `=`) to check if any element in `te.metadata -> 'dates'` matches the components in `filter_date_components`.
-    *   **Rationale:** Enable filtering based on date components during vector search.
+    *   **Action:** Update function signature and logic for component filtering (`filter_date_components` JSONB parameter).
+    *   **Status:** Completed (Local `sql/schema.sql` updated, SQL executed successfully on Supabase instance).
 
 7.  **Update Query Logic (`memory-action.ts`):**
-    *   **Action:** Adapt function calls and fallback queries.
-    *   **Details:**
-        *   Construct the `filter_date_components` argument when calling the modified `search_memory_chunks`.
-        *   Update fallback queries (Metadata & FTS) to filter using JSONB operators against `files.file_metadata -> 'dates'` based on query components.
-    *   **Rationale:** Utilize the new component filtering capabilities in both primary and fallback search paths.
+    *   **Action:** Adapt RPC calls and fallback queries (`.filter(..., 'cs', ...)` ) for component filtering.
+    *   **Status:** Completed.
 
 8.  **Testing:**
-    *   **Action:** Thoroughly test the end-to-end flow with various date formats (absolute, relative, partial, vague, time-specific) for both storage and querying. Verify vector search filtering and fallback logic work correctly with date components.
-    *   **Rationale:** Ensure the new system behaves as expected and handles edge cases.
+    *   **Action:** Thoroughly test end-to-end flow with various date formats for storage and component-based querying.
+    *   **Status:** Pending.
 
-**Phase 6 Status: Planned** 
+**Phase 6 Status: Completed (Apr 8, 2025)** 

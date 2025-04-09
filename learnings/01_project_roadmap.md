@@ -10,6 +10,8 @@
 *   **Backend:** Supabase (PostgreSQL Database + pgvector Extension)
 *   **APIs:** OpenAI API (for Action calls), Supabase API
 
+**Note on Updates:** *When requesting updates to learning documents, the expectation is a thorough alignment of all relevant details (descriptions, logic summaries, statuses, etc.) across all related files (`01_project_roadmap.md`, `03_consolidated_enhancement_plan.md`, `04_date_refactor_plan.md`, etc.) to reflect the current state accurately, not just marking items as complete.*
+
 ---
 
 ### Phase 1: Foundation & Setup (Completed)
@@ -41,18 +43,18 @@
 3.  **Core Function Logic:**
     *   **Storage (`store`/`combined`):**
         *   Generates `text-embedding-3-small` embeddings for text chunks (`CHUNK_SIZE=1000`, `CHUNK_OVERLAP=200`).
-        *   Stores file info and `file_metadata` in the `files` table. Metadata includes extracted entities like `priority`, `language`, and `dates` (as `NormalizedDate` objects). `conversation_id` and `thread_id` are stored in top-level columns.
-        *   Stores chunks, embeddings, `chunk_index`, and chunk-level `metadata` (mirroring file metadata) in `transcript_embeddings`.
-    *   **Date Handling (Current Implementation):**
-        *   Uses `date-fns` within the `normalizeDateString` function to parse various date/time formats from input strings.
-        *   Always uses the current timestamp (`new Date()`) as the reference for resolving relative dates.
-        *   Outputs `NormalizedDate` objects (`{ original: string, normalized: string | null, note?: string }`). The `normalized` field contains an ISO 8601 string if successful. These objects are stored in the `dates` array within metadata JSONB columns.
-        *   Rejects overly vague date terms (e.g., "sometime", "end of").
+        *   Stores file info and `file_metadata` in the `files` table. Metadata includes extracted entities like `priority`, `language`, and `dates` (as `EnhancedNormalizedDate` objects after refactor).
+        *   `conversation_id` and `thread_id` are stored in top-level columns on the `files` table for efficient filtering.
+        *   Stores chunks, embeddings, `chunk_index`, and chunk-level `metadata` (mirroring `file_metadata`) in `transcript_embeddings`. **Note:** Chunk metadata redundantly includes `conversation_id`/`thread_id` from `file_metadata` for potential future chunk-specific context needs.
+    *   **Date Handling (Current Implementation - Post Refactor):**
+        *   Uses `chrono-node` library within `parseDateStringToEnhanced` function to parse various date/time formats relative to the current timestamp.
+        *   Outputs `EnhancedNormalizedDate` objects containing components (year, month, day, hour, etc.) and potentially a normalized ISO string.
+        *   These `EnhancedNormalizedDate` objects are stored in the `dates` array within metadata JSONB columns (`files.file_metadata` and `transcript_embeddings.metadata`).
     *   **Query (`query`/`combined`):**
         *   Implements a **Tiered Query Strategy**:
-            1.  **Primary - Vector Search:** Calls `search_memory_chunks` RPC, passing query embedding and extracted metadata filters (topics, people, locations, type, sentiment, normalized date range).
-            2.  **Fallback 1 - Metadata Search:** If Vector Search fails, queries `files` table. Filters `file_metadata` using JSONB operators (`@>`, `->>`) based on query entities (people, locations, topics, priority). Also filters by `files.created_at` timestamp range if query dates are available.
-            3.  **Fallback 2 - Full-Text Search (FTS):** If Metadata Search fails, queries `files` table using `textSearch` against the `transcript_tsv` column. The search uses *all* relevant string entities extracted from the query (people, topics, locations, type, sentiment, language, original date strings) joined by ` | ` (OR). Results are ranked by relevance (`ts_rank_cd`). Also filters by `files.created_at` timestamp range if query dates are available.
+            1.  **Primary - Vector Search:** Calls `search_memory_chunks` RPC, passing query embedding and extracted metadata filters (topics, people, locations, type, sentiment, and *date components via `filter_date_components` JSONB*).
+            2.  **Fallback 1 - Metadata Search:** If Vector Search fails, queries `files` table. Filters `file_metadata` using JSONB operators (`@>`, `->>`) based on query entities (people, locations, topics, priority). *Date filtering uses JSONB containment (`cs`) check on `file_metadata->dates` based on parsed query date components.*
+            3.  **Fallback 2 - Full-Text Search (FTS):** If Metadata Search fails, queries `files` table using `textSearch` against the `transcript_tsv` column. The search uses *all* relevant string entities extracted from the query (people, topics, locations, type, sentiment, language, original date strings) joined by ` | ` (OR). Results are ranked by relevance (`ts_rank_cd`). *Date filtering uses JSONB containment (`cs`) check on `file_metadata->dates` based on parsed query date components.*
         *   The source of the result (`vector_store`, `postgres_fallback_metadata`, `postgres_fallback_text`, `none`) is tracked in the response (`query_source`).
 4.  **Error Handling & Logging:** Implemented try/catch blocks, basic Netlify function logging, and consistent error responses.
 5.  **Deployment & Initial Testing:** Function deployed and tested via endpoint.
@@ -85,7 +87,7 @@
 2.  **Refinement & Bug Fixing:**
     *   Adjusted `VECTOR_MATCH_THRESHOLD` for better query recall.
     *   Implemented and refined the tiered fallback search logic.
-    *   Implemented and refined date normalization logic (`normalizeDateString`).
+    *   Implemented and refined date normalization logic (*originally `normalizeDateString`, now `parseDateStringToEnhanced` with `chrono-node`*).
     *   Refactored to remove `user_id` dependency.
     *   Added and tested metadata enhancements (priority, language, etc.) and filtering.
     *   Ensured `chunk_index` propagation.
@@ -97,16 +99,17 @@
 
 **Objective:** Improve quality, performance, and features beyond the current core functionality.
 
-1.  **Refactor Date Handling (Current Focus):**
+1.  **Refactor Date Handling (Implementation Completed, Testing Pending):** 
     *   **Goal:** Modify date handling to parse, store, and query using structured date/time components (year, month, day, hour, weekday, relative markers, etc.) instead of solely relying on a single normalized ISO 8601 string.
-    *   **Approach:**
-        *   Integrate `chrono-node` library into the Netlify function for parsing natural language date strings. (Completed)
-        *   Define an `EnhancedNormalizedDate` interface/schema containing `original`, `normalized` (ISO string if fully resolved, else null), and various component fields (`year`, `month`, `day`, `day_of_week`, `time_hour`, etc.). (Completed)
-        *   Update storage logic to save arrays of `EnhancedNormalizedDate` objects into metadata JSONB columns (`files.file_metadata`, `transcript_embeddings.metadata`). (Pending)
-        *   Add a GIN index to `transcript_embeddings.metadata` for efficient component querying. (Completed)
-        *   Modify the `search_memory_chunks` SQL function to accept a JSONB parameter (`filter_date_components`) and filter based on these components within the `metadata -> \'dates\'` array. (Pending)
-        *   Update Netlify function query logic (vector search call arguments, fallback query filters) to construct and utilize component-based filters. (Pending)
-    *   **Rationale:** Enables more flexible querying based on specific date components (e.g., "find notes from Tuesdays", "search activity in July") and retains partial information when full normalization fails.
+    *   **Approach (Implementation):**
+        *   Integrated `chrono-node` library into the Netlify function for parsing. (Completed)
+        *   Defined `EnhancedNormalizedDate` interface/schema containing components. (Completed)
+        *   Updated storage logic to save arrays of `EnhancedNormalizedDate` objects into metadata JSONB columns. (Completed)
+        *   Added a GIN index to `transcript_embeddings.metadata`. (Completed)
+        *   Modified the `search_memory_chunks` SQL function to accept a JSONB parameter (`filter_date_components`) and filter based on components. (Completed - SQL deployed to Supabase)
+        *   Updated Netlify function query logic (vector search call arguments, fallback query filters) to construct and utilize component-based filters. (Completed)
+    *   **Rationale:** Enables more flexible querying and retains partial information. Detailed plan in `learnings/04_date_refactor_plan.md`.
+    *   **Status:** Implementation complete (including DB function deployment). Testing is pending (Step 8 in `learnings/04_date_refactor_plan.md`).
 
 2.  **Future Considerations (Backlog):**
     *   Advanced Retrieval (Hybrid search, time decay).

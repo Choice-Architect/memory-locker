@@ -90,29 +90,6 @@
   },
   "components": {
     "schemas": {
-      "NormalizedDate": {
-        "type": "object",
-        "properties": {
-          "original": {
-            "type": "string",
-            "description": "The original date string provided by the user or extracted."
-          },
-          "normalized": {
-            "type": "string",
-            "format": "date-time",
-            "description": "The date string normalized to ISO 8601 format.",
-            "nullable": true
-          },
-          "note": {
-            "type": "string",
-            "description": "An optional note indicating why normalization might have failed (e.g., 'vague', 'parse_error').",
-            "nullable": true
-          }
-        },
-        "required": [
-          "original"
-        ]
-      },
       "ExtractedEntities": {
         "type": "object",
         "properties": {
@@ -126,7 +103,8 @@
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Date-related strings extracted from the user query."
           },
           "locations": {
             "type": "array",
@@ -142,11 +120,13 @@
           },
           "type": {
             "type": "string",
-            "description": "Inferred type of interaction (e.g., story, dictated_email, note, reminder, task)"
+            "description": "Inferred type of interaction (e.g., story, dictated_email, note, reminder, task)",
+            "nullable": true
           },
           "sentiment": {
             "type": "string",
-            "description": "Inferred sentiment if applicable (e.g., funny, important, angry)"
+            "description": "Inferred sentiment if applicable (e.g., funny, important, angry)",
+            "nullable": true
           },
           "priority": {
             "type": "integer",
@@ -179,36 +159,6 @@
           }
         },
         "description": "Flexible container for entities extracted from text, including inferred type/sentiment. Used in RequestPayload."
-      },
-      "OutputExtractedEntities": {
-        "type": "object",
-        "properties": {
-          "people": {
-            "type": "array",
-            "items": { "type": "string" }
-          },
-          "dates": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NormalizedDate"
-            }
-          },
-          "locations": {
-            "type": "array",
-            "items": { "type": "string" }
-          },
-          "topics": {
-            "type": "array",
-            "items": { "type": "string" }
-          },
-          "type": { "type": "string" },
-          "sentiment": { "type": "string" },
-          "priority": { "type": "integer", "nullable": true },
-          "conversation_id": { "type": "string", "nullable": true },
-          "thread_id": { "type": "string", "nullable": true },
-          "language": { "type": "string", "enum": ["en", "fr", "ar"], "nullable": true }
-        },
-        "description": "Structure of entities as returned within a ContextObject, using NormalizedDate objects."
       },
       "EnhancedNormalizedDate": {
         "type": "object",
@@ -289,7 +239,7 @@
       },
       "OutputProcessedEntities": {
         "type": "object",
-        "description": "Structure of entities as returned within a ContextObject, using EnhancedNormalizedDate objects.",
+        "description": "Structure of entities after internal processing, as stored in metadata and returned within a ContextObject.",
         "properties": {
           "people": {
             "type": "array",
@@ -316,12 +266,7 @@
           "thread_id": { "type": "string", "nullable": true },
           "language": { "type": "string", "enum": ["en", "fr", "ar"], "nullable": true }
         },
-        "additionalProperties": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
+        "additionalProperties": true
       },
       "RequestPayload": {
         "type": "object",

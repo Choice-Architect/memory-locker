@@ -198,17 +198,20 @@ CREATE INDEX IF NOT EXISTS idx_transcript_embeddings_metadata_gin ON public.tran
 -- =================================
 
 -- Function for vector similarity search on memory chunks with metadata filtering
+-- Drop the existing function first
+DROP FUNCTION IF EXISTS public.search_memory_chunks(vector(1536),double precision,integer,TEXT[],TEXT[],TEXT[],TEXT,TEXT,TEXT,TEXT);
+
+-- Recreate with new signature and logic
 CREATE OR REPLACE FUNCTION public.search_memory_chunks(
     query_embedding vector(1536),
     match_threshold double precision,
     match_count integer,
-    filter_topics TEXT[] DEFAULT NULL,      -- Optional: Filter by topics (array contains ALL)
-    filter_people TEXT[] DEFAULT NULL,      -- Optional: Filter by people (array contains ALL)
-    filter_locations TEXT[] DEFAULT NULL,   -- Optional: Filter by locations (array contains ALL)
-    filter_type TEXT DEFAULT NULL,          -- Optional: Filter by specific type
-    filter_sentiment TEXT DEFAULT NULL,     -- Optional: Filter by specific sentiment
-    filter_date_start TEXT DEFAULT NULL,    -- Optional: Start date (ISO 8601 string or YYYY-MM-DD)
-    filter_date_end TEXT DEFAULT NULL       -- Optional: End date (ISO 8601 string or YYYY-MM-DD)
+    filter_topics TEXT[] DEFAULT NULL,
+    filter_people TEXT[] DEFAULT NULL,
+    filter_locations TEXT[] DEFAULT NULL,
+    filter_type TEXT DEFAULT NULL,
+    filter_sentiment TEXT DEFAULT NULL,
+    filter_date_components JSONB DEFAULT NULL -- NEW: JSON object with keys like 'year', 'month', 'day_of_week' etc.
 )
  RETURNS TABLE(
      id uuid,
@@ -222,23 +225,7 @@ CREATE OR REPLACE FUNCTION public.search_memory_chunks(
  -- Explicitly set the search path for security
  SET search_path = 'public', 'extensions'
 AS $function$
-DECLARE
-    start_date TIMESTAMPTZ;
-    end_date TIMESTAMPTZ;
 BEGIN
-    -- Attempt to cast date strings to TIMESTAMPTZ, handle potential errors
-    BEGIN
-        start_date := filter_date_start::TIMESTAMPTZ;
-    EXCEPTION WHEN others THEN
-        start_date := NULL;
-    END;
-    BEGIN
-        -- Add 1 day to end_date to make the range inclusive of the end day
-        end_date := (filter_date_end::DATE + interval '1 day')::TIMESTAMPTZ;
-    EXCEPTION WHEN others THEN
-        end_date := NULL;
-    END;
-
   RETURN QUERY
   SELECT
     te.id,
@@ -249,23 +236,30 @@ BEGIN
     te.chunk_index
   FROM transcript_embeddings te
   WHERE
-    -- Vector similarity check (always applied)
+    -- Vector similarity check
     1 - (te.embedding <=> query_embedding) > match_threshold
 
-    -- Optional Metadata Filters (applied only if filter parameter is NOT NULL)
+    -- Standard Metadata Filters (Unchanged)
     AND (filter_topics IS NULL OR (te.metadata -> 'topics')::jsonb @> to_jsonb(filter_topics))
     AND (filter_people IS NULL OR (te.metadata -> 'people')::jsonb @> to_jsonb(filter_people))
     AND (filter_locations IS NULL OR (te.metadata -> 'locations')::jsonb @> to_jsonb(filter_locations))
     AND (filter_type IS NULL OR te.metadata ->> 'type' = filter_type)
     AND (filter_sentiment IS NULL OR te.metadata ->> 'sentiment' = filter_sentiment)
 
-    -- Optional Date Range Filter
-    -- Checks if ANY normalized date within the metadata's 'dates' array falls within the specified range
+    -- NEW Date Component Filter Logic
     AND (
-        (start_date IS NULL AND end_date IS NULL) OR -- Pass if no date filter applied
-        (start_date IS NOT NULL AND end_date IS NULL AND EXISTS (SELECT 1 FROM jsonb_array_elements(te.metadata -> 'dates') AS d WHERE (d ->> 'normalized')::TIMESTAMPTZ >= start_date)) OR -- Only start date
-        (start_date IS NULL AND end_date IS NOT NULL AND EXISTS (SELECT 1 FROM jsonb_array_elements(te.metadata -> 'dates') AS d WHERE (d ->> 'normalized')::TIMESTAMPTZ < end_date)) OR -- Only end date
-        (start_date IS NOT NULL AND end_date IS NOT NULL AND EXISTS (SELECT 1 FROM jsonb_array_elements(te.metadata -> 'dates') AS d WHERE (d ->> 'normalized')::TIMESTAMPTZ >= start_date AND (d ->> 'normalized')::TIMESTAMPTZ < end_date)) -- Both dates
+        filter_date_components IS NULL OR -- Pass if no date filter object provided
+        EXISTS ( -- Check if AT LEAST ONE date object in the 'dates' array matches ALL provided components
+            SELECT 1
+            FROM jsonb_array_elements(te.metadata -> 'dates') AS d
+            WHERE
+                (filter_date_components ->> 'year' IS NULL OR (d ->> 'year')::int = (filter_date_components ->> 'year')::int)
+            AND (filter_date_components ->> 'month' IS NULL OR (d ->> 'month')::int = (filter_date_components ->> 'month')::int)
+            AND (filter_date_components ->> 'day' IS NULL OR (d ->> 'day')::int = (filter_date_components ->> 'day')::int)
+            AND (filter_date_components ->> 'day_of_week' IS NULL OR (d ->> 'day_of_week')::int = (filter_date_components ->> 'day_of_week')::int)
+            AND (filter_date_components ->> 'time_hour' IS NULL OR (d ->> 'time_hour')::int = (filter_date_components ->> 'time_hour')::int)
+            -- Add other component checks as needed (e.g., 'period', 'relative_marker')
+        )
     )
 
   ORDER BY similarity DESC
