@@ -542,30 +542,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             const queryEmbedding = queryEmbeddings[0];
 
             // b. Vector Search Call Update
-            console.log("Attempt 1: Searching via vector search with component filtering...");
-
-            // Construct the filter_date_components object from the first parsed query date
-            const firstQueryDate: EnhancedNormalizedDate | undefined = queryMetadata.dates?.[0];
-            const dateComponentsFilter: { [key: string]: number | string } | null = firstQueryDate ?
-                Object.entries({
-                    year: firstQueryDate.year,
-                    month: firstQueryDate.month,
-                    day: firstQueryDate.day,
-                    day_of_week: firstQueryDate.day_of_week,
-                    time_hour: firstQueryDate.time_hour,
-                    // Add period, relative markers etc. if the SQL function supports them
-                }).reduce((acc, [key, value]) => {
-                    // Only include keys where value is defined (not null or undefined)
-                    if (value !== undefined && value !== null) {
-                        acc[key] = value;
-                    }
-                    return acc;
-                }, {} as { [key: string]: number | string })
-                : null;
-
-            // Ensure the filter is not an empty object, convert to null if it is.
-            const finalDateComponentsFilter = (dateComponentsFilter && Object.keys(dateComponentsFilter).length > 0) ? dateComponentsFilter : null;
-            console.log("Constructed date component filter for RPC:", JSON.stringify(finalDateComponentsFilter));
+            console.log("Attempt 1: Searching via vector search...");
 
             // UPDATE RPC Call parameters:
             const { data: searchResults, error: searchError } = await supabase.rpc(
@@ -579,8 +556,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                     filter_locations: queryMetadata.locations || null,
                     filter_type: queryMetadata.type || null,
                     filter_sentiment: queryMetadata.sentiment || null,
-                    // ADD new date param:
-                    filter_date_components: finalDateComponentsFilter
                 }
             );
             const typedSearchResults = searchResults as SearchResultItem[] | null;
@@ -635,17 +610,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                 if (queryMetadata.locations && queryMetadata.locations.length > 0) { fallbackQueryMeta = fallbackQueryMeta.contains('file_metadata->locations', queryMetadata.locations); metaFiltersApplied = true; }
                 if (queryMetadata.topics && queryMetadata.topics.length > 0) { fallbackQueryMeta = fallbackQueryMeta.contains('file_metadata->topics', queryMetadata.topics); metaFiltersApplied = true; }
                 if (queryMetadata.priority) { fallbackQueryMeta = fallbackQueryMeta.eq('file_metadata->>priority', queryMetadata.priority); metaFiltersApplied = true; }
-
-                // ADD Date Component Filter (NEW)
-                if (finalDateComponentsFilter) {
-                    console.log(`Fallback Meta: Applying date component filter: ${JSON.stringify(finalDateComponentsFilter)}`);
-                    fallbackQueryMeta = fallbackQueryMeta.filter(
-                        'file_metadata->dates',
-                        'cs',
-                        JSON.stringify([finalDateComponentsFilter])
-                    );
-                    metaFiltersApplied = true;
-                }
 
                 // Execute Metadata Fallback only if filters were applicable
                 if (metaFiltersApplied) {
@@ -729,16 +693,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             })
                             .order('rank', { ascending: false })
                             .limit(FALLBACK_MATCH_COUNT);
-
-                        // ADD Date Component Filter (NEW)
-                        if (finalDateComponentsFilter) {
-                            console.log(`Fallback FTS: Applying date component filter: ${JSON.stringify(finalDateComponentsFilter)}`);
-                            ftsQueryBuilder = ftsQueryBuilder.filter(
-                                'file_metadata->dates',
-                                'cs',
-                                JSON.stringify([finalDateComponentsFilter])
-                            );
-                        }
 
                         // 4. Execute the FTS query
                         console.log("Executing Fallback FTS Query...");

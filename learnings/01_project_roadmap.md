@@ -52,9 +52,9 @@
         *   These `EnhancedNormalizedDate` objects are stored in the `dates` array within metadata JSONB columns (`files.file_metadata` and `transcript_embeddings.metadata`).
     *   **Query (`query`/`combined`):**
         *   Implements a **Tiered Query Strategy**:
-            1.  **Primary - Vector Search:** Calls `search_memory_chunks` RPC, passing query embedding and extracted metadata filters (topics, people, locations, type, sentiment, and *date components via `filter_date_components` JSONB*).
-            2.  **Fallback 1 - Metadata Search:** If Vector Search fails, queries `files` table. Filters `file_metadata` using JSONB operators (`@>`, `->>`) based on query entities (people, locations, topics, priority). *Date filtering uses JSONB containment (`cs`) check on `file_metadata->dates` based on parsed query date components.*
-            3.  **Fallback 2 - Full-Text Search (FTS):** If Metadata Search fails, queries `files` table using `textSearch` against the `transcript_tsv` column. The search uses *all* relevant string entities extracted from the query (people, topics, locations, type, sentiment, language, original date strings) joined by ` | ` (OR). Results are ranked by relevance (`ts_rank_cd`). *Date filtering uses JSONB containment (`cs`) check on `file_metadata->dates` based on parsed query date components.*
+            1.  **Primary - Vector Search:** Calls `search_memory_chunks` RPC, passing query embedding and extracted metadata filters (topics, people, locations, type, sentiment). *Date components are NOT used for filtering.*
+            2.  **Fallback 1 - Metadata Search:** If Vector Search fails, queries `files` table. Filters `file_metadata` using JSONB operators (`@>`, `->>`) based on query entities (people, locations, topics, priority). *Date components are NOT used for filtering.*
+            3.  **Fallback 2 - Full-Text Search (FTS):** If Metadata Search fails, queries `files` table using `textSearch` against the `transcript_tsv` column. The search uses *all* relevant string entities extracted from the query (people, topics, locations, type, sentiment, language, original date strings) joined by ` | ` (OR). Results are ranked by relevance (`ts_rank_cd`). *Date components are NOT used for filtering.*
         *   The source of the result (`vector_store`, `postgres_fallback_metadata`, `postgres_fallback_text`, `none`) is tracked in the response (`query_source`).
 4.  **Error Handling & Logging:** Implemented try/catch blocks, basic Netlify function logging, and consistent error responses.
 5.  **Deployment & Initial Testing:** Function deployed and tested via endpoint.
@@ -106,9 +106,9 @@
         *   Defined `EnhancedNormalizedDate` interface/schema containing components. (Completed)
         *   Updated storage logic to save arrays of `EnhancedNormalizedDate` objects into metadata JSONB columns. (Completed)
         *   Added a GIN index to `transcript_embeddings.metadata`. (Completed)
-        *   Modified the `search_memory_chunks` SQL function to accept a JSONB parameter (`filter_date_components`) and filter based on components. (Completed - SQL deployed to Supabase)
-        *   Updated Netlify function query logic (vector search call arguments, fallback query filters) to construct and utilize component-based filters. (Completed)
-    *   **Rationale:** Enables more flexible querying and retains partial information. Detailed plan in `learnings/04_date_refactor_plan.md`.
+        *   Modified the `search_memory_chunks` SQL function to accept a JSONB parameter (`filter_date_components`) *BUT this parameter is no longer intended for active filtering in the WHERE clause*. (Completed - SQL deployed to Supabase)
+        *   Updated Netlify function query logic (vector search call arguments, fallback query filters) to *remove* component-based date filtering. (Pending Code Change)
+    *   **Rationale:** Enables more flexible querying and retains partial information *for potential post-retrieval processing*. Detailed plan in `learnings/04_date_refactor_plan.md` (Needs update to reflect removal of filter).
     *   **Status:** Implementation complete (including DB function deployment). Testing is pending (Step 8 in `learnings/04_date_refactor_plan.md`).
 
 2.  **Future Considerations (Backlog):**

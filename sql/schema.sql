@@ -200,8 +200,9 @@ CREATE INDEX IF NOT EXISTS idx_transcript_embeddings_metadata_gin ON public.tran
 -- Function for vector similarity search on memory chunks with metadata filtering
 -- Drop the existing function first
 DROP FUNCTION IF EXISTS public.search_memory_chunks(vector(1536),double precision,integer,TEXT[],TEXT[],TEXT[],TEXT,TEXT,TEXT,TEXT);
+DROP FUNCTION IF EXISTS public.search_memory_chunks(vector(1536),double precision,integer,TEXT[],TEXT[],TEXT[],TEXT,TEXT,JSONB);
 
--- Recreate with new signature and logic
+-- Recreate with updated signature and logic (removing date component filter)
 CREATE OR REPLACE FUNCTION public.search_memory_chunks(
     query_embedding vector(1536),
     match_threshold double precision,
@@ -210,8 +211,8 @@ CREATE OR REPLACE FUNCTION public.search_memory_chunks(
     filter_people TEXT[] DEFAULT NULL,
     filter_locations TEXT[] DEFAULT NULL,
     filter_type TEXT DEFAULT NULL,
-    filter_sentiment TEXT DEFAULT NULL,
-    filter_date_components JSONB DEFAULT NULL -- NEW: JSON object with keys like 'year', 'month', 'day_of_week' etc.
+    filter_sentiment TEXT DEFAULT NULL
+    -- filter_date_components JSONB DEFAULT NULL -- Parameter REMOVED
 )
  RETURNS TABLE(
      id uuid,
@@ -239,28 +240,28 @@ BEGIN
     -- Vector similarity check
     1 - (te.embedding <=> query_embedding) > match_threshold
 
-    -- Standard Metadata Filters (Unchanged)
+    -- Standard Metadata Filters
     AND (filter_topics IS NULL OR (te.metadata -> 'topics')::jsonb @> to_jsonb(filter_topics))
     AND (filter_people IS NULL OR (te.metadata -> 'people')::jsonb @> to_jsonb(filter_people))
     AND (filter_locations IS NULL OR (te.metadata -> 'locations')::jsonb @> to_jsonb(filter_locations))
     AND (filter_type IS NULL OR te.metadata ->> 'type' = filter_type)
     AND (filter_sentiment IS NULL OR te.metadata ->> 'sentiment' = filter_sentiment)
 
-    -- NEW Date Component Filter Logic
-    AND (
-        filter_date_components IS NULL OR -- Pass if no date filter object provided
-        EXISTS ( -- Check if AT LEAST ONE date object in the 'dates' array matches ALL provided components
-            SELECT 1
-            FROM jsonb_array_elements(te.metadata -> 'dates') AS d
-            WHERE
-                (filter_date_components ->> 'year' IS NULL OR (d ->> 'year')::int = (filter_date_components ->> 'year')::int)
-            AND (filter_date_components ->> 'month' IS NULL OR (d ->> 'month')::int = (filter_date_components ->> 'month')::int)
-            AND (filter_date_components ->> 'day' IS NULL OR (d ->> 'day')::int = (filter_date_components ->> 'day')::int)
-            AND (filter_date_components ->> 'day_of_week' IS NULL OR (d ->> 'day_of_week')::int = (filter_date_components ->> 'day_of_week')::int)
-            AND (filter_date_components ->> 'time_hour' IS NULL OR (d ->> 'time_hour')::int = (filter_date_components ->> 'time_hour')::int)
-            -- Add other component checks as needed (e.g., 'period', 'relative_marker')
-        )
-    )
+    -- REMOVED Date Component Filter Logic
+    -- AND (
+    --     filter_date_components IS NULL OR -- Pass if no date filter object provided
+    --     EXISTS ( -- Check if AT LEAST ONE date object in the 'dates' array matches ALL provided components
+    --         SELECT 1
+    --         FROM jsonb_array_elements(te.metadata -> 'dates') AS d
+    --         WHERE
+    --             (filter_date_components ->> 'year' IS NULL OR (d ->> 'year')::int = (filter_date_components ->> 'year')::int)
+    --         AND (filter_date_components ->> 'month' IS NULL OR (d ->> 'month')::int = (filter_date_components ->> 'month')::int)
+    --         AND (filter_date_components ->> 'day' IS NULL OR (d ->> 'day')::int = (filter_date_components ->> 'day')::int)
+    --         AND (filter_date_components ->> 'day_of_week' IS NULL OR (d ->> 'day_of_week')::int = (filter_date_components ->> 'day_of_week')::int)
+    --         AND (filter_date_components ->> 'time_hour' IS NULL OR (d ->> 'time_hour')::int = (filter_date_components ->> 'time_hour')::int)
+    --         -- Add other component checks as needed (e.g., 'period', 'relative_marker')
+    --     )
+    -- )
 
   ORDER BY similarity DESC
   LIMIT match_count;
