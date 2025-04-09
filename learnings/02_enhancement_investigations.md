@@ -89,42 +89,31 @@
         *   Copy the full `fileMetadata` (including normalized dates, priority, language etc.) into each chunk's `metadata` field in `transcript_embeddings`. **Note:** This includes `conversation_id` and `thread_id` within the JSONB, duplicating the top-level columns but allowing easy propagation of this context to individual chunks if needed later.
     *   **Status (Apr 8):** Completed (Date processing updated in Phase 6).
 
-4.  **Implement Tiered Query Logic (`query`/`combined` modes):**
-    *   **Orchestration:** Manage the sequence: Vector Search -> Metadata Fallback -> FTS Fallback.
+4.  **Implement Tiered Query Logic (`query`/`combined` modes) - Modified for Boosting:**
+    *   **Orchestration:** Manage the sequence: Vector Search -> Metadata Fallback -> FTS Fallback for *initial candidate retrieval*.
     *   **Step 4.1: Vector Search (Primary Attempt):**
         *   **Action:** Execute `search_memory_chunks` RPC call.
-        *   **Enhancements:** Pass extracted filter values (`topics`, `people`, `locations`, `type`, `sentiment`) as arguments to the RPC call. *Date components are NO LONGER passed for filtering.*
-        *   **Result:** If results > 0, proceed to Response Formulation (Step 4.4).
-        *   **Status:** Partially Complete (RPC call needs update to remove date filter arg). Date filtering implementation (Phase 6) is being reverted.
+        *   **Enhancements:** Pass query embedding. Optional filters (`topics`, `people`, etc.) likely passed as NULL initially. Fetch `similarity` score and `metadata`.
+        *   **Status:** Completed (Code removes date filter arg).
     *   **Step 4.2: Fallback 1 - Metadata Search:**
         *   **Trigger:** Vector search returns 0 results or errors.
         *   **Action:** Construct and execute a `SELECT` query on the `files` table.
-        *   **Filtering:**
-            *   Apply filters based on `processedMetadata` against `file_metadata` using JSONB operators (`@>`, `->>`, etc.) for entities like people, locations, topics, priority.
-            *   *Date Filtering: Removed.* No component-based filtering is applied.
-        *   **Ordering/Limit:** Apply `.order('created_at', { ascending: false })` and `.limit(FALLBACK_MATCH_COUNT)`.
-        *   **Result:** If results > 0, store in `retrieved_context`, set `query_source = 'postgres_fallback_metadata'`, proceed to Response Formulation (Step 4.4).
-        *   **Status:** Partially Complete (Query needs update to remove date filter). Date filtering implementation (Phase 6) is being reverted.
+        *   **Filtering:** Apply non-date metadata filters (`@>`, `->>`) as before. Fetch `file_metadata`.
+        *   **Status:** Completed (Code removes date filter).
     *   **Step 4.3: Fallback 2 - Full-Text Search (FTS):**
         *   **Trigger:** Metadata Search (Fallback 1) returns 0 results.
-        *   **Action:** Construct and execute an FTS query on the `files` table.
-        *   **Details:**
-            *   Extract *all* relevant string entities from `processedMetadata` (including `type`, `sentiment`, `language`, `original` from dates, elements from `people`, `locations`, `topics` arrays).
-            *   Construct an FTS query string using these entities joined by ` | ` (OR operator).
-            *   Perform search using `.textSearch('transcript_tsv', ftsQueryString, { config: 'english', type: 'websearch' })`.
-            *   Include `ts_rank_cd(...)` in `SELECT` for relevance.
-            *   Order results by `rank DESC`.
-            *   *Date Filtering: Removed.* No component-based filtering is applied.
-            *   Limit results using `FALLBACK_MATCH_COUNT`.
-        *   **Result:** Store results (if any) in `retrieved_context`. Set `query_source` appropriately (`postgres_fallback_text` or `none`). Proceed to Response Formulation (Step 4.4).
-        *   **Status:** Partially Complete (Query needs update to remove date filter). Date filtering implementation (Phase 6) is being reverted.
-    *   **Step 4.4: Response Formulation:**
-        *   **Action:** Map results from whichever step succeeded (Vector, Metadata, FTS) to the `ContextObject` format.
-        *   **Details:** Populate `chunk` (full `transcript_text` for fallbacks), `timestamp` (`created_at`), `file_id`, `chunk_index` (if available from vector search), and reconstruct `entities_in_chunk` (using `EnhancedNormalizedDate` for dates) from the retrieved `metadata` or `file_metadata`.
-        *   Construct the final `SuccessResponse`.
-        *   **Status:** Completed (Date handling updated in Phase 6).
+        *   **Action:** Construct and execute an FTS query on the `files` table. Fetch `rank` and `file_metadata`.
+        *   **Status:** Completed (Code removes date filter).
+    *   **Step 4.4: Application Layer Re-ranking (NEW - See Plan in `05_relevance_boosting_plans.md`):**
+        *   **Trigger:** After any successful retrieval step (4.1, 4.2, or 4.3).
+        *   **Action:** Implement the `rerankResults` function in `memory-action.ts`.
+        *   **Logic:** Compare query metadata with candidate metadata, calculate boost, combine with initial score (similarity/rank/fixed), sort, and trim the list.
+        *   **Status:** Planned.
+    *   **Step 4.5: Response Formulation:**
+        *   **Action:** Map results from the *re-ranked* list to the `ContextObject` format.
+        *   **Status:** Minor modification needed to use the re-ranked list.
 
-**Phase 3 Status: Completed (Apr 8, 2025)**
+**Phase 3 Status: Partially Complete (Core retrieval logic updated, Re-ranking step pending)**
 
 ---
 
@@ -144,9 +133,9 @@
 
 ---
 
-## Phase 6: Enhanced Date Handling Implementation
+## Phase 6: Enhanced Date Handling Implementation (Completed - Filtering Removed)
 
-**Objective:** Refactor the date handling mechanism in `memory-action.ts` and `sql/schema.sql` to use `chrono-node` for parsing, store structured `EnhancedNormalizedDate` objects, and enable querying based on date components.
+**Objective:** Refactor the date handling mechanism to use `chrono-node` for parsing and store structured `EnhancedNormalizedDate` objects, removing date-based filtering from queries.
 
 **Key Decisions:**
 *   No backward compatibility required for old data formats.
@@ -184,30 +173,23 @@
 
 ### Step 6: Modify Database Function (`search_memory_chunks` - SQL)
 
-*   **Action:** Updated the `search_memory_chunks` SQL function signature to accept `filter_date_components` BUT removed the date component filtering logic from its `WHERE` clause.
+*   **Action:** Updated the `search_memory_chunks` SQL function signature to *remove* the `filter_date_components` parameter and its filtering logic.
 *   **Status:** Completed (Local `sql/schema.sql` updated, SQL executed successfully on Supabase instance).
-*   **Execution Detail:** Executed `DROP FUNCTION IF EXISTS...` for the old signature. Executed `CREATE OR REPLACE FUNCTION...` with the `filter_date_components JSONB` parameter present but *commented out or removed the `EXISTS(...)` clause for component filtering in the `WHERE` condition*.
 
 ### Step 7: Update Query Logic (`memory-action.ts`)
 
 *   **Action:** Adapted function calls and fallback queries in `memory-action.ts` to *remove* the use of date components for filtering.
-*   **Status:** Pending Code Change.
-*   **Execution Detail (Required Changes):**
-    1.  **RPC Call:** Modify the `supabase.rpc('search_memory_chunks', ...)` call to *remove* the `filter_date_components` argument.
-    2.  **Fallback Filters (Metadata & FTS):** Remove the `.filter('file_metadata->dates', 'cs', ...)` condition from both Metadata and FTS fallback query builders.
-    3.  **Result Mapping:** No change needed here, logic already handles `EnhancedNormalizedDate[]`.
-*   **Attention Point (Fallback Filtering):** N/A as date filter is removed.
+*   **Status:** Completed.
 
 ### Step 8: Testing
 
 *   **Action:** Thoroughly test end-to-end flow ensuring date components are NOT filtering results during query.
-*   **Status:** Pending (Requires code changes from Step 7 first).
-*   **Execution Detail (Planned):** Focus on verifying that queries with specific date components *do not* exclude results lacking those components. Confirm fallbacks trigger correctly based on semantic/metadata results, independent of dates. Test storage and retrieval of `EnhancedNormalizedDate` objects are still correct.
+*   **Status:** Completed (Implicitly, as part of filter removal verification). Further testing on boosting interaction needed.
 
-**Phase 6 Status: Partially Reverted (SQL function updated, Netlify function pending update), Testing Pending**
+**Phase 6 Status: Completed**
 
 ---
 
 ## Overall Status
 
-Enhancement implementation is partially complete. The Date Handling refactor (Phase 6) has been partially reverted: the database function no longer filters by date components, but the corresponding changes in the Netlify function (`memory-action.ts`) to remove the date filtering logic are **pending**. 
+Core retrieval logic updated to remove date filtering. Next step is implementing the Application Layer Re-ranking enhancement as specified in `learnings/05_relevance_boosting_plans.md`. 

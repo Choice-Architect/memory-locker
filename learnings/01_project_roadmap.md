@@ -52,10 +52,11 @@
         *   These `EnhancedNormalizedDate` objects are stored in the `dates` array within metadata JSONB columns (`files.file_metadata` and `transcript_embeddings.metadata`).
     *   **Query (`query`/`combined`):**
         *   Implements a **Tiered Query Strategy**:
-            1.  **Primary - Vector Search:** Calls `search_memory_chunks` RPC, passing query embedding and extracted metadata filters (topics, people, locations, type, sentiment). *Date components are NOT used for filtering.*
+            1.  **Primary - Vector Search:** Calls `search_memory_chunks` RPC, passing query embedding. Optional metadata filters (topics, people, locations, type, sentiment) *can* be passed, but the current plan is to retrieve broadly first. *Date components are NOT used for filtering.*
             2.  **Fallback 1 - Metadata Search:** If Vector Search fails, queries `files` table. Filters `file_metadata` using JSONB operators (`@>`, `->>`) based on query entities (people, locations, topics, priority). *Date components are NOT used for filtering.*
-            3.  **Fallback 2 - Full-Text Search (FTS):** If Metadata Search fails, queries `files` table using `textSearch` against the `transcript_tsv` column. The search uses *all* relevant string entities extracted from the query (people, topics, locations, type, sentiment, language, original date strings) joined by ` | ` (OR). Results are ranked by relevance (`ts_rank_cd`). *Date components are NOT used for filtering.*
+            3.  **Fallback 2 - Full-Text Search (FTS):** If Metadata Search fails, queries `files` table using `textSearch` against the `transcript_tsv` column. The search uses *all* relevant string entities extracted from the query. Results are ranked by relevance (`ts_rank_cd`). *Date components are NOT used for filtering.*
         *   The source of the result (`vector_store`, `postgres_fallback_metadata`, `postgres_fallback_text`, `none`) is tracked in the response (`query_source`).
+        *   **Relevance Boosting:** After initial retrieval, relevance is enhanced in the application layer using metadata comparison (See Phase 5).
 4.  **Error Handling & Logging:** Implemented try/catch blocks, basic Netlify function logging, and consistent error responses.
 5.  **Deployment & Initial Testing:** Function deployed and tested via endpoint.
 
@@ -99,25 +100,20 @@
 
 **Objective:** Improve quality, performance, and features beyond the current core functionality.
 
-1.  **Refactor Date Handling (Implementation Completed, Testing Pending):** 
-    *   **Goal:** Modify date handling to parse, store, and query using structured date/time components (year, month, day, hour, weekday, relative markers, etc.) instead of solely relying on a single normalized ISO 8601 string.
-    *   **Approach (Implementation):**
-        *   Integrated `chrono-node` library into the Netlify function for parsing. (Completed)
-        *   Defined `EnhancedNormalizedDate` interface/schema containing components. (Completed)
-        *   Updated storage logic to save arrays of `EnhancedNormalizedDate` objects into metadata JSONB columns. (Completed)
-        *   Added a GIN index to `transcript_embeddings.metadata`. (Completed)
-        *   Modified the `search_memory_chunks` SQL function to accept a JSONB parameter (`filter_date_components`) *BUT this parameter is no longer intended for active filtering in the WHERE clause*. (Completed - SQL deployed to Supabase)
-        *   Updated Netlify function query logic (vector search call arguments, fallback query filters) to *remove* component-based date filtering. (Pending Code Change)
-    *   **Rationale:** Enables more flexible querying and retains partial information *for potential post-retrieval processing*. Detailed plan in `learnings/04_date_refactor_plan.md` (Needs update to reflect removal of filter).
-    *   **Status:** Implementation complete (including DB function deployment). Testing is pending (Step 8 in `learnings/04_date_refactor_plan.md`).
+1.  **Refactor Date Handling (Completed - Filtering Removed):** 
+    *   **Goal:** Modify date handling to parse and store structured date/time components.
+    *   **Approach:** Integrated `chrono-node`, defined `EnhancedNormalizedDate`, updated storage logic. SQL function and Netlify function query logic were updated to *remove* date component filtering.
+    *   **Rationale:** Retains detailed date information *for potential post-retrieval processing* (like relevance boosting) rather than strict filtering.
+    *   **Status:** Completed.
 
-2.  **Future Considerations (Backlog):**
-    *   Advanced Retrieval (Hybrid search, time decay).
-    *   Context Management (Multi-turn conversations).
-    *   File Handling (Uploads, analysis, metadata extraction).
-    *   User Feedback/Correction Mechanism.
-    *   Performance Optimization (Cold starts, query tuning).
-    *   Enhanced Logging/Monitoring.
+2.  **Implement Relevance Boosting (Application Layer) (Next Step):**
+    *   **Goal:** Improve relevance ranking of query results using stored metadata *after* initial broad retrieval.
+    *   **Approach:** Implement re-ranking logic within the Netlify function (`memory-action.ts`) based on Plan 1 in `learnings/05_relevance_boosting_plans.md`. This involves retrieving a larger candidate set, calculating a metadata boost score based on entity/type/sentiment overlap, combining scores, and returning the top K results.
+    *   **Rationale:** Provides a flexible way to leverage metadata context without overly restricting initial results.
+    *   **Status:** Planned.
+
+3.  **Future Considerations (Backlog):**
+    *   Advanced Retrieval (Hybrid search, time decay, more sophisticated boosting).
 
 ---
 
