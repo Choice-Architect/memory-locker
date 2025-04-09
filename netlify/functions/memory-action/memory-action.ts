@@ -6,16 +6,36 @@ import { parse, formatISO, startOfDay, endOfDay, addDays, subDays, startOfWeek, 
 
 // --- Interfaces for API Contract ---
 
-// Updated Interface for normalized date object
+// Updated Interface for normalized date object (Old - will be replaced by EnhancedNormalizedDate in outputs)
 interface NormalizedDate {
     original: string;
     normalized: string | null; // ISO 8601 format or null if failed
     note?: string; // Added: Reason for failure (e.g., 'vague', 'parse_error')
 }
 
+// NEW Interface for Enhanced Date Handling with Components
+interface EnhancedNormalizedDate {
+    original: string;        // The original string like "last Tuesday afternoon"
+    normalized?: string | null; // ISO 8601 if fully resolved, else null
+    note?: string;           // Explanation if partial or failed (e.g., "Partial parse: Day and period identified relative to reference date")
+    // --- Component Fields (all optional) ---
+    year?: number;           // e.g., 2024
+    month?: number;          // e.g., 4 (1-12)
+    day?: number;            // e.g., 2 (1-31)
+    day_of_week?: number;    // e.g., 2 (0=Sun, 1=Mon, 2=Tue...)
+    time_hour?: number;      // e.g., 15 (0-23)
+    time_minute?: number;    // e.g., 0
+    time_second?: number;    // e.g., 0
+    period?: 'AM' | 'PM' | 'Morning' | 'Afternoon' | 'Evening' | 'Night'; // e.g., "Afternoon"
+    relative_marker?: 'last' | 'this' | 'next' | 'previous'; // e.g., "last"
+    relative_unit?: 'day' | 'week' | 'month' | 'year' | 'weekend'; // e.g., "week" (implicitly via Tuesday)
+}
+
 interface ExtractedEntities {
     people?: string[];
-    dates?: (string | NormalizedDate)[]; // Allow storing original strings or normalized objects
+    // Input can still be flexible string or NormalizedDate for initial capture
+    // but will be processed into EnhancedNormalizedDate internally.
+    dates?: (string | NormalizedDate)[];
     locations?: string[];
     topics?: string[];
     type?: string; // Added based on schema
@@ -27,17 +47,33 @@ interface ExtractedEntities {
     [key: string]: any; // Allow flexible entity types, keep for now
 }
 
+// Interface for entities AFTER internal processing (using EnhancedNormalizedDate)
+// This is what gets stored in metadata and returned in context objects.
+interface ProcessedEntities {
+    people?: string[];
+    dates?: EnhancedNormalizedDate[]; // Use the new enhanced structure
+    locations?: string[];
+    topics?: string[];
+    type?: string;
+    sentiment?: string;
+    priority?: number;
+    conversation_id?: string;
+    thread_id?: string;
+    language?: 'en' | 'fr' | 'ar';
+    [key: string]: any;
+}
+
 interface RequestPayload {
     query_text: string;
-    extracted_entities: ExtractedEntities;
+    extracted_entities: ExtractedEntities; // Input uses the original ExtractedEntities
     // user_id?: string; (Removed)
     mode: 'store' | 'query' | 'combined';
 }
 
 interface ContextObject {
     chunk: string;
-    timestamp: string; // ISO 8601 format
-    entities_in_chunk: ExtractedEntities; // Note: Currently storing file-level entities here
+    timestamp: string; // ISO 8601 format (Could be chunk creation or file creation)
+    entities_in_chunk: ProcessedEntities; // Output uses ProcessedEntities with EnhancedNormalizedDate
     file_id?: string; // Reference to the source file (Corrected: UUID as string)
     chunk_id?: string; // Reference to the specific chunk (Corrected: UUID as string)
     chunk_index?: number; // Added: Index of the chunk within its file
@@ -60,12 +96,10 @@ interface SearchResultItem {
     // id?: string; // Chunk ID from transcript_embeddings if returned by RPC (Corrected: UUID as string)
     file_id: string; // Corrected: UUID as string
     content_chunk: string;
-    metadata?: {
-        created_at?: string;
-        entities_in_chunk?: ExtractedEntities;
-        [key: string]: any;
-    };
+    // Metadata from DB should now contain ProcessedEntities structure
+    metadata?: ProcessedEntities & { created_at?: string; [key: string]: any };
     similarity?: number;
+    chunk_index?: number; // Added this field here too
 }
 
 // Define interface for the structure returned by the fallback files query
@@ -73,10 +107,8 @@ interface FallbackResultItem {
     id: string; // Corrected: UUID as string
     transcript_text: string;
     created_at: string | null;
-    file_metadata: { // Assuming file_metadata is an object
-        dates?: NormalizedDate[]; // Expect normalized dates here now
-        [key: string]: any; // Allow other properties
-    } | null;
+    // file_metadata from DB should now contain ProcessedEntities structure
+    file_metadata: ProcessedEntities | null;
 }
 
 // --- Constants ---

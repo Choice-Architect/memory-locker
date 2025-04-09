@@ -186,12 +186,13 @@ CREATE INDEX idx_file_manager_log_processed ON file_manager_log(processed);
 -- NOTE: Due to the high dimensionality (3072) of the embeddings, we are not using vector indexes
 -- directly. Instead, we use a standard B-tree index on file_id for filtering.
 -- Vector search should be implemented in application code using pgvector's distance functions.
--- NOTE: An HNSW index is recommended for efficient vector search on the 'embedding' column 
+-- NOTE: An HNSW index is recommended for efficient vector search on the 'embedding' column
 --       and should be created manually after enabling the pgvector extension.
 --       Example: CREATE INDEX ON transcript_embeddings USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX idx_transcript_embeddings_file_id ON transcript_embeddings(file_id);
 CREATE INDEX idx_transcript_embeddings_created_at ON transcript_embeddings(created_at);
 CREATE INDEX transcript_embeddings_embedding_hnsw_idx ON public.transcript_embeddings USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_transcript_embeddings_metadata_gin ON public.transcript_embeddings USING gin (metadata jsonb_path_ops);
 
 -- PART 4: FUNCTIONS
 -- =================================

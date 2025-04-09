@@ -210,6 +210,119 @@
         },
         "description": "Structure of entities as returned within a ContextObject, using NormalizedDate objects."
       },
+      "EnhancedNormalizedDate": {
+        "type": "object",
+        "description": "Represents a parsed date, potentially with components, derived from an original string.",
+        "properties": {
+          "original": {
+            "type": "string",
+            "description": "The original date string provided."
+          },
+          "normalized": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The date string normalized to ISO 8601 format, if fully resolved.",
+            "nullable": true
+          },
+          "note": {
+            "type": "string",
+            "description": "An optional note explaining partial parsing or failure (e.g., 'vague', 'parse_error', 'partial').",
+            "nullable": true
+          },
+          "year": {
+            "type": "integer",
+            "description": "Year component (e.g., 2024).",
+            "nullable": true
+          },
+          "month": {
+            "type": "integer",
+            "description": "Month component (1-12).",
+            "nullable": true
+          },
+          "day": {
+            "type": "integer",
+            "description": "Day of month component (1-31).",
+            "nullable": true
+          },
+          "day_of_week": {
+            "type": "integer",
+            "description": "Day of week component (e.g., 0=Sun, 1=Mon...).",
+            "nullable": true
+          },
+          "time_hour": {
+            "type": "integer",
+            "description": "Hour component (0-23).",
+            "nullable": true
+          },
+          "time_minute": {
+            "type": "integer",
+            "description": "Minute component (0-59).",
+            "nullable": true
+          },
+          "time_second": {
+            "type": "integer",
+            "description": "Second component (0-59).",
+            "nullable": true
+          },
+          "period": {
+            "type": "string",
+            "enum": ["AM", "PM", "Morning", "Afternoon", "Evening", "Night"],
+            "description": "Time period if identified (e.g., 'Afternoon').",
+            "nullable": true
+          },
+          "relative_marker": {
+            "type": "string",
+            "enum": ["last", "this", "next", "previous"],
+            "description": "Relative marker if identified (e.g., 'last').",
+            "nullable": true
+          },
+          "relative_unit": {
+            "type": "string",
+            "enum": ["day", "week", "month", "year", "weekend"],
+            "description": "Relative unit if identified (e.g., 'week').",
+            "nullable": true
+          }
+        },
+        "required": [
+          "original"
+        ]
+      },
+      "OutputProcessedEntities": {
+        "type": "object",
+        "description": "Structure of entities as returned within a ContextObject, using EnhancedNormalizedDate objects.",
+        "properties": {
+          "people": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "dates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EnhancedNormalizedDate"
+            }
+          },
+          "locations": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "topics": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "type": { "type": "string", "nullable": true },
+          "sentiment": { "type": "string", "nullable": true },
+          "priority": { "type": "integer", "nullable": true },
+          "conversation_id": { "type": "string", "nullable": true },
+          "thread_id": { "type": "string", "nullable": true },
+          "language": { "type": "string", "enum": ["en", "fr", "ar"], "nullable": true }
+        },
+        "additionalProperties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
       "RequestPayload": {
         "type": "object",
         "required": [
@@ -246,11 +359,11 @@
           "timestamp": {
             "type": "string",
             "format": "date-time",
-            "description": "Timestamp associated with the chunk or original file."
+            "description": "Timestamp associated with the chunk or original file (e.g., chunk creation or file creation time)."
           },
           "entities_in_chunk": {
-            "$ref": "#/components/schemas/OutputExtractedEntities",
-            "description": "Entities identified within this specific chunk, using NormalizedDate objects."
+            "$ref": "#/components/schemas/OutputProcessedEntities",
+            "description": "Entities identified within this specific chunk, using EnhancedNormalizedDate objects."
           },
           "file_id": {
             "type": "string",

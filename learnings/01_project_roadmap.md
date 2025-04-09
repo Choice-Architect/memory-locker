@@ -97,13 +97,17 @@
 
 **Objective:** Improve quality, performance, and features beyond the current core functionality.
 
-1.  **Planned - Refactor Date Handling:**
-    *   **Goal:** Modify date handling to store segmented date/time components instead of normalized ISO 8601 strings.
+1.  **Refactor Date Handling (Current Focus):**
+    *   **Goal:** Modify date handling to parse, store, and query using structured date/time components (year, month, day, hour, weekday, relative markers, etc.) instead of solely relying on a single normalized ISO 8601 string.
     *   **Approach:**
-        *   Update `normalizeDateString` (or replace it) to extract components like `{ year: 2024, month: 7, day: 15, hour: 14, minute: 0, original: "..." }` and potentially flags/values for relative terms (`{ relative: "yesterday", original: "..." }`).
-        *   Update storage logic to save this component structure in the `dates` array within metadata (`file_metadata`, `transcript_embeddings.metadata`).
-        *   Update query logic (vector search function arguments/logic, fallback metadata filters) to work with these components, handling both specific dates and relative terms. This will likely involve more complex SQL/JSONB querying.
-    *   **Rationale:** Explore potential benefits for specific component queries, though challenges with range queries and relative term handling need careful consideration.
+        *   Integrate `chrono-node` library into the Netlify function for parsing natural language date strings. (Completed)
+        *   Define an `EnhancedNormalizedDate` interface/schema containing `original`, `normalized` (ISO string if fully resolved, else null), and various component fields (`year`, `month`, `day`, `day_of_week`, `time_hour`, etc.). (Completed)
+        *   Update storage logic to save arrays of `EnhancedNormalizedDate` objects into metadata JSONB columns (`files.file_metadata`, `transcript_embeddings.metadata`). (Pending)
+        *   Add a GIN index to `transcript_embeddings.metadata` for efficient component querying. (Completed)
+        *   Modify the `search_memory_chunks` SQL function to accept a JSONB parameter (`filter_date_components`) and filter based on these components within the `metadata -> \'dates\'` array. (Pending)
+        *   Update Netlify function query logic (vector search call arguments, fallback query filters) to construct and utilize component-based filters. (Pending)
+    *   **Rationale:** Enables more flexible querying based on specific date components (e.g., "find notes from Tuesdays", "search activity in July") and retains partial information when full normalization fails.
+
 2.  **Future Considerations (Backlog):**
     *   Advanced Retrieval (Hybrid search, time decay).
     *   Context Management (Multi-turn conversations).

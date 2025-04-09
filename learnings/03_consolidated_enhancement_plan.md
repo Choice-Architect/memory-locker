@@ -144,4 +144,62 @@
 
 ---
 
-**Overall Status:** All planned phases and steps outlined above are marked as completed based on previous updates and actions taken as of Apr 8, 2025. 
+**Overall Status:** All planned phases and steps outlined above are marked as completed based on previous updates and actions taken as of Apr 8, 2025.
+
+---
+
+## Phase 6: Enhanced Date Handling Implementation (Next Steps)
+
+**Objective:** Refactor the date handling mechanism to parse, store, and query date information using structured components for greater flexibility and accuracy, replacing the sole reliance on normalized ISO strings.
+
+1.  **Add Dependencies:**
+    *   **Action:** Install `chrono-node` library in the Netlify function project (`netlify/functions`).
+    *   **Command:** `npm install chrono-node` or `yarn add chrono-node`.
+    *   **Rationale:** Provides robust natural language date parsing capabilities.
+
+2.  **Database Indexing:**
+    *   **Action:** Create the missing GIN index on the `transcript_embeddings.metadata` column.
+    *   **SQL:**
+        ```sql
+        CREATE INDEX IF NOT EXISTS idx_transcript_embeddings_metadata_gin ON public.transcript_embeddings USING gin (metadata jsonb_path_ops);
+        ```
+    *   **Rationale:** Enables efficient querying of date components stored within the chunk metadata JSONB during vector search filtering. The corresponding index on `files.file_metadata` already exists.
+
+3.  **Update Code Interfaces & Schema:**
+    *   **Action:** Define the `EnhancedNormalizedDate` structure and update relevant interfaces/schemas.
+    *   **Details:**
+        *   Define `EnhancedNormalizedDate` in `memory-action.ts` (including `original`, `normalized?`, `note?`, `year?`, `month?`, `day?`, `day_of_week?`, `time_hour?`, `time_minute?`, `period?`, `relative_marker?`, `relative_unit?`).
+        *   Update `OutputExtractedEntities`, `ContextObject`, `SearchResultItem`, `FallbackResultItem` in `memory-action.ts` to use `EnhancedNormalizedDate[]`.
+        *   Update `openapi.json`: Define `EnhancedNormalizedDate` schema and update references in `OutputExtractedEntities` and `ContextObject`.
+    *   **Rationale:** Align code and API contract with the new data structure.
+    *   **Status: Completed**
+
+4.  **Refactor Date Parsing Logic (`memory-action.ts`):**
+    *   **Action:** Replace or modify the existing `normalizeDateString` function.
+    *   **Details:** Use `chrono.parse()` to process input date strings. Map `chrono` results to the `EnhancedNormalizedDate` structure, using `new Date()` as the reference time.
+    *   **Rationale:** Leverage `chrono-node` for complex parsing, extracting components even for partial or relative dates.
+
+5.  **Update Storage Logic (`memory-action.ts`):**
+    *   **Action:** Ensure the array of `EnhancedNormalizedDate` objects is correctly saved to the `file_metadata` (in `files`) and `metadata` (in `transcript_embeddings`) columns during `store`/`combined` operations.
+    *   **Rationale:** Persist the structured date information.
+
+6.  **Modify Database Function (`search_memory_chunks` - SQL):**
+    *   **Action:** Update the function signature and filtering logic.
+    *   **Details:**
+        *   Remove `filter_date_start`, `filter_date_end` parameters.
+        *   Add `filter_date_components JSONB DEFAULT NULL` parameter.
+        *   Replace the date `WHERE` clause with logic using `jsonb_array_elements` and JSONB operators (`->>`, `=`) to check if any element in `te.metadata -> 'dates'` matches the components in `filter_date_components`.
+    *   **Rationale:** Enable filtering based on date components during vector search.
+
+7.  **Update Query Logic (`memory-action.ts`):**
+    *   **Action:** Adapt function calls and fallback queries.
+    *   **Details:**
+        *   Construct the `filter_date_components` argument when calling the modified `search_memory_chunks`.
+        *   Update fallback queries (Metadata & FTS) to filter using JSONB operators against `files.file_metadata -> 'dates'` based on query components.
+    *   **Rationale:** Utilize the new component filtering capabilities in both primary and fallback search paths.
+
+8.  **Testing:**
+    *   **Action:** Thoroughly test the end-to-end flow with various date formats (absolute, relative, partial, vague, time-specific) for both storage and querying. Verify vector search filtering and fallback logic work correctly with date components.
+    *   **Rationale:** Ensure the new system behaves as expected and handles edge cases.
+
+**Phase 6 Status: Planned** 
