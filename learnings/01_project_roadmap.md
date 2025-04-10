@@ -1,4 +1,4 @@
-## Memory Locker: Custom GPT Product Development Roadmap (v1.1)
+## Memory Locker: Custom GPT Product Development Roadmap (v1.2)
 
 **Goal:** Create a Custom GPT within the official ChatGPT application that allows a user to store and retrieve personal memories, notes, and information using natural language, voice, and potentially file uploads. The GPT will leverage Actions to interact with a Supabase backend via a Netlify Function.
 
@@ -50,15 +50,18 @@
         *   Uses `chrono-node` library within `parseDateStringToEnhanced` function to parse various date/time formats relative to the current timestamp.
         *   Outputs `EnhancedNormalizedDate` objects containing components (year, month, day, hour, etc.) and potentially a normalized ISO string.
         *   These `EnhancedNormalizedDate` objects are stored in the `dates` array within metadata JSONB columns (`files.file_metadata` and `transcript_embeddings.metadata`).
-    *   **Query (`query`/`combined`) - Strategy v1.2 (Pending Implementation):**
+    *   **Query (`query`/`combined`) - Strategy v1.3 (Pending Implementation):**
         *   Implements a **Simplified Query Strategy with Application-Layer Re-ranking**:
-            1.  **Primary Retrieval - Vector Search:** Calls `search_memory_chunks` RPC with query embedding. Retrieves top `VECTOR_MATCH_COUNT` (e.g., 15) candidates based on similarity. Optional metadata filters (`topics`, `people`, etc.) are typically omitted for broad retrieval. *Date components are NOT used for vector filtering.*
-            2.  **Fallback Retrieval - FTS:** If Vector Search fails or returns no results, queries the `files` table using `textSearch` against `transcript_tsv` (using `'english'` config). The search uses entities from the query *excluding language*. **Conditional `created_at` Filtering:** If the Netlify function derives a specific past date range from the query's `EnhancedNormalizedDate` objects, a `WHERE created_at BETWEEN ...` clause is added to the FTS query. Retrieves top `FALLBACK_MATCH_COUNT` (e.g., 20) candidates.
-            3.  **Application-Layer Re-ranking:** After Step 1 or 2, the Netlify function (`memory-action.ts`) re-ranks the retrieved candidates. It calculates a `final_score` for each candidate: `final_score = initial_score + metadata_boost_score`.
-                *   `initial_score` is derived from vector `similarity` or a fixed value (e.g., 0.5) for FTS results.
-                *   `metadata_boost_score` is calculated by summing small increments (+0.05) for each overlapping metadata entity between the query and the candidate (`people`, `locations`, `topics`, `type`, `sentiment`, `dates` presence check; *language is excluded*).
-            4.  **Final Selection:** The top `FINAL_MATCH_COUNT` (e.g., 5) results based on `final_score` are selected and returned.
+            1.  **Primary Retrieval - Vector Search:** Calls `search_memory_chunks` RPC with query embedding. Assume RPC returns `similarity`. Retrieves top `VECTOR_MATCH_COUNT` (15) candidates.
+            2.  **Fallback Retrieval - FTS:** If Vector Search fails or returns no results, queries the `files` table using `textSearch` against `transcript_tsv` (using `'english'` config and query entities *excluding language*). Select the `ts_rank_cd` score as `rank`. Retrieves top `FALLBACK_MATCH_COUNT` (20) candidates.
+            3.  **Mapping & Truncation:** Map results to `ContextObject`s, preserving `similarity` (from vector) or `rank` (from FTS). Truncate FTS `chunk` text to 3000 chars.
+            4.  **Application-Layer Re-ranking:** After retrieval and mapping, the Netlify function (`memory-action.ts`) re-ranks the candidates using `rerankResults`.
+                *   Calculates `initial_score` based on `similarity` (vector) or `rank` (FTS).
+                *   Calculates `metadata_boost_score` by summing increments for overlapping metadata (`people`, `locations`, `topics`, `type`, `sentiment`, `dates` presence; *language excluded*; `+0.05` each). For FTS results, adds an additional `+0.10` if the candidate's `timestamp` falls within a past date range derived from the query.
+                *   Calculates `final_score = min(1.0, initial_score + metadata_boost_score)`.
+            5.  **Final Selection:** The top `FINAL_MATCH_COUNT` (5) results based on `final_score` are selected and returned.
         *   The source of the result (`vector_store`, `postgres_fallback_text`, `none`) is tracked in the response (`query_source`).
+        *   **Note:** Date parsing notes from `chrono-node` are no longer included in the response `message_for_gpt`.
 4.  **Error Handling & Logging:** Implemented try/catch blocks, basic Netlify function logging, and consistent error responses.
 5.  **Deployment & Initial Testing:** Function deployed and tested via endpoint.
 
@@ -97,19 +100,21 @@
 
 1.  **Refactor Date Handling (Completed - Filtering Removed):** 
     *   **Goal:** Modify date handling to parse and store structured date/time components.
-    *   **Approach:** Integrated `chrono-node`, defined `EnhancedNormalizedDate`, updated storage logic. SQL function and Netlify function query logic were updated to *remove* date component filtering.
-    *   **Rationale:** Retains detailed date information *for potential post-retrieval processing* (like relevance boosting) rather than strict filtering.
+    *   **Approach:** Integrated `chrono-node`, defined `EnhancedNormalizedDate`, updated storage logic. SQL function and Netlify function query logic were updated to *remove* date component filtering during initial retrieval.
+    *   **Rationale:** Retains detailed date information for relevance boosting during re-ranking rather than strict pre-filtering.
     *   **Status:** Completed.
 
-2.  **Implement Relevance Boosting (Application Layer) (Next Step - Plan v1.2):**
-    *   **Goal:** Improve relevance ranking of query results using stored metadata *after* initial broad retrieval, following the simplified fallback and re-ranking strategy.
-    *   **Approach:** Implement the logic detailed in **`learnings/02_enhancement_plan.md`** within the Netlify function (`memory-action.ts`). Key implementation tasks include:
+2.  **Implement Relevance Boosting (Application Layer) (Next Step - Plan v1.3):**
+    *   **Goal:** Improve relevance ranking of query results using stored metadata, vector similarity, FTS rank, and date matching *after* initial broad retrieval, following the simplified fallback and re-ranking strategy (v1.3).
+    *   **Approach:** Implement the logic detailed in **`learnings/02_enhancement_plan.md`** (v1.3) within the Netlify function (`memory-action.ts`). Key implementation tasks include:
         *   Updating constants (`VECTOR_MATCH_COUNT=15`, `FALLBACK_MATCH_COUNT=20`, `FINAL_MATCH_COUNT=5`).
-        *   Removing the old metadata fallback tier from the query logic.
-        *   Implementing the conditional `created_at` filtering logic within the FTS fallback based on derived date ranges from `EnhancedNormalizedDate` objects.
-        *   Implementing the `rerankResults` function: calculate `initial_score` (similarity or fixed), `metadata_boost_score` (additive, +0.05 per overlap type, excluding language), and `final_score`.
-        *   Integrating the `rerankResults` call after initial retrieval to sort and trim candidates before returning the final response.
-    *   **Rationale:** Simplifies fallback logic, provides flexible metadata-driven ranking (excluding language), and enables correct time-based filtering for FTS fallback when applicable.
+        *   Updating relevant TypeScript interfaces (`SearchResultItem`, `FallbackResultItem`, `ContextObject`).
+        *   Ensuring FTS query selects `rank` and does not pre-filter by date.
+        *   Updating mapping logic to preserve scores (`similarity`, `rank`) and truncate FTS chunks.
+        *   Implementing the enhanced `rerankResults` function: calculate `initial_score` (similarity or rank), `metadata_boost_score` (additive, +0.05 per overlap type excluding language, +0.10 for FTS date range match), and `final_score`.
+        *   Integrating the `rerankResults` call after initial retrieval.
+        *   Removing date parsing note logic from the final response.
+    *   **Rationale:** Leverages both semantic similarity and text relevance scores, provides flexible metadata/date-driven ranking (excluding language), and simplifies query logic.
     *   **Status:** Planned.
 
 3.  **Future Considerations (Backlog):**
