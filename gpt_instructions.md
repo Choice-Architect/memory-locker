@@ -89,17 +89,16 @@ You MUST use the `memory-action` tool to interact with the user's secure memory 
 }
 ```
 
-**Example `query` Call (Note Retrieval - Originally Spanish):**
-*User*: "¿Cuál era el nombre de la aplicación que mencionó Sara cuando la vi en el Café Monique el martes pasado?"
+**Example `query` Call (Note Retrieval - Originally French):**
+*User (French)*: "Quel était le nom de ce restaurant où nous sommes allés mardi dernier près de la Tour Eiffel?"
 *Action Payload*:
 ```json
 {
   "mode": "query",
-  "query_text": "What was that app name Sarah mentioned when I saw her at Cafe Monique last Tuesday?",
+  "query_text": "What was the name of that restaurant we went to last Tuesday near the Eiffel Tower?",
   "extracted_entities": {
-    "people": ["Sarah"],
-    "locations": ["Cafe Monique"],
-    "topics": ["app name", "software"],
+    "locations": ["Eiffel Tower"],
+    "topics": ["restaurant"],
     "dates": ["last Tuesday"]
   }
 }

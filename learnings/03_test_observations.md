@@ -24,37 +24,66 @@ This report summarizes the key observations and issues identified during the tes
 
 ---
 
-## Section B: Date/Time Entity Performance & Issues
+## Section B: Date/Time Entity Performance & Issues (Post v1.4 Refinement & Clarified Rules)
 
-**3. Date Entity Performance Summary:**
+**Summary:** Testing after the v1.4 date parsing refinement attempt revealed mixed results when evaluated against the newly clarified parsing requirements. While simple relative day resolution improved, several key issues targeted by v1.4 persist or worsened, and fundamental problems with granularity and qualifier handling remain.
 
-*   **Original String Extraction:** The GPT model consistently performed well in extracting the original date/time-related strings from the input text across various formats (e.g., "yesterday afternoon", "next Tuesday morning", "April 28th, 2025 from 2am to 4am UTC", "last two weeks of August 2025", "last spring", "end of day", "vendredi prochain", "this morning", "September", "tomorrow end of day", multiple specific and relative dates, "today", "next Wednesday", "last week", "early next year", "last Tuesday", "next month"). It successfully ignored irrelevant conversational date references (e.g., "See you tomorrow"). Minor omissions of less specific phrases ("last month", "next 48 hours") occurred but were not critical.
-*   **Parsing/Normalization (`EnhancedNormalizedDate`):** Performance was mixed and revealed significant limitations and potentially unnecessary complexity in the current `chrono-node` based parsing approach.
-    *   **Successes:**
-        *   Specific Dates/Times: Generally handled well (e.g., "April 28th, 2025 from 2am...").
-        *   Simple Relative Terms: Parsed successfully when easily resolvable relative to the current time (e.g., "yesterday afternoon", "end of day" - incorrect day resolution issue noted below, "tomorrow end of day" - incorrect day resolution issue noted below, "today", "last week").
-        *   Time Ranges: Successfully captured the start time from range expressions like "from X to Y". Capturing only the start time is considered acceptable for project needs; the full range remains in the `original` string.
-    *   **Observations & Failures/Issues:**
-        *   Unnecessary Complexity Fields: Fields like `relative_marker` and `relative_unit` were populated in several partial parses. These add complexity and are not currently used for ranking; they are candidates for removal in future refinements.
-        *   Relative Day Names: Often failed to resolve to a specific date (e.g., "next Tuesday morning", "next Wednesday", "last Tuesday"). Returned only partial info (day of week, relative marker).
-        *   Month Names/Relative Months: Failed to resolve when provided alone or with vague qualifiers (e.g., "September", "next month"). Returned only partial info (month, year, relative marker).
-        *   Relative Day Parts: Failed to resolve without a specific date anchor (e.g., "this morning").
-        *   Complex Relative Ranges: Grossly misinterpreted ranges anchored to specific months/years (e.g., "last two weeks of August 2025" interpreted relative to *now*).
+**1. Parsing/Normalization Performance (`EnhancedNormalizedDate`):**
 
-**4. Identified Issues (Dates):**
+*   **Successes (Aligning with Clarified Requirements):**
+    *   **Simple Relative Dates:** Generally resolved correctly to specific YYYY-MM-DD (e.g., "yesterday", "today", "next Tuesday", "last Tuesday", "next Wednesday", "tomorrow").
+    *   **Specific Dates/Times:** Full dates and specific dates with times were parsed correctly (e.g., "April 28th, 2025 from 2am..."). Start times from ranges were captured.
+    *   **Vague Terms Ignored:** Vague seasonal terms ("last spring") were correctly ignored, resulting in no date components, as required.
+    *   **Simple Qualifiers Ignored:** Modifiers like "before" (`avant`), "evening", "afternoon", "COB" were often correctly ignored when resolving the core date phrase.
 
-*   **Date Parsing Limitations (Core Issue):** The primary issue is the inability of the current date parsing mechanism (`chrono-node` as configured/used) to reliably handle various common date/time expressions that *should* be parsed according to project requirements. This manifests in several ways:
-    *   **Incorrect Day Resolution for Boundaries:** Resolving terms like "end of day" or "tonight" to the *next* calendar day instead of the current one.
-    *   **Unwanted Time Normalization:** Generating specific time components (hour, minute, second) from vague references like "end of day", "last week", etc. when only the date (Y/M/D or YYYY-MM) is desired.
-    *   **Inability to Resolve Relative Dates / Incorrect Granularity:** Failure to calculate specific date components based on the reference timestamp for relative terms, or resolving to an incorrect level of granularity. Examples:
-        *   *Should* resolve "next Wednesday" to YYYY-MM-DD (failure noted).
-        *   *Should* resolve "last Tuesday" to YYYY-MM-DD (failure noted).
-        *   *Should* resolve "last week" to YYYY-MM (or similar week representation), not a specific day (failure noted).
-        *   *Should* resolve "next month" to YYYY-MM (failure noted - only got YYYY-MM).
-        *   (Note: "next year" resolving to YYYY is acceptable - success noted).
-    *   **Context Dependency:** Failure to parse terms needing more context, like month names alone ("September") or relative day parts ("this morning").
-    *   **Failure to Prioritize Explicit Anchors:** Ignoring explicit date components (like month, year) when combined with relative phrases, and incorrectly applying the relative part to the present instead (e.g., "last two weeks of August 2025" parsed relative to *now*, ignoring "August 2025").
-    *   **Lack of Localization:** No built-in support for parsing non-English date strings ("vendredi prochain").
-*   (Issue Ref: 2.1 in `03_test_issues.md` covers most of these parsing failures, excluding the now-acceptable time range and vague term handling).
+*   **Failures (Against Clarified Requirements):**
+    *   **Day Boundary Issues:**
+        *   `end of day`: Failed completely (no components found). Should resolve to reference date YYYY-MM-DD.
+        *   `this morning`: Incorrectly resolved to the *next* day when reference time was afternoon. Should resolve to reference date YYYY-MM-DD.
+    *   **Qualifier Handling Issues:**
+        *   Failed to ignore required qualifiers like "early", "EOD", "first week of", "last two weeks". These interfered with parsing, leading to incorrect dates or granularity.
+    *   **Incorrect Granularity:**
+        *   Consistently assigned specific days (often the 1st or inferred from reference date) to week, month, or year references ("last week", "next month", "September", "May 2025", "next year"). Should have left Day (and potentially Month) `undefined`.
+    *   **Explicit Anchor Prioritization Failure:**
+        *   Failed to prioritize explicit anchors ("August 2025") when parsing complex relative phrases ("last two weeks of August 2025").
+    *   **Past Specific Date Handling:**
+        *   Incorrectly resolved a recently passed specific date ("April 8th") to the following year instead of the correct past date within the current year context.
+
+**2. Identified Issues (Dates - Post v1.4):**
+
+*   **Parsing Logic Implementation Gaps:** The core issues stem from incomplete or incorrect implementation of the intended parsing logic within `parseDateStringToEnhanced`, particularly regarding:
+    *   Handling day boundary terms ("end of day", "this morning").
+    *   Stripping/ignoring specific qualifiers ("early", "EOD", etc.).
+    *   Enforcing correct granularity (avoiding default days for week/month/year inputs).
+    *   Prioritizing explicit date components over relative interpretations.
+    *   Correctly resolving past dates within the current year context.
 
 ---
+
+## Section C: Agreed Date Parsing Strategy & Required Changes (Post Test 2 Analysis)
+
+**1. Strategy Shift: Prioritize Components, Allow Uncertain Normalization:**
+
+*   The primary goal of `parseDateStringToEnhanced` is to accurately extract and store individual date/time **components** (`year`, `month`, `day`, `day_of_week`, `week_number`, `period`, `time_hour`, `time_minute`, `time_second`) into the `EnhancedNormalizedDate` object.
+*   Components that cannot be reliably determined from the input MUST be stored as `undefined`.
+*   Generating a `normalized` ISO 8601 string is secondary. In cases where components are uncertain (e.g., only Year/Month known, or only Year/Week known), the `normalized` field **MUST** be set to `null` rather than defaulting to an potentially inaccurate date (like the 1st of the month).
+
+**2. Requirement: Ignore Granularity/Time Qualifiers:**
+
+*   The parser MUST strip or ignore non-date qualifiers related to time-of-day or granularity (e.g., "early", "late", "end of", "EOD", "COB", "sometime", "around", "beginning of", "first week of", "last two weeks of") *before* attempting to parse the core date expression (e.g., "Friday", "next month", "August 2025").
+
+**3. Required Code Changes in `parseDateStringToEnhanced` (`memory-action.ts`):**
+
+*   **Implement Qualifier Stripping:** Add robust logic to identify and remove the specified qualifiers before passing the string to `chrono-node` or `date-fns` logic.
+*   **Fix Day Boundary Logic:** Correctly implement checks and component setting for "end of day", "tonight", and "this morning" to resolve to the reference date's YYYY-MM-DD.
+*   **Fix Granularity Logic:** Ensure inputs like "last week", "next month", "September", "May 2025", "next year" result in `Day` (and potentially `Month`) being `undefined`, and `normalized: null`.
+*   **Implement Week Number:** Add logic to calculate `week_number` (e.g., using `date-fns.getWeek`) for "last week"/"next week" inputs. Update the `EnhancedNormalizedDate` interface to include `week_number?: number;`.
+*   **Fix Explicit Anchor Logic:** Ensure explicit components (Year, Month in "August 2025") correctly frame the context for relative parts ("last two weeks").
+*   **Fix Past Date Logic:** Correctly handle specific dates (Month/Day) that have recently passed, resolving them within the current year context.
+*   **Set `normalized: null`:** Systematically set `normalized = null` whenever Day is `undefined` (or potentially when Month is also `undefined`).
+
+**4. Other Required File Updates:**
+
+*   **`openapi.json`:** Remove `conversation_id` and `thread_id` properties from the `#/components/schemas/ExtractedEntities` definition. Update `EnhancedNormalizedDate` schema to include optional `week_number`.
+*   **`gpt_instructions.md`:** Explicitly instruct the GPT *not* to extract `conversation_id` or `thread_id`. Update any examples if necessary.
+*   **`learnings/04_date_parse_tasks.md`:** This task list needs significant revision or replacement based on the failures and new requirements identified here.
