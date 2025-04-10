@@ -19,7 +19,16 @@ import {
     subMonths,
     subYears,
     isFuture,
-    isPast
+    isPast,
+    isSameDay,
+    isBefore,
+    isAfter,
+    addWeeks,
+    addDays,
+    set,
+    format,
+    setDay,
+    addMonths
 } from 'date-fns';
 import * as chrono from 'chrono-node';
 
@@ -46,8 +55,6 @@ interface EnhancedNormalizedDate {
     time_minute?: number;    // e.g., 0
     time_second?: number;    // e.g., 0
     period?: 'AM' | 'PM' | 'Morning' | 'Afternoon' | 'Evening' | 'Night'; // e.g., "Afternoon"
-    relative_marker?: 'last' | 'this' | 'next' | 'previous'; // e.g., "last"
-    relative_unit?: 'day' | 'week' | 'month' | 'year' | 'weekend'; // e.g., "week" (implicitly via Tuesday)
 }
 
 interface ExtractedEntities {
@@ -62,7 +69,6 @@ interface ExtractedEntities {
     priority?: number; // Added: Optional user-assigned priority (1-10)
     conversation_id?: string; // Added: Optional conversation identifier
     thread_id?: string; // Added: Optional thread identifier
-    language?: 'en' | 'fr' | 'ar'; // Added: Optional language code
     [key: string]: any; // Allow flexible entity types, keep for now
 }
 
@@ -78,7 +84,6 @@ interface ProcessedEntities {
     priority?: number;
     conversation_id?: string;
     thread_id?: string;
-    language?: 'en' | 'fr' | 'ar';
     [key: string]: any;
 }
 
@@ -236,48 +241,28 @@ function deriveDateRange(dates: EnhancedNormalizedDate[] | undefined, referenceD
         }
 
         // Handle specific relative terms if no date derived yet
-        if (!potentialStart && dateInfo.relative_marker === 'last') {
-            if (dateInfo.relative_unit === 'day' || /yesterday/i.test(dateInfo.original)) {
+        // Check keywords in the original string instead of removed properties
+        const lowerOriginal = dateInfo.original.toLowerCase();
+        if (!potentialStart && /\blast\b/.test(lowerOriginal)) {
+            if (/\bday\b/.test(lowerOriginal) || /yesterday/i.test(lowerOriginal)) {
                 potentialStart = startOfDay(subDays(referenceDate, 1));
                 potentialEnd = endOfDay(subDays(referenceDate, 1));
-                console.log(`Derived range from relative term: yesterday`);
+                console.log(`Derived range from relative term: yesterday/last day`);
             }
-             else if (dateInfo.relative_unit === 'week') {
+             else if (/\bweek\b/.test(lowerOriginal)) {
                 potentialStart = startOfWeek(subWeeks(referenceDate, 1)); // Consider locale for start of week
                 potentialEnd = endOfWeek(subWeeks(referenceDate, 1));
                 console.log(`Derived range from relative term: last week`);
             }
-             else if (dateInfo.relative_unit === 'month') {
+             else if (/\bmonth\b/.test(lowerOriginal)) {
                 potentialStart = startOfMonth(subMonths(referenceDate, 1));
                 potentialEnd = endOfMonth(subMonths(referenceDate, 1));
                 console.log(`Derived range from relative term: last month`);
             }
-             else if (dateInfo.relative_unit === 'year') {
+             else if (/\byear\b/.test(lowerOriginal)) {
                 potentialStart = startOfYear(subYears(referenceDate, 1));
                 potentialEnd = endOfYear(subYears(referenceDate, 1));
                 console.log(`Derived range from relative term: last year`);
-            }
-        }
-
-        // Handle Year-Month or Year if no specific date/relative term worked
-        if (!potentialStart && dateInfo.year) {
-            if (dateInfo.month) { // Year and Month provided
-                const year = dateInfo.year;
-                const monthIndex = dateInfo.month - 1; // date-fns uses 0-indexed months
-                const dateInMonth = new Date(year, monthIndex);
-                if (isValid(dateInMonth) && isPast(endOfMonth(dateInMonth))) { // Check if the whole month is past
-                    potentialStart = startOfMonth(dateInMonth);
-                    potentialEnd = endOfMonth(dateInMonth);
-                    console.log(`Derived range from year/month: ${dateInfo.year}-${dateInfo.month}`);
-                }
-            } else { // Only Year provided
-                 const year = dateInfo.year;
-                 const dateInYear = new Date(year, 0); // January 1st of the year
-                 if (isValid(dateInYear) && isPast(endOfYear(dateInYear))) { // Check if the whole year is past
-                    potentialStart = startOfYear(dateInYear);
-                    potentialEnd = endOfYear(dateInYear);
-                    console.log(`Derived range from year: ${dateInfo.year}`);
-                 }
             }
         }
 
@@ -317,105 +302,280 @@ function checkOverlap(arr1?: any[], arr2?: any[]): boolean {
     return false;
 }
 
-// ADD NEW parseDateStringToEnhanced function using chrono-node
+/**
+ * Refined date parsing function (v1.4).
+ * Assumes input 'dateString' is English (due to GPT pre-translation).
+ * Uses chrono-node for initial parsing, then date-fns for corrections and specific resolutions.
+ * Aims to return accurate year, month, day, and time components, with a correctly formatted normalized string.
+ */
 function parseDateStringToEnhanced(dateString: string, referenceDate: Date): EnhancedNormalizedDate {
-    // Chrono parses relative to the referenceDate's timezone context
+    // Input Assumption: dateString is assumed to be English.
+
     const results = chrono.parse(dateString, referenceDate, { forwardDate: true });
 
-    if (!results || results.length === 0) {
-        console.log(`Chrono could not parse date string: "${dateString}"`);
-        return { original: dateString, note: "Could not parse date." };
+    if (results.length === 0) {
+        return { original: dateString, note: "No date components found" };
     }
 
     const result = results[0];
-    let note = "Parsed successfully.";
-    let normalized: string | null = null;
-
     const components = result.start;
-    const year = components.get('year');
-    const month = components.get('month');
-    const day = components.get('day');
-    const hour = components.get('hour');
-    const minute = components.get('minute');
-    const second = components.get('second');
-    const weekday = components.get('weekday');
+    const chronoDate = result.date(); // Get the initial Date object from chrono
 
-    const isCertain = components.isCertain('year') && components.isCertain('month') && components.isCertain('day');
+    // Use ?? undefined to handle potential null returns from .get()
+    let correctedYear: number | undefined = components.get('year') ?? undefined;
+    let correctedMonth: number | undefined = components.get('month') ?? undefined; // 1-12
+    let correctedDay: number | undefined = components.get('day') ?? undefined;
+    let correctedHour: number | undefined = undefined;
+    let correctedMinute: number | undefined = undefined;
+    let correctedSecond: number | undefined = undefined;
 
-    if (isCertain) {
-        try {
-            // Get the JS Date object from Chrono
-            const parsedDateObj = result.date();
+    let dateIsCertain = false;
+    let timeIsCertain = false;
+    let finalDate: Date | null = null; // To store the date-fns calculated date
 
-            if (!isValid(parsedDateObj)) {
-                 throw new Error("Chrono library returned an invalid Date object.");
-            }
+    // --- 1. Day Boundary Correction ---
+    // If chrono resolved to the *next* day for end-of-day phrases, correct it back to referenceDate's day.
+    const lowerCaseDateString = dateString.toLowerCase();
+    if (/\b(end of day|tonight|eod)\b/.test(lowerCaseDateString)) {
+        if (isValid(chronoDate) && !isSameDay(chronoDate, referenceDate)) {
+            console.log(`Correcting day boundary for '${dateString}'`);
+            correctedYear = referenceDate.getFullYear();
+            correctedMonth = referenceDate.getMonth() + 1; // JS month is 0-indexed
+            correctedDay = referenceDate.getDate();
+        } else if (isValid(chronoDate) && isSameDay(chronoDate, referenceDate)) {
+            // If it's already the same day, keep chrono's components
+            correctedYear = chronoDate.getFullYear();
+            correctedMonth = chronoDate.getMonth() + 1;
+            correctedDay = chronoDate.getDate();
+        }
+         else {
+             // Fallback if chronoDate invalid
+             correctedYear = referenceDate.getFullYear();
+             correctedMonth = referenceDate.getMonth() + 1;
+             correctedDay = referenceDate.getDate();
+         }
+        // Explicitly unset time for these phrases
+        correctedHour = undefined;
+        correctedMinute = undefined;
+        correctedSecond = undefined;
+    }
 
-            // formatISO can represent the date with timezone offset
-            normalized = formatISO(parsedDateObj);
+    // --- 2. Relative Date Resolution (using date-fns) ---
+    let calculatedDate: Date | null = null; // Use this to store date-fns results
 
-            if (!components.isCertain('hour')) {
-                 note += " Time component was implied or defaulted by parser.";
+    // Check chrono certainty vs. keywords
+    if (components.isCertain('weekday') && !components.isCertain('day')) {
+        const weekday = components.get('weekday') ?? referenceDate.getDay(); // Default to current day if null
+        if (/\bnext\b/i.test(dateString)) {
+            calculatedDate = setDay(referenceDate, weekday, { weekStartsOn: 1 }); // Assuming week starts Monday
+             if (calculatedDate && (isBefore(calculatedDate, referenceDate) || isSameDay(calculatedDate, referenceDate))) {
+                  calculatedDate = addWeeks(calculatedDate, 1);
              }
-
-        } catch (err) {
-            console.error(`Error constructing or formatting Date object for "${dateString}":`, err);
-            normalized = null;
-            note = "Error during final date construction/formatting.";
+             console.log(`Resolved 'next weekday' for '${dateString}'`);
+        } else if (/\blast\b/i.test(dateString)) {
+            calculatedDate = setDay(referenceDate, weekday, { weekStartsOn: 1 });
+            if (calculatedDate && (isAfter(calculatedDate, referenceDate) || isSameDay(calculatedDate, referenceDate))) {
+                 calculatedDate = subWeeks(calculatedDate, 1);
+            }
+            console.log(`Resolved 'last weekday' for '${dateString}'`);
         }
+        // If just a weekday name without 'next'/'last', chrono might get it right, but let's check
+        else if (isValid(chronoDate) && isSameDay(chronoDate, referenceDate) && referenceDate.getDay() !== weekday) {
+             // Chrono might default to today, use setDay to be sure
+             calculatedDate = setDay(referenceDate, weekday, { weekStartsOn: 1 });
+             // Ambiguous - assume future? Or nearest? Let's assume nearest future/past based on chrono guess
+             if(calculatedDate) {
+                 if(isAfter(chronoDate, referenceDate)) { // Chrono guessed future
+                    if (isBefore(calculatedDate, referenceDate) || isSameDay(calculatedDate, referenceDate)) {
+                        calculatedDate = addWeeks(calculatedDate, 1);
+                    }
+                 } else { // Chrono guessed past or today
+                     if (isAfter(calculatedDate, referenceDate) || isSameDay(calculatedDate, referenceDate)) {
+                        calculatedDate = subWeeks(calculatedDate, 1);
+                     }
+                 }
+             }
+             console.log(`Resolved specific weekday '${dateString}'`);
+        }
+
+
+    } else if (/\btomorrow\b/i.test(dateString)) {
+        calculatedDate = addDays(referenceDate, 1);
+        console.log(`Resolved 'tomorrow' for '${dateString}'`);
+    } else if (/\byesterday\b/i.test(dateString)) {
+        calculatedDate = subDays(referenceDate, 1);
+        console.log(`Resolved 'yesterday' for '${dateString}'`);
+    } else if (/\blast week\b/i.test(dateString)) {
+        // Get year/month of start of last week. Day becomes uncertain.
+        const startOfLastWeek = startOfWeek(subWeeks(referenceDate, 1), { weekStartsOn: 1 });
+        correctedYear = startOfLastWeek.getFullYear();
+        correctedMonth = startOfLastWeek.getMonth() + 1;
+        correctedDay = undefined; // Day is uncertain
+        console.log(`Resolved 'last week' for '${dateString}'`);
+    } else if (/\bnext week\b/i.test(dateString)) {
+         const startOfNextWeek = startOfWeek(addWeeks(referenceDate, 1), { weekStartsOn: 1 });
+         correctedYear = startOfNextWeek.getFullYear();
+         correctedMonth = startOfNextWeek.getMonth() + 1;
+         correctedDay = undefined;
+         console.log(`Resolved 'next week' for '${dateString}'`);
+    } else if (/\blast month\b/i.test(dateString)) {
+        const startOfLastMonth = startOfMonth(subMonths(referenceDate, 1));
+        correctedYear = startOfLastMonth.getFullYear();
+        correctedMonth = startOfLastMonth.getMonth() + 1;
+        correctedDay = undefined;
+        console.log(`Resolved 'last month' for '${dateString}'`);
+    } else if (/\bnext month\b/i.test(dateString)) {
+        const startOfNextMonth = startOfMonth(addMonths(referenceDate, 1));
+        correctedYear = startOfNextMonth.getFullYear();
+        correctedMonth = startOfNextMonth.getMonth() + 1;
+        correctedDay = undefined;
+        console.log(`Resolved 'next month' for '${dateString}'`);
+    }
+    // ... add more relative resolutions if needed ...
+
+    // If date-fns calculated a date, use its components
+    if (calculatedDate && isValid(calculatedDate)) {
+        correctedYear = calculatedDate.getFullYear();
+        correctedMonth = calculatedDate.getMonth() + 1;
+        correctedDay = calculatedDate.getDate();
+        finalDate = calculatedDate; // Store for normalization
+    } else if (isValid(chronoDate)) {
+        // If no specific relative rule matched, but chrono gave a valid date, use it
+        // Re-apply boundary correction if it happened
+         if (/\b(end of day|tonight|eod)\b/.test(lowerCaseDateString) && !isSameDay(chronoDate, referenceDate)) {
+             finalDate = set(referenceDate, { hours: 0, minutes: 0, seconds: 0, milliseconds: 0 });
+             correctedYear = finalDate.getFullYear();
+             correctedMonth = finalDate.getMonth() + 1;
+             correctedDay = finalDate.getDate();
+         } else {
+             finalDate = chronoDate;
+             // Use chrono's components if not overridden by boundary correction
+             correctedYear = correctedYear ?? finalDate.getFullYear();
+             correctedMonth = correctedMonth ?? finalDate.getMonth() + 1;
+             correctedDay = correctedDay ?? finalDate.getDate();
+         }
+    }
+
+
+    // --- 3. Time Component Handling ---
+    // Use ?? undefined to handle potential null returns
+    timeIsCertain = components.isCertain('hour');
+    if (timeIsCertain) {
+        correctedHour = components.get('hour') ?? undefined;
+        // Only set minute/second if hour is certain AND they are provided/certain
+        if (correctedHour !== undefined) {
+             correctedMinute = components.get('minute') ?? 0; // Default minute/second to 0 if hour is certain but they aren't
+             correctedSecond = components.get('second') ?? 0;
+        } else {
+            // If hour became undefined somehow, reset others
+             timeIsCertain = false;
+             correctedMinute = undefined;
+             correctedSecond = undefined;
+        }
+
+        // Apply time to the finalDate if it exists
+        if (finalDate) {
+            finalDate = set(finalDate, {
+                hours: correctedHour,
+                minutes: correctedMinute,
+                seconds: correctedSecond,
+                milliseconds: 0 // Ensure ms is 0 for consistency
+            });
+        }
+
     } else {
-        normalized = null;
-        note = "Partial parse: Year, Month, or Day component missing or uncertain.";
-    }
-
-    // --- Add Heuristics for Period/Relative Markers ---
-    let period: EnhancedNormalizedDate['period'] = undefined;
-    if (components.isCertain('hour') && hour !== null) {
-        const h = hour;
-        if (h >= 5 && h < 12) period = 'Morning';
-        else if (h === 12) period = components.get('meridiem') === 0 ? 'AM' : 'PM'; // Handle noon specifically if AM/PM known
-        else if (h > 12 && h < 17) period = 'Afternoon';
-        else if (h >= 17 && h < 21) period = 'Evening';
-        else period = 'Night'; // Roughly 9 PM to 5 AM
-
-        // Refine if AM/PM is known
-        if (components.isCertain('meridiem')) {
-             period = components.get('meridiem') === 0 ? 'AM' : 'PM'; // 0=AM, 1=PM
+        correctedHour = undefined;
+        correctedMinute = undefined;
+        correctedSecond = undefined;
+        // Remove time components from finalDate if it exists
+        if (finalDate) {
+             finalDate = startOfDay(finalDate);
         }
     }
 
-    // Basic relative marker detection
-    let relative_marker: EnhancedNormalizedDate['relative_marker'] = undefined;
-    if (/last|previous/i.test(dateString)) relative_marker = 'last';
-    else if (/next/i.test(dateString)) relative_marker = 'next';
-    else if (/this/i.test(dateString)) relative_marker = 'this';
+    // --- 4. Explicit Anchor Prioritization ---
+    // If chrono was certain about year/month from the text, ensure they override relative calculations
+    // Use ?? undefined
+    const chronoCertainYear = components.get('year') ?? undefined;
+    const chronoCertainMonth = components.get('month') ?? undefined;
 
-    // Basic relative unit detection
-    let relative_unit: EnhancedNormalizedDate['relative_unit'] = undefined;
-    if (/day/i.test(dateString)) relative_unit = 'day';
-    else if (/week/i.test(dateString)) relative_unit = 'week';
-    else if (/month/i.test(dateString)) relative_unit = 'month';
-    else if (/year/i.test(dateString)) relative_unit = 'year';
-    else if (/weekend/i.test(dateString)) relative_unit = 'weekend';
+    if (components.isCertain('year') && chronoCertainYear !== correctedYear) {
+         console.log(`Prioritizing explicit year ${chronoCertainYear} for '${dateString}'`);
+         correctedYear = chronoCertainYear;
+         // If year changes, day might become invalid if month is Feb etc. Recalculate finalDate if possible.
+         if(correctedMonth && correctedDay && finalDate) {
+             try {
+                 finalDate = set(finalDate, { year: correctedYear });
+                 if (!isValid(finalDate)) finalDate = null; // Invalidate if date is wrong (e.g. Feb 30)
+             } catch { finalDate = null; }
+         } else { finalDate = null; } // Cannot determine full date anymore
+    }
+     if (components.isCertain('month') && chronoCertainMonth !== correctedMonth) {
+         console.log(`Prioritizing explicit month ${chronoCertainMonth} for '${dateString}'`);
+         correctedMonth = chronoCertainMonth;
+         // Recalculate finalDate if possible
+         if(correctedYear && correctedDay && correctedMonth && finalDate) {
+             try {
+                // date-fns month is 0-indexed
+                finalDate = set(finalDate, { month: correctedMonth - 1 });
+                if (!isValid(finalDate)) finalDate = null;
+             } catch { finalDate = null; }
+         } else { finalDate = null; }
+    }
+    // Re-check date certainty after anchor prioritization potentially changed things
+    dateIsCertain = correctedYear !== undefined && correctedMonth !== undefined && correctedDay !== undefined && finalDate !== null && isValid(finalDate);
 
-    const enhancedDate: EnhancedNormalizedDate = {
+
+    // --- 5. Normalize Output String ---
+    let normalized: string | null = null;
+    if (dateIsCertain && finalDate) {
+        if (timeIsCertain) {
+            normalized = formatISO(finalDate); // Full ISO string with time
+        } else {
+            normalized = format(finalDate, 'yyyy-MM-dd'); // Date only
+        }
+    } else if (correctedYear !== undefined && correctedMonth !== undefined) {
+        // Allow YYYY-MM if day is uncertain but month/year known (e.g., "last month")
+        // normalized = format(new Date(correctedYear, correctedMonth - 1), 'yyyy-MM'); // Might be useful later?
+        normalized = null; // For now, require day certainty for a normalized string
+    } else if (correctedYear !== undefined) {
+         // Allow YYYY if only year known
+         // normalized = format(new Date(correctedYear, 0), 'yyyy');
+         normalized = null;
+    }
+
+
+    // --- 6. Construct Final Object (Simplified Output) ---
+    const output: EnhancedNormalizedDate = {
         original: dateString,
         normalized: normalized,
-        note: note,
-        year: components.isCertain('year') ? (year ?? undefined) : undefined,
-        month: components.isCertain('month') ? (month ?? undefined) : undefined,
-        day: components.isCertain('day') ? (day ?? undefined) : undefined,
-        day_of_week: components.isCertain('weekday') ? (weekday ?? undefined) : undefined,
-        time_hour: components.isCertain('hour') ? (hour ?? undefined) : undefined,
-        time_minute: components.isCertain('minute') ? (minute ?? undefined) : undefined,
-        time_second: components.isCertain('second') ? (second ?? undefined) : undefined,
-        period: period,
-        relative_marker: relative_marker,
-        relative_unit: relative_unit
+        note: results[0]?.text !== dateString ? `Parsed section: "${results[0]?.text}"` : undefined,
+        year: correctedYear,
+        month: correctedMonth,
+        day: correctedDay,
+        day_of_week: finalDate ? (finalDate.getDay()) : (components.get('weekday') ?? undefined), // Use calculated day of week if possible, handle null
+        period: components.get('meridiem') === 0 ? 'AM' : components.get('meridiem') === 1 ? 'PM' : undefined, // Map meridiem if available
+        // Only include time if it was certain
+        ...(timeIsCertain && correctedHour !== undefined && {
+            time_hour: correctedHour,
+            time_minute: correctedMinute,
+            time_second: correctedSecond,
+        })
     };
 
-    console.log(`Enhanced Parsing Result for '${dateString}':`, JSON.stringify(enhancedDate));
-    return enhancedDate;
+    // Add a note if parsing was partial or uncertain
+    if (!dateIsCertain && !timeIsCertain && !output.note) {
+         output.note = "Could not fully resolve date/time components.";
+    } else if (!dateIsCertain && timeIsCertain && !output.note) {
+         output.note = "Could not fully resolve date components, but time was specified.";
+    } else if (dateIsCertain && !timeIsCertain && !output.note && components.isCertain('hour')) {
+        // This case happens if time was found but explicitly removed (e.g., "end of day")
+        output.note = "Date resolved, time components ignored due to phrasing.";
+     }
+
+
+    console.log(`Parsed '${dateString}' ->`, JSON.stringify(output));
+    return output;
 }
 
 /**
@@ -664,8 +824,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             type: initialEntities.type,
             sentiment: initialEntities.sentiment,
             priority: initialEntities.priority,
-            language: initialEntities.language,
-            // Initialize dates as undefined, will be populated below
             dates: undefined
         };
 
@@ -714,7 +872,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                  type: processedMetadata.type,
                  sentiment: processedMetadata.sentiment,
                  priority: processedMetadata.priority,
-                 language: processedMetadata.language || 'en', // Default if not processed
                  dates: processedMetadata.dates, // Assign the newly parsed EnhancedNormalizedDate[]
                  // conversation_id and thread_id are top-level in 'files' table
             };
@@ -761,32 +918,25 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                  console.log("Generating embeddings...");
                  const embeddings = await generateEmbeddings(chunks);
                  const validEmbeddings = embeddings.filter(e => e !== null) as number[][];
-                 if (validEmbeddings.length !== chunks.length) {
-                     console.warn("Some embeddings could not be generated.");
+                 const validChunks = chunks.filter((_, i) => embeddings[i] !== null);
+
+                 if (validEmbeddings.length === 0) {
+                     throw new Error("Failed to generate any valid embeddings.");
                  }
 
-                 if (validEmbeddings.length > 0) {
+                 if (validChunks.length > 0) {
                      // d. Prepare records for 'transcript_embeddings'
                      const timestamp = new Date().toISOString();
-                     const embeddingRecords = chunks.map((chunk, index) => {
-                         const embedding = embeddings[index];
-                         if (!embedding) return null; // Skip if embedding failed
-
-                         // Store the *full fileMetadata* (including EnhancedNormalizedDate[])
-                         // in each chunk's metadata field.
-                         const chunkMetadata: ProcessedEntities & { created_at: string; chunk_index: number } = {
-                             ...fileMetadata, // Spread the file metadata (contains EnhancedNormalizedDate[])
+                     const embeddingRecords = validChunks.map((chunk, index) => ({
+                         file_id: fileId,
+                         content_chunk: chunk,
+                         embedding: validEmbeddings[index],
+                         metadata: {
+                             ...fileMetadata,
                              created_at: timestamp,
                              chunk_index: index,
-                         };
-
-                         return {
-                             file_id: fileId,
-                             content_chunk: chunk,
-                             embedding: embedding,
-                             metadata: chunkMetadata, // Ensure this contains EnhancedNormalizedDate[]
-                         };
-                     }).filter(record => record !== null);
+                         },
+                     }));
 
                      // e. Insert into 'transcript_embeddings' table
                      if (embeddingRecords.length > 0) {
@@ -825,11 +975,16 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
             // a. Generate embedding for the query text
             console.log("Generating embedding for query text...");
-            const queryEmbeddings = await generateEmbeddings([queryText]);
-            if (!queryEmbeddings || queryEmbeddings.length === 0 || !queryEmbeddings[0]) {
-                throw new Error("Failed to generate embedding for the query text.");
+            const queryEmbeddingResponse = await openai.embeddings.create({
+                model: EMBEDDING_MODEL,
+                input: queryText,
+                dimensions: EMBEDDING_DIMENSIONS,
+            });
+            const queryEmbedding = queryEmbeddingResponse?.data[0]?.embedding;
+
+            if (!queryEmbedding) {
+                throw new Error("Failed to generate query embedding.");
             }
-            const queryEmbedding = queryEmbeddings[0];
 
             // b. Vector Search Call Update
             console.log("Attempt 1: Searching via vector search...");
@@ -875,7 +1030,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             type: result.metadata.type,
                             sentiment: result.metadata.sentiment,
                             priority: result.metadata.priority,
-                            language: result.metadata.language,
                           }
                         : {},
                 }));
@@ -976,7 +1130,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                                         type: file.file_metadata.type,
                                         sentiment: file.file_metadata.sentiment,
                                         priority: file.file_metadata.priority,
-                                        language: file.file_metadata.language,
                                       }
                                     : {},
                             }));
