@@ -68,7 +68,7 @@ The following steps detail the required modifications within the `netlify/functi
         *   **c. Calculate `metadata_boost_score`:**
             *   Initialize `metadata_boost_score = 0.0`.
             *   Apply additive boosts (`+= 0.05`) for overlaps between `candidate.entities_in_chunk` and `queryMetadata` for: `people`, `locations`, `topics` (using `checkOverlap`), `type` (exact match), `sentiment` (exact match).
-            *   Apply boost for `dates` presence: If `queryMetadata.dates` and `candidate.entities_in_chunk?.dates` both have length > 0, add `+= 0.05`.
+            *   **Apply Hierarchical Date Matching Boost:** Implement logic to iterate through `queryMetadata.dates`. For each query date, check for matches in `candidate.entities_in_chunk.dates` at the Day (+0.05), Month (+0.03), or Year (+0.01) level, adding the highest match found for that query date to the boost score.
             *   **Apply Date Range Boost (FTS Only):** If `query_source === 'postgres_fallback_text'`:
                 *   Call `deriveDateRange(queryMetadata.dates)` once to get potential past ranges.
                 *   Parse `candidate.timestamp` to a `Date` object.
@@ -95,9 +95,9 @@ The following steps detail the required modifications within the `netlify/functi
 *   Verify Vector Search results correctly use `similarity` for initial scoring in re-ranking.
 *   Verify FTS fallback triggers correctly and results use `rank` for initial scoring.
 *   Verify FTS results have their `chunk` truncated to 3000 characters.
-*   Verify re-ranking logic correctly calculates scores, including the metadata overlap boosts.
+*   Verify re-ranking logic correctly calculates scores, including the metadata overlap boosts and the hierarchical date matching boost (Day > Month > Year).
 *   Verify FTS results receive the additional `+0.10` date range boost when their `created_at` timestamp matches a derived past query date range.
-*   Test edge cases (no metadata overlap, empty query metadata, results with 0 similarity/rank, etc.).
+*   Test edge cases (no metadata overlap, empty query metadata, results with 0 similarity/rank, partial/full date matches, etc.).
 *   Confirm final response contains `FINAL_MATCH_COUNT` results.
 *   Confirm `message_for_gpt` no longer contains date parsing notes.
 

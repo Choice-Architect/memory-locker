@@ -526,8 +526,43 @@ async function rerankResults(
         // Check for exact match on sentiment
         if (queryMetadata.sentiment && candidateEntities?.sentiment && queryMetadata.sentiment === candidateEntities.sentiment) metadata_boost_score += 0.05;
 
-        // Check for presence of dates in both query and candidate
-        if (queryMetadata.dates && queryMetadata.dates.length > 0 && candidateEntities?.dates && candidateEntities.dates.length > 0) metadata_boost_score += 0.05;
+        // --- START: Revised Hierarchical Date Matching Boost ---
+        if (queryMetadata.dates && queryMetadata.dates.length > 0 && candidateEntities?.dates && candidateEntities.dates.length > 0) {
+            let dateBoostApplied = 0.0;
+            for (const queryDate of queryMetadata.dates) {
+                let bestMatchBoost = 0.0;
+                for (const candidateDate of candidateEntities.dates) {
+                    let currentMatchBoost = 0.0;
+                    // Check Day-Level Match (highest priority)
+                    if (queryDate.year && queryDate.month && queryDate.day &&
+                        candidateDate.year === queryDate.year &&
+                        candidateDate.month === queryDate.month &&
+                        candidateDate.day === queryDate.day) {
+                        currentMatchBoost = 0.05; // Higher boost for exact day
+                    }
+                    // Check Month-Level Match (medium priority)
+                    else if (queryDate.year && queryDate.month &&
+                             candidateDate.year === queryDate.year &&
+                             candidateDate.month === queryDate.month) {
+                        currentMatchBoost = Math.max(currentMatchBoost, 0.03); // Medium boost if month matches (don't overwrite higher day boost)
+                    }
+                    // Check Year-Level Match (lowest priority)
+                    else if (queryDate.year && candidateDate.year === queryDate.year) {
+                        currentMatchBoost = Math.max(currentMatchBoost, 0.01); // Low boost if only year matches
+                    }
+
+                    // Keep the highest boost found for this queryDate across all candidateDates
+                    bestMatchBoost = Math.max(bestMatchBoost, currentMatchBoost);
+                    // If we found the best possible match (day level), no need to check other candidateDates for this queryDate
+                    if (bestMatchBoost === 0.05) break;
+                }
+                // Add the best boost found for this queryDate to the total
+                dateBoostApplied += bestMatchBoost;
+            }
+            metadata_boost_score += dateBoostApplied;
+             console.log(`Applied hierarchical date boost: +${dateBoostApplied.toFixed(3)} for candidate file ${candidate.file_id} chunk ${candidate.chunk_index}`);
+        }
+        // --- END: Revised Hierarchical Date Matching Boost ---
 
         // Language is explicitly excluded
 

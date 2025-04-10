@@ -55,7 +55,7 @@
             3.  **Mapping & Truncation:** Map results to `ContextObject`s, preserving `similarity` (from vector) or `rank` (from FTS). Truncate FTS `chunk` text to 3000 chars.
             4.  **Application-Layer Re-ranking:** After retrieval and mapping, the Netlify function (`memory-action.ts`) re-ranks the candidates using `rerankResults`.
                 *   Calculates `initial_score` based on `similarity` (vector) or `rank` (FTS).
-                *   Calculates `metadata_boost_score` by summing increments for overlapping metadata (`people`, `locations`, `topics`, `type`, `sentiment`, `dates` presence; *language excluded*; `+0.05` each). For FTS results, adds an additional `+0.10` if the candidate's `timestamp` falls within a past date range derived from the query.
+                *   Calculates `metadata_boost_score` by summing increments for overlapping metadata (`people`, `locations`, `topics`, `type`, `sentiment`; *language excluded*; `+0.05` each) and adding a hierarchical boost for date matching (Day +0.05, Month +0.03, Year +0.01). For FTS results, adds an additional `+0.10` if the candidate's `timestamp` falls within a past date range derived from the query.
                 *   Calculates `final_score = min(1.0, initial_score + metadata_boost_score)`.
             5.  **Final Selection:** The top `FINAL_MATCH_COUNT` (5) results based on `final_score` are selected and returned.
         *   The source of the result (`vector_store`, `postgres_fallback_text`, `none`) is tracked in the response (`query_source`).
@@ -109,10 +109,10 @@
         *   Updated relevant TypeScript interfaces.
         *   Ensuring FTS query selects `rank` and does not pre-filter by date.
         *   Updating mapping logic to preserve scores and truncate FTS chunks.
-        *   Implementing the enhanced `rerankResults` function (calculating initial score, metadata boost score including FTS date boost, and final score).
+        *   Implementing the enhanced `rerankResults` function (calculating initial score, metadata boost score including hierarchical date matching, FTS date range boost, and final score).
         *   Integrating the `rerankResults` call after initial retrieval.
         *   Removing date parsing note logic from the final response.
-    *   **Rationale:** Leverages both semantic similarity and text relevance scores, provides flexible metadata/date-driven ranking (excluding language), and simplifies query logic.
+    *   **Rationale:** Leverages both semantic similarity and text relevance scores, provides flexible metadata/date-driven ranking (excluding language), including hierarchical date matching, and simplifies query logic.
     *   **Status:** Completed.
 
 3.  **Future Considerations (Backlog):**
