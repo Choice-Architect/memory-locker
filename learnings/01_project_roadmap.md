@@ -120,11 +120,11 @@
     *   **Findings:** The extraction of `people`, `locations`, `topics`, `type`, `sentiment`, `language`, `priority`, and `organizations` performs reliably and meets current requirements. The classification of specific businesses as `locations` is acceptable for now. The non-extraction of `conversation_id`/`thread_id` from user input is confirmed as the correct behavior due to backend UUID constraints.
     *   **Status:** Stable. These non-date entity handling aspects are considered the baseline and should not be altered in future `store` mode modifications unless explicitly specified.
 
-4.  **Refine Date Parsing (`store` mode) (Completed - v1.4):**
-    *   **Goal:** Improve accuracy and reliability of stored `EnhancedNormalizedDate` components by refining the `parseDateStringToEnhanced` function in `memory-action.ts` using `chrono-node` and `date-fns` post-processing.
-    *   **Approach:** Implemented specific corrections for day boundaries, relative date resolution, time component granularity, and explicit anchor prioritization, focusing on English inputs (assuming GPT pre-translation). Simplified output by removing unused fields (`relative_marker`, `relative_unit`).
-    *   **Rationale:** Enhance the quality of stored date metadata to improve the effectiveness of v1.3 query re-ranking (hierarchical date boost).
-    *   **Status:** Completed.
+4.  **Refine Date Parsing (`store` mode) (Implementation Required - v1.4 Revised):**
+    *   **Goal:** Implement the revised v1.4 date parsing strategy (detailed in `learnings/02_enhancement_plan.md`) to accurately extract individual date/time components, handle granularity/uncertainty correctly (using `normalized: null`), ignore specified qualifiers, and fix identified parsing errors.
+    *   **Approach:** Modify `parseDateStringToEnhanced` in `memory-action.ts` per the revised v1.4 plan. Update `openapi.json` (remove UUID fields, add `week_number`) and `gpt_instructions.md` (prohibit UUID extraction).
+    *   **Rationale:** Correct parsing errors identified in Test 2, ensure accurate date component storage for reliable v1.3 relevance ranking, and prevent backend UUID errors.
+    *   **Status:** **Required.** The initial v1.4 implementation was only partially successful and requires significant rework based on Test 2 findings and clarified requirements.
 
 5.  **Future Considerations (Backlog):**
     *   Advanced Retrieval (Hybrid search, time decay, more sophisticated boosting).
