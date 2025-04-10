@@ -50,11 +50,14 @@
         *   Uses `chrono-node` library within `parseDateStringToEnhanced` function to parse various date/time formats relative to the current timestamp.
         *   Outputs `EnhancedNormalizedDate` objects containing components (year, month, day, hour, etc.) and potentially a normalized ISO string.
         *   These `EnhancedNormalizedDate` objects are stored in the `dates` array within metadata JSONB columns (`files.file_metadata` and `transcript_embeddings.metadata`).
-    *   **Query (`query`/`combined`) - Revised Strategy v1.2:**
-        *   Implements a **Simplified Query Strategy with Re-ranking**:
-            1.  **Primary - Vector Search:** Calls `search_memory_chunks` RPC, passing query embedding. Retrieves top `VECTOR_MATCH_COUNT` (e.g., 15) candidates based on similarity. Optional metadata filters (topics, people, etc.) can be passed but likely omitted for broad initial retrieval. *Date components are NOT used for filtering here.*
-            2.  **Fallback - Full-Text Search (FTS):** If Vector Search fails, queries `files` table using `textSearch` against `transcript_tsv` column, using entities from the query. *Crucially, includes conditional `created_at` filtering:* If the Netlify function derives a specific past date range from the query, a `WHERE created_at BETWEEN ...` clause is added. Retrieves top `FALLBACK_MATCH_COUNT` (e.g., 20) candidates ranked by FTS relevance (`ts_rank_cd`).
-            3.  **Application-Layer Re-ranking:** After initial retrieval (Vector or FTS), the Netlify function performs re-ranking. It calculates a `final_score` for each candidate based on its `initial_score` (similarity or fixed score for FTS) plus a `metadata_boost_score` (sum of +0.05 for each overlapping metadata entity: people, locations, topics, type, sentiment, dates). The top `FINAL_MATCH_COUNT` (e.g., 5) results based on `final_score` are selected.
+    *   **Query (`query`/`combined`) - Strategy v1.2 (Pending Implementation):**
+        *   Implements a **Simplified Query Strategy with Application-Layer Re-ranking**:
+            1.  **Primary Retrieval - Vector Search:** Calls `search_memory_chunks` RPC with query embedding. Retrieves top `VECTOR_MATCH_COUNT` (e.g., 15) candidates based on similarity. Optional metadata filters (`topics`, `people`, etc.) are typically omitted for broad retrieval. *Date components are NOT used for vector filtering.*
+            2.  **Fallback Retrieval - FTS:** If Vector Search fails or returns no results, queries the `files` table using `textSearch` against `transcript_tsv` (using `'english'` config). The search uses entities from the query *excluding language*. **Conditional `created_at` Filtering:** If the Netlify function derives a specific past date range from the query's `EnhancedNormalizedDate` objects, a `WHERE created_at BETWEEN ...` clause is added to the FTS query. Retrieves top `FALLBACK_MATCH_COUNT` (e.g., 20) candidates.
+            3.  **Application-Layer Re-ranking:** After Step 1 or 2, the Netlify function (`memory-action.ts`) re-ranks the retrieved candidates. It calculates a `final_score` for each candidate: `final_score = initial_score + metadata_boost_score`.
+                *   `initial_score` is derived from vector `similarity` or a fixed value (e.g., 0.5) for FTS results.
+                *   `metadata_boost_score` is calculated by summing small increments (+0.05) for each overlapping metadata entity between the query and the candidate (`people`, `locations`, `topics`, `type`, `sentiment`, `dates` presence check; *language is excluded*).
+            4.  **Final Selection:** The top `FINAL_MATCH_COUNT` (e.g., 5) results based on `final_score` are selected and returned.
         *   The source of the result (`vector_store`, `postgres_fallback_text`, `none`) is tracked in the response (`query_source`).
 4.  **Error Handling & Logging:** Implemented try/catch blocks, basic Netlify function logging, and consistent error responses.
 5.  **Deployment & Initial Testing:** Function deployed and tested via endpoint.
@@ -74,7 +77,7 @@
     *   Infer `type` and `sentiment`.
     *   Extract `priority`, `language`, `conversation_id`, `thread_id`.
     *   Handle responses (synthesize context, acknowledge storage/errors).
-3.  **Action Schema Definition (`openapi.json`):** Created OpenAPI v3.1.0 spec defining the server URL, path, method, request/response schemas (including `NormalizedDate` in output), and API key authentication (`x-api-key`).
+3.  **Action Schema Definition (`openapi.json`):** Created OpenAPI v3.1.0 spec defining the server URL, path, method, request body (`ExtractedEntities` for input dates), response (`SuccessResponse` containing `ContextObject`s, which in turn use `OutputProcessedEntities` referencing `EnhancedNormalizedDate` for output dates), and API key authentication (`x-api-key`).
 4.  **Action Configuration:** Added schema to GPT config, configured API key authentication. Schema validated in editor.
 
 ---
@@ -84,14 +87,7 @@
 **Objective:** Tested the end-to-end flow and refined implementation based on results.
 
 1.  **End-to-End Testing:** Performed various tests (store, query, complex scenarios, fallbacks) via the ChatGPT interface.
-2.  **Refinement & Bug Fixing:**
-    *   Adjusted `VECTOR_MATCH_THRESHOLD` for better query recall.
-    *   Implemented and refined the tiered fallback search logic.
-    *   Implemented and refined date normalization logic (*originally `normalizeDateString`, now `parseDateStringToEnhanced` with `chrono-node`*).
-    *   Refactored to remove `user_id` dependency.
-    *   Added and tested metadata enhancements (priority, language, etc.) and filtering.
-    *   Ensured `chunk_index` propagation.
-    *   Addressed various bugs and inconsistencies identified during testing.
+2.  **Refinement & Bug Fixing:** *(Details to be populated after testing v1.2 implementation)*
 
 ---
 
@@ -106,15 +102,14 @@
     *   **Status:** Completed.
 
 2.  **Implement Relevance Boosting (Application Layer) (Next Step - Plan v1.2):**
-    *   **Goal:** Improve relevance ranking of query results using stored metadata *after* initial broad retrieval, using the simplified fallback.
-    *   **Approach:** Implement re-ranking logic within the Netlify function (`memory-action.ts`) based on **Plan v1.2 in `learnings/03_relevance_boosting_plans.md`**. This involves:
-        *   Removing the metadata fallback tier.
-        *   Implementing conditional `created_at` filtering in the FTS fallback.
-        *   Retrieving a larger candidate set (e.g., 15/20).
-        *   Implementing the `rerankResults` function with purely additive scoring (`final_score = initial_score + metadata_boost_score`).
-        *   Calculating `metadata_boost_score` based on entity overlap (+0.05 per type).
-        *   Returning the top K (e.g., 5) results.
-    *   **Rationale:** Simplifies fallback logic while providing flexible metadata-driven ranking and correct time-based filtering.
+    *   **Goal:** Improve relevance ranking of query results using stored metadata *after* initial broad retrieval, following the simplified fallback and re-ranking strategy.
+    *   **Approach:** Implement the logic detailed in **`learnings/02_enhancement_plan.md`** within the Netlify function (`memory-action.ts`). Key implementation tasks include:
+        *   Updating constants (`VECTOR_MATCH_COUNT=15`, `FALLBACK_MATCH_COUNT=20`, `FINAL_MATCH_COUNT=5`).
+        *   Removing the old metadata fallback tier from the query logic.
+        *   Implementing the conditional `created_at` filtering logic within the FTS fallback based on derived date ranges from `EnhancedNormalizedDate` objects.
+        *   Implementing the `rerankResults` function: calculate `initial_score` (similarity or fixed), `metadata_boost_score` (additive, +0.05 per overlap type, excluding language), and `final_score`.
+        *   Integrating the `rerankResults` call after initial retrieval to sort and trim candidates before returning the final response.
+    *   **Rationale:** Simplifies fallback logic, provides flexible metadata-driven ranking (excluding language), and enables correct time-based filtering for FTS fallback when applicable.
     *   **Status:** Planned.
 
 3.  **Future Considerations (Backlog):**
