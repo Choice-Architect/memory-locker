@@ -1,4 +1,4 @@
-# Memory Locker: Enhancement Implementation Plan v1.3
+# Memory Locker: Enhancement Implementation Plan v1.3 - Query Mode Re-ranking
 
 **Version:** 1.3 (Revised)
 
@@ -58,6 +58,8 @@ The following steps detail the required modifications within the `netlify/functi
     *   Ensure `checkOverlap(arr1?: any[], arr2?: any[]): boolean` is present and handles case-insensitivity for strings.
     *   Ensure `deriveDateRange(dates: EnhancedNormalizedDate[]): { startDate: string; endDate: string } | null` is present (it's needed for re-ranking now).
 
+*Note: Subsequent testing (`learnings/03_test_observations.md`, Section A) confirmed that the necessary metadata entities (`people`, `locations`, `topics`, `type`, `sentiment`) are reliably extracted during the `store` process, validating the prerequisite for the metadata boosting described below. The testing also confirmed reliable `language` extraction, supporting its intentional exclusion from the boost score.*
+
 **6. Enhance `rerankResults` Function:**
     *   **Signature:** Remains the same.
     *   **Internal Logic:**
@@ -103,3 +105,68 @@ The following steps detail the required modifications within the `netlify/functi
 
 ---
 *   Update `learnings/01_project_roadmap.md` to reflect the completed implementation status of this revised plan.
+
+---
+
+# Enhancement Implementation Plan v1.4: Store Mode Date Parsing Refinement
+
+**Version:** 1.4
+
+**Prerequisite Assumption:** The controlling GPT (`gpt_instructions.md`) will be updated to:
+1.  Translate all user input (`query_text`) to English before sending it to the `memory-action` in `store` or `combined` mode.
+2.  Continue to extract the *original* detected language (e.g., 'fr', 'en') and send it in the `extracted_entities.language` field.
+3.  The `memory-action` function will store this original `language` code, but the parsing logic below only needs to handle English date strings.
+
+**Goal:** Refine the `parseDateStringToEnhanced` function within `memory-action.ts` to improve the accuracy and reliability of the stored `EnhancedNormalizedDate` components, leveraging `chrono-node` for initial parsing and `date-fns` for post-processing and correction, focusing solely on English date expressions.
+
+**Rationale:** Address the specific date parsing failures identified in `03_test_observations.md` (Section B, Issue 2.1) to ensure more accurate date components are stored in metadata, thereby improving the effectiveness of the v1.3 relevance re-ranking (hierarchical date matching boost).
+
+---
+
+## Implementation Steps (`memory-action.ts`)
+
+The following steps detail required modifications within the `parseDateStringToEnhanced` function in `netlify/functions/memory-action/memory-action.ts`.
+
+**1. Refine `parseDateStringToEnhanced` Function Logic:**
+
+*   **Input Assumption:** Acknowledge via comments that the `dateString` argument is assumed to be English.
+*   **Post-`chrono.parse` Processing:** Retain `chrono.parse` for initial parsing. Add logic *after* the initial parse to refine the `result` (`results[0]`) and extracted `components`.
+    *   **a. Day Boundary Correction:**
+        *   Check if the input string contains terms like "end of day", "tonight", "EOD".
+        *   Compare the date part (`YYYY-MM-DD`) of `result.start.date()` with the `referenceDate`.
+        *   If they don't match (specifically, if `chrono`'s date is the day *after* `referenceDate`), use `date-fns` (e.g., `setYear`, `setMonth`, `setDate` or `startOfDay(referenceDate)`) to force the `year`, `month`, `day` components to match the `referenceDate`. Update the internal `components` object accordingly.
+    *   **b. Relative Date Resolution (using `date-fns`):**
+        *   Check if `chrono` produced a partial result for common relative terms (e.g., `result.start.isCertain('weekday')` is true but `result.start.isCertain('day')` is false, or month/year is known but day is not).
+        *   Based on the identified components (e.g., `weekday`, `relative_marker` implied by `chrono`'s parsing context) and the `referenceDate`, use `date-fns` functions (e.g., `nextTuesday(referenceDate)`, `lastDayOfMonth(referenceDate)`, `addMonths(referenceDate, 1)`, `startOfWeek(referenceDate, { weekStartsOn: 1 })`) to calculate the specific target `year`, `month`, and `day`.
+        *   Update the internal `components` object with these calculated, more precise values. Prioritize these calculated Y/M/D values over potentially vague `chrono` outputs for the final `EnhancedNormalizedDate`.
+    *   **c. Time Component Handling (Reduce Granularity):**
+        *   Only populate the `time_hour`, `time_minute`, `time_second` fields in the returned `EnhancedNormalizedDate` object if `result.start.isCertain('hour')` is true.
+        *   If time components are uncertain, ensure the `normalized` ISO string output reflects this (e.g., format as `YYYY-MM-DD` using `date-fns.format(calculatedDate, 'yyyy-MM-dd')` instead of `formatISO` which includes time/offset). Set `normalized` to `null` if even the date is uncertain after corrections.
+    *   **d. Explicit Anchor Prioritization:**
+        *   Before finalizing components, check if the original `dateString` contained explicit anchors (e.g., a specific month name like "August", a year like "2025").
+        *   If `chrono` identified these explicit components (`result.start.isCertain('month')`, `result.start.isCertain('year')`), ensure the final `year` and `month` components reflect these explicit values, potentially overriding interpretations derived solely from relative terms (e.g., for "last two weeks of August 2025", ensure Year=2025, Month=8 are primary).
+    *   **e. Simplify Output Object:**
+        *   Remove the `relative_marker` and `relative_unit` properties entirely from the final `EnhancedNormalizedDate` object returned by the function.
+*   **Interface Update:** Update the `EnhancedNormalizedDate` interface definition within `memory-action.ts` to remove the `relative_marker` and `relative_unit` optional properties. (Note: `openapi.json` will need a corresponding update later).
+
+**2. Add/Update Testing Requirements:**
+
+*   Add specific unit tests (or manual test cases for `03_test_observations.md`) for `parseDateStringToEnhanced` covering:
+    *   Input "end of day", "tonight" -> Resolves to current date (YYYY-MM-DD), time components are undefined/null.
+    *   Input "next Wednesday" (relative to a known date) -> Resolves to correct future YYYY-MM-DD.
+    *   Input "last Tuesday" (relative to a known date) -> Resolves to correct past YYYY-MM-DD.
+    *   Input "last week" (relative to a known date) -> Resolves to appropriate YYYY-MM components (or YYYY-WW week number), *not* a specific day. `normalized` might be `null` or represent the week/month start.
+    *   Input "last two weeks of August 2025" -> Resolves primarily based on August 2025 (YYYY=2025, Month=8). `normalized` reflects this, potentially `null` or `2025-08`.
+    *   Input "April 28th, 2025 from 2am to 4am UTC" -> `time_hour`=2, `time_minute`=0 are populated; `normalized` includes time.
+    *   Confirm `relative_marker` and `relative_unit` are absent in the output object.
+
+**3. Update Project Roadmap:**
+
+*   Add a task under Phase 5 in `learnings/01_project_roadmap.md` reflecting the goal of this v1.4 date parsing refinement.
+
+**Impact Statement:**
+
+*   Successfully implementing this plan will result in more accurate and reliable date components (`year`, `month`, `day`, `time_hour`, etc.) being stored in the `EnhancedNormalizedDate` objects within the JSONB metadata (`files.file_metadata`, `transcript_embeddings.metadata`).
+*   This increased accuracy directly benefits the existing v1.3 query re-ranking logic in `rerankResults`, specifically the hierarchical date matching boost, making it more effective at identifying relevant memories based on date criteria. No changes are required to the `rerankResults` function itself as part of *this* plan (v1.4).
+
+---

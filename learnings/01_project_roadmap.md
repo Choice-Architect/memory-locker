@@ -1,4 +1,4 @@
-## Memory Locker: Custom GPT Product Development Roadmap (v1.2)
+## Memory Locker: Custom GPT Product Development Roadmap (v1.4)
 
 **Goal:** Create a Custom GPT within the official ChatGPT application that allows a user to store and retrieve personal memories, notes, and information using natural language, voice, and potentially file uploads. The GPT will leverage Actions to interact with a Supabase backend via a Netlify Function.
 
@@ -59,7 +59,7 @@
                 *   Calculates `final_score = min(1.0, initial_score + metadata_boost_score)`.
             5.  **Final Selection:** The top `FINAL_MATCH_COUNT` (5) results based on `final_score` are selected and returned.
         *   The source of the result (`vector_store`, `postgres_fallback_text`, `none`) is tracked in the response (`query_source`).
-        *   **Note:** Date parsing notes from `chrono-node` are no longer included in the response `message_for_gpt`.
+        *   **Note:** Date parsing notes (e.g., "Partial parse...") from `chrono-node` are present within the `EnhancedNormalizedDate` objects returned in `retrieved_context`, but are not used for ranking and are no longer separately included in the top-level `message_for_gpt` field.
 4.  **Error Handling & Logging:** Implemented try/catch blocks, basic Netlify function logging, and consistent error responses.
 5.  **Deployment & Initial Testing:** Function deployed and tested via endpoint.
 
@@ -115,17 +115,24 @@
     *   **Rationale:** Leverages both semantic similarity and text relevance scores, provides flexible metadata/date-driven ranking (excluding language), including hierarchical date matching, and simplifies query logic.
     *   **Status:** Completed.
 
-3.  **Future Considerations (Backlog):**
+3.  **Non-Date Entity Extraction (`store` mode) - Status Confirmed:**
+    *   **Goal:** Confirm the stability and acceptance of non-date entity extraction in the `store` mode based on recent testing (ref: `learnings/03_test_observations.md`).
+    *   **Findings:** The extraction of `people`, `locations`, `topics`, `type`, `sentiment`, `language`, `priority`, and `organizations` performs reliably and meets current requirements. The classification of specific businesses as `locations` is acceptable for now. The non-extraction of `conversation_id`/`thread_id` from user input is confirmed as the correct behavior due to backend UUID constraints.
+    *   **Status:** Stable. These non-date entity handling aspects are considered the baseline and should not be altered in future `store` mode modifications unless explicitly specified.
+
+4.  **Refine Date Parsing (`store` mode) (Planned - v1.4):**
+    *   **Goal:** Improve accuracy and reliability of stored `EnhancedNormalizedDate` components by refining the `parseDateStringToEnhanced` function in `memory-action.ts` using `chrono-node` and `date-fns` post-processing.
+    *   **Approach:** Implement specific corrections for day boundaries, relative date resolution, time component granularity, and explicit anchor prioritization, focusing on English inputs (assuming GPT pre-translation). Simplify output by removing unused fields.
+    *   **Rationale:** Enhance the quality of stored date metadata to improve the effectiveness of v1.3 query re-ranking (hierarchical date boost).
+    *   **Status:** Planned.
+
+5.  **Future Considerations (Backlog):**
     *   Advanced Retrieval (Hybrid search, time decay, more sophisticated boosting).
 
 ---
 
 ### Phase 6: Documentation & Launch (Pending)
 
-**Objective:** Finalize documentation and prepare for wider use.
-
-1.  **Documentation:** Finalize OpenAPI comments, document Netlify function logic/setup, review GPT instructions.
-2.  **Final Checks:** Perform regression testing, review security configurations.
-3.  **Launch/Sharing:** Publish the Custom GPT (Private/Link/Store).
+1.  **Final Checks:** Perform regression testing, review security configurations.
 
 --- 
