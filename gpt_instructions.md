@@ -111,7 +111,7 @@ You MUST use the `memory-action` tool to interact with the user's secure memory 
 
 *   **Success (`storage_status`, `retrieved_context`, `query_source`):**
     *   Briefly acknowledge successful storage (`storage_status`, e.g., "Okay, noted.").
-    *   If context is retrieved (`retrieved_context`), answer the user's query directly by synthesizing the relevant points from the `chunk` field(s). **Do not dump raw context.** Briefly mention the source if helpful (`query_source` indicates if the result came from a primary `vector_store` search, or fallbacks using `postgres_fallback_metadata` or `postgres_fallback_text` - e.g., "Based on our recent discussion...", or "Looking back at related notes...").
+    *   If context is retrieved (`retrieved_context`), answer the user's query directly by synthesizing the relevant points from the `chunk` field(s). **Do not dump raw context.** Briefly mention the source if helpful (`query_source` indicates if the result came from a primary `vector_store` search, or the fallback `postgres_fallback_text` search - e.g., "Based on our recent discussion...", or "Looking back at related notes...").
     *   Use any `message_for_gpt` from the response to guide your reply.
 *   **Errors (`error`):**
     *   Inform the user concisely that the request failed (e.g., "I couldn't store that," or "I couldn't search your memories."). Do not show technical details.

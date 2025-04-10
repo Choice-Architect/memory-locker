@@ -2,7 +2,25 @@ import { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import stemmer from '@stdlib/nlp-porter-stemmer';
-import { formatISO, isValid, parseISO, endOfDay } from 'date-fns';
+import {
+    formatISO,
+    isValid,
+    parseISO,
+    endOfDay,
+    startOfDay,
+    startOfWeek,
+    endOfWeek,
+    startOfMonth,
+    endOfMonth,
+    startOfYear,
+    endOfYear,
+    subDays,
+    subWeeks,
+    subMonths,
+    subYears,
+    isFuture,
+    isPast
+} from 'date-fns';
 import * as chrono from 'chrono-node';
 
 // --- Interfaces for API Contract ---
@@ -112,14 +130,22 @@ interface FallbackResultItem {
     file_metadata: ProcessedEntities | null;
 }
 
+// NEW Interface for internal re-ranking
+interface ScoredContextObject extends ContextObject {
+    initial_score: number; // Normalized initial score (0-1)
+    metadata_boost_score: number; // Calculated boost
+    final_score: number;  // Score after boost
+}
+
 // --- Constants ---
 const EMBEDDING_MODEL = 'text-embedding-3-small';
 const EMBEDDING_DIMENSIONS = 1536; // Dimension for text-embedding-3-small
 const CHUNK_SIZE = 1000; // Target size in characters
 const CHUNK_OVERLAP = 200; // Overlap in characters
 const VECTOR_MATCH_THRESHOLD = 0.5; // Similarity threshold for vector search (Lowered from 0.75)
-const VECTOR_MATCH_COUNT = 5;     // Max number of chunks to retrieve via vector search
-const FALLBACK_MATCH_COUNT = 10; // Added fallback match count
+const VECTOR_MATCH_COUNT = 15;     // Max number of chunks to retrieve via vector search (Updated for re-ranking)
+const FALLBACK_MATCH_COUNT = 20; // Max number of files to retrieve via FTS fallback (Updated for re-ranking)
+const FINAL_MATCH_COUNT = 5;     // Final number of results to return after re-ranking
 const STORAGE_REFERENCE_DATE = new Date('2025-04-06T12:00:00Z'); // Fixed reference for storing test data
 
 // Simple list of common English stop words
@@ -170,6 +196,123 @@ const initializeClients = () => {
 };
 
 // --- Utility Functions ---
+
+// ADD NEW deriveDateRange function
+/**
+ * Analyzes an array of EnhancedNormalizedDate objects to derive a specific,
+ * historical date range suitable for filtering.
+ * Prefers the first specific, past range found.
+ * Returns null if no suitable range can be determined.
+ */
+function deriveDateRange(dates: EnhancedNormalizedDate[] | undefined, referenceDate: Date = new Date()): { startDate: string; endDate: string } | null {
+    if (!dates || dates.length === 0) {
+        return null;
+    }
+
+    console.log("Deriving date range from:", JSON.stringify(dates));
+
+    for (const dateInfo of dates) {
+        let potentialStart: Date | null = null;
+        let potentialEnd: Date | null = null;
+
+        // Try using chrono's parsed date directly if fully specified and in the past
+        if (dateInfo.normalized && dateInfo.year && dateInfo.month && dateInfo.day) {
+            try {
+                const parsed = parseISO(dateInfo.normalized);
+                if (isValid(parsed) && isPast(parsed)) {
+                    // Use the specific day
+                    potentialStart = startOfDay(parsed);
+                    potentialEnd = endOfDay(parsed);
+                    console.log(`Derived range from normalized date: ${dateInfo.original}`);
+                } else {
+                     console.log(`Normalized date ${dateInfo.normalized} is invalid or in the future, skipping.`);
+                }
+            } catch (e) {
+                console.warn(`Error parsing normalized date ${dateInfo.normalized}, ignoring.`);
+            }
+        }
+
+        // Handle specific relative terms if no date derived yet
+        if (!potentialStart && dateInfo.relative_marker === 'last') {
+            if (dateInfo.relative_unit === 'day' || /yesterday/i.test(dateInfo.original)) {
+                potentialStart = startOfDay(subDays(referenceDate, 1));
+                potentialEnd = endOfDay(subDays(referenceDate, 1));
+                console.log(`Derived range from relative term: yesterday`);
+            }
+             else if (dateInfo.relative_unit === 'week') {
+                potentialStart = startOfWeek(subWeeks(referenceDate, 1)); // Consider locale for start of week
+                potentialEnd = endOfWeek(subWeeks(referenceDate, 1));
+                console.log(`Derived range from relative term: last week`);
+            }
+             else if (dateInfo.relative_unit === 'month') {
+                potentialStart = startOfMonth(subMonths(referenceDate, 1));
+                potentialEnd = endOfMonth(subMonths(referenceDate, 1));
+                console.log(`Derived range from relative term: last month`);
+            }
+             else if (dateInfo.relative_unit === 'year') {
+                potentialStart = startOfYear(subYears(referenceDate, 1));
+                potentialEnd = endOfYear(subYears(referenceDate, 1));
+                console.log(`Derived range from relative term: last year`);
+            }
+        }
+
+        // Handle Year-Month or Year if no specific date/relative term worked
+        if (!potentialStart && dateInfo.year) {
+            if (dateInfo.month) { // Year and Month provided
+                const year = dateInfo.year;
+                const monthIndex = dateInfo.month - 1; // date-fns uses 0-indexed months
+                const dateInMonth = new Date(year, monthIndex);
+                if (isValid(dateInMonth) && isPast(endOfMonth(dateInMonth))) { // Check if the whole month is past
+                    potentialStart = startOfMonth(dateInMonth);
+                    potentialEnd = endOfMonth(dateInMonth);
+                    console.log(`Derived range from year/month: ${dateInfo.year}-${dateInfo.month}`);
+                }
+            } else { // Only Year provided
+                 const year = dateInfo.year;
+                 const dateInYear = new Date(year, 0); // January 1st of the year
+                 if (isValid(dateInYear) && isPast(endOfYear(dateInYear))) { // Check if the whole year is past
+                    potentialStart = startOfYear(dateInYear);
+                    potentialEnd = endOfYear(dateInYear);
+                    console.log(`Derived range from year: ${dateInfo.year}`);
+                 }
+            }
+        }
+
+        // If we found a valid past range, return it (prioritizing the first one found)
+        if (potentialStart && potentialEnd && isValid(potentialStart) && isValid(potentialEnd) && isPast(potentialEnd)) {
+            return {
+                startDate: formatISO(potentialStart),
+                endDate: formatISO(potentialEnd),
+            };
+        }
+    }
+
+    console.log("No specific, historical date range could be derived.");
+    return null; // No suitable range found
+}
+
+// NEW checkOverlap helper function for re-ranking
+/**
+ * Checks if two arrays share at least one common element.
+ * Performs case-insensitive comparison for strings.
+ * Handles null/undefined arrays gracefully.
+ */
+function checkOverlap(arr1?: any[], arr2?: any[]): boolean {
+    if (!arr1 || !arr2 || arr1.length === 0 || arr2.length === 0) {
+        return false;
+    }
+
+    const set1 = new Set(arr1.map(item => (typeof item === 'string' ? item.toLowerCase() : item)));
+
+    for (const item2 of arr2) {
+        const normalizedItem2 = typeof item2 === 'string' ? item2.toLowerCase() : item2;
+        if (set1.has(normalizedItem2)) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 // ADD NEW parseDateStringToEnhanced function using chrono-node
 function parseDateStringToEnhanced(dateString: string, referenceDate: Date): EnhancedNormalizedDate {
@@ -324,6 +467,83 @@ async function generateEmbeddings(chunks: string[]): Promise<(number[] | null)[]
     }
 }
 
+// NEW rerankResults function (Task 5)
+/**
+ * Re-ranks retrieved context objects based on initial score and metadata overlap.
+ */
+async function rerankResults(
+    candidates: ContextObject[],
+    queryMetadata: ProcessedEntities,
+    query_source: Extract<SuccessResponse['query_source'], 'vector_store' | 'postgres_fallback_text'>
+): Promise<ContextObject[]> {
+    if (!candidates || candidates.length === 0) {
+        return [];
+    }
+
+    console.log(`Re-ranking ${candidates.length} candidates from source: ${query_source}`);
+
+    const scoredCandidates: ScoredContextObject[] = candidates.map(candidate => {
+        // a. Map to Scored Objects & b. Calculate initial_score
+        let initial_score = 0;
+        if (query_source === 'vector_store') {
+            // Attempt to access similarity, default to 0 if not present
+            initial_score = (candidate as any).similarity || 0;
+            // Ensure similarity is within 0-1 range (clamp if necessary, though unlikely)
+            initial_score = Math.max(0, Math.min(1, initial_score));
+        } else { // postgres_fallback_text
+            initial_score = 0.5; // Assign fixed base score for FTS results
+        }
+
+        // c. Calculate metadata_boost_score
+        let metadata_boost_score = 0.0;
+        const candidateEntities = candidate.entities_in_chunk;
+
+        // Check overlaps for different entity types (+0.05 for each type of overlap)
+        if (checkOverlap(queryMetadata.people, candidateEntities?.people)) metadata_boost_score += 0.05;
+        if (checkOverlap(queryMetadata.locations, candidateEntities?.locations)) metadata_boost_score += 0.05;
+        if (checkOverlap(queryMetadata.topics, candidateEntities?.topics)) metadata_boost_score += 0.05;
+
+        // Check for exact match on type
+        if (queryMetadata.type && candidateEntities?.type && queryMetadata.type === candidateEntities.type) metadata_boost_score += 0.05;
+
+        // Check for exact match on sentiment
+        if (queryMetadata.sentiment && candidateEntities?.sentiment && queryMetadata.sentiment === candidateEntities.sentiment) metadata_boost_score += 0.05;
+
+        // Check for presence of dates in both query and candidate
+        if (queryMetadata.dates && queryMetadata.dates.length > 0 && candidateEntities?.dates && candidateEntities.dates.length > 0) metadata_boost_score += 0.05;
+
+        // Language is explicitly excluded
+
+        // d. Calculate final_score
+        let final_score = Math.min(1.0, initial_score + metadata_boost_score);
+
+        // e. Populate Scored Object
+        return {
+            ...candidate,
+            initial_score,
+            metadata_boost_score,
+            final_score,
+        };
+    });
+
+    // f. Sort by final_score (descending)
+    scoredCandidates.sort((a, b) => b.final_score - a.final_score);
+
+    console.log("Scores after re-ranking:", scoredCandidates.map(c => ({ file_id: c.file_id, chunk_index: c.chunk_index, initial: c.initial_score.toFixed(3), boost: c.metadata_boost_score.toFixed(3), final: c.final_score.toFixed(3) })));
+
+    // g. Trim to FINAL_MATCH_COUNT
+    const topResults = scoredCandidates.slice(0, FINAL_MATCH_COUNT);
+
+    // h. Map back to ContextObject (removing temporary scores)
+    const finalContext: ContextObject[] = topResults.map(scored => {
+        const { initial_score, metadata_boost_score, final_score, ...contextObject } = scored;
+        return contextObject;
+    });
+
+    // i. Return
+    console.log(`Returning ${finalContext.length} results after re-ranking.`);
+    return finalContext;
+}
 
 // --- Handler Function ---
 const handler: Handler = async (event: HandlerEvent, context: HandlerContext): Promise<{ statusCode: number; body: string; headers?: { [key: string]: string } }> => {
@@ -596,70 +816,11 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             // c. Fallback Logic Update
             if (retrieved_context.length === 0) {
 
-                console.log("Attempt 2: Fallback - Metadata Search on 'files' table...");
-                let fallbackQueryMeta = supabase
-                    .from('files')
-                    .select('id, transcript_text, created_at, file_metadata')
-                    .order('created_at', { ascending: false })
-                    .limit(FALLBACK_MATCH_COUNT);
-
-                let metaFiltersApplied = false;
-
-                // Apply Metadata Entity Filters (Unchanged for non-date entities)
-                if (queryMetadata.people && queryMetadata.people.length > 0) { fallbackQueryMeta = fallbackQueryMeta.contains('file_metadata->people', queryMetadata.people); metaFiltersApplied = true; }
-                if (queryMetadata.locations && queryMetadata.locations.length > 0) { fallbackQueryMeta = fallbackQueryMeta.contains('file_metadata->locations', queryMetadata.locations); metaFiltersApplied = true; }
-                if (queryMetadata.topics && queryMetadata.topics.length > 0) { fallbackQueryMeta = fallbackQueryMeta.contains('file_metadata->topics', queryMetadata.topics); metaFiltersApplied = true; }
-                if (queryMetadata.priority) { fallbackQueryMeta = fallbackQueryMeta.eq('file_metadata->>priority', queryMetadata.priority); metaFiltersApplied = true; }
-
-                // Execute Metadata Fallback only if filters were applicable
-                if (metaFiltersApplied) {
-                    console.log("Executing Fallback Metadata Query...");
-                    const { data: metaResults, error: metaError } = await fallbackQueryMeta;
-                    const typedMetaResults = metaResults as FallbackResultItem[] | null;
-
-                    if (metaError) {
-                        console.error("Error during fallback metadata search:", metaError);
-                         if (!vectorSearchFailed) message_for_gpt = `Vector search found nothing. Fallback metadata search failed: ${metaError.message}`;
-                         else message_for_gpt += ` Fallback metadata search also failed: ${metaError.message}`;
-                         if (!vectorSearchFailed) query_source = 'error';
-                    } else if (typedMetaResults && typedMetaResults.length > 0) {
-                        console.log(`Found ${typedMetaResults.length} files via fallback metadata search.`);
-                         query_source = 'postgres_fallback_metadata';
-                         if (vectorSearchFailed) message_for_gpt += ` Found ${typedMetaResults.length} file(s) via metadata fallback.`;
-                         else message_for_gpt = `Found ${typedMetaResults.length} file(s) via metadata search.`;
-
-                        // Map results - Ensure dates handled as EnhancedNormalizedDate[]
-                        retrieved_context = typedMetaResults.map((file: FallbackResultItem) => ({
-                             file_id: file.id,
-                             chunk: file.transcript_text,
-                             timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
-                             chunk_index: undefined,
-                             entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
-                                 ? { /* Reconstruction logic */
-                                     people: file.file_metadata.people,
-                                     dates: (file.file_metadata.dates as EnhancedNormalizedDate[]) || [],
-                                     locations: file.file_metadata.locations,
-                                     topics: file.file_metadata.topics,
-                                     type: file.file_metadata.type,
-                                     sentiment: file.file_metadata.sentiment,
-                                     priority: file.file_metadata.priority,
-                                     language: file.file_metadata.language,
-                                   }
-                                 : {},
-                         }));
-                    } else {
-                         console.log("Fallback metadata search found no results.");
-                    }
-                } else {
-                    console.log("No applicable filters for fallback metadata search, skipping.");
-                }
-
-
-                // Attempt Text Search Fallback ONLY if Metadata Search found nothing
+                // Attempt Text Search Fallback (Now the primary fallback)
                 if (retrieved_context.length === 0) {
-                    console.log("Attempt 3: Fallback - Full-Text Search on 'files' table using query entities...");
+                    console.log("Attempt 2: Fallback - Full-Text Search on 'files' table using query entities...");
 
-                    // 1. Gather all string entities from the query metadata
+                    // 1. Gather all string entities from the query metadata (EXCLUDING language)
                     const entityValues: string[] = [];
                     // Include original date strings in FTS query
                     (queryMetadata.dates || []).forEach(d => entityValues.push(d.original));
@@ -668,7 +829,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                     (queryMetadata.topics || []).forEach(t => entityValues.push(t));
                     if (queryMetadata.type) entityValues.push(queryMetadata.type);
                     if (queryMetadata.sentiment) entityValues.push(queryMetadata.sentiment);
-                    if (queryMetadata.language) entityValues.push(queryMetadata.language);
+                    // DO NOT include queryMetadata.language
 
                     // Remove duplicates and empty strings
                     const uniqueEntities = [...new Set(entityValues)].filter(e => e && e.trim() !== '');
@@ -685,7 +846,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                         // 3. Build the Supabase query with FTS
                         let ftsQueryBuilder = supabase
                             .from('files')
-                            // Ensure rank is aliased properly for selection
                             .select('id, transcript_text, created_at, file_metadata, rank:ts_rank_cd(transcript_tsv, to_tsquery(\'english\', $1))')
                             .textSearch('transcript_tsv', ftsQueryString, {
                                 config: 'english',
@@ -694,23 +854,34 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             .order('rank', { ascending: false })
                             .limit(FALLBACK_MATCH_COUNT);
 
+                        // --- START: Integrate Conditional Date Filtering (Task 2b) ---
+                        const dateRange = deriveDateRange(queryMetadata.dates); // Pass the processed dates
+                        if (dateRange) {
+                             console.log(`Applying FTS date range filter: ${dateRange.startDate} to ${dateRange.endDate}`);
+                             ftsQueryBuilder = ftsQueryBuilder.gte('created_at', dateRange.startDate);
+                             ftsQueryBuilder = ftsQueryBuilder.lte('created_at', dateRange.endDate);
+                        }
+                         else {
+                            console.log("No date range filter applied to FTS.");
+                        }
+                        // --- END: Integrate Conditional Date Filtering ---
+
                         // 4. Execute the FTS query
                         console.log("Executing Fallback FTS Query...");
-                        // Adjust expected type to include rank if selected
                         const { data: ftsResults, error: ftsError } = await ftsQueryBuilder;
                         const typedTextResults = ftsResults as (FallbackResultItem & { rank?: number })[] | null;
 
                         if (ftsError) {
                             console.error("Error during fallback FTS search:", ftsError);
-                            if (!vectorSearchFailed && query_source !== 'error') message_for_gpt = `Vector/Metadata search found nothing. Fallback text search failed: ${ftsError.message}`;
+                            // Simpler error message handling now
+                            if (!vectorSearchFailed) message_for_gpt = `Vector search found nothing. Fallback text search failed: ${ftsError.message}`;
                             else message_for_gpt += ` Fallback text search also failed: ${ftsError.message}`;
                             if (query_source !== 'error') query_source = 'error';
                         } else if (typedTextResults && typedTextResults.length > 0) {
                             console.log(`Found ${typedTextResults.length} files via fallback FTS search.`);
-                            const previousQuerySource = query_source;
-                            query_source = 'postgres_fallback_text';
+                            query_source = 'postgres_fallback_text'; // Set correct source
 
-                            if (vectorSearchFailed || previousQuerySource === 'error') {
+                            if (vectorSearchFailed) {
                                 message_for_gpt += ` Found ${typedTextResults.length} potential match(es) via text fallback.`;
                             } else {
                                 message_for_gpt = `Found ${typedTextResults.length} potential match(es) via text search.`;
@@ -719,9 +890,9 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             // Map results - Ensure dates handled as EnhancedNormalizedDate[]
                             retrieved_context = typedTextResults.map((file) => ({
                                 file_id: file.id,
-                                chunk: file.transcript_text,
+                                chunk: file.transcript_text, // Use full transcript for now
                                 timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
-                                chunk_index: undefined,
+                                chunk_index: undefined, // FTS is on the whole file
                                 entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
                                     ? { /* Reconstruction logic */
                                         people: file.file_metadata.people,
@@ -739,23 +910,33 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             console.log("Fallback FTS search also found no results.");
                             if (query_source !== 'error') {
                                 query_source = 'none';
-                                message_for_gpt = "I couldn't find any relevant information using vector, metadata, or text search.";
+                                message_for_gpt = "I couldn't find any relevant information using vector or text search."; // Updated message
                             } else {
                                 message_for_gpt += " Fallback text search also found nothing.";
                             }
                         }
                     } else {
-                        console.log("No valid entities found in the query to perform FTS fallback, skipping.");
+                        console.log("No valid non-language entities found in the query to perform FTS fallback, skipping.");
                         if (query_source !== 'error') {
                             query_source = 'none';
                             message_for_gpt = "I couldn't find any relevant information based on the query filters, and no specific entities were provided for text search.";
                         } else {
-                            message_for_gpt += " No specific entities provided for text fallback.";
+                            message_for_gpt += " No specific non-language entities provided for text fallback.";
                         }
                     }
                 } // End Text Search Fallback attempt
 
             } // End of Fallback Logic block
+
+            // --- START: Integrate Re-ranking Call (Task 6) ---
+            if (retrieved_context.length > 0 && (query_source === 'vector_store' || query_source === 'postgres_fallback_text')) {
+                console.log(`Calling rerankResults for ${retrieved_context.length} candidates from ${query_source}...`);
+                retrieved_context = await rerankResults(retrieved_context, queryMetadata, query_source);
+                // query_source remains unchanged, reflecting the initial retrieval method
+            } else {
+                 console.log("Skipping re-ranking due to no initial results or non-rankable source.");
+            }
+            // --- END: Integrate Re-ranking Call ---
 
         } // End of 'query'/'combined' block
 
@@ -774,10 +955,10 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         }
 
         // Final response construction
-        console.log(`DEBUG: Final retrieved_context count: ${retrieved_context.length}`);
+        console.log(`DEBUG: Final retrieved_context count after potential re-ranking: ${retrieved_context.length}`);
 
         const successResponse: SuccessResponse = {
-            retrieved_context: retrieved_context,
+            retrieved_context: retrieved_context, // Use the potentially re-ranked context
             storage_status: storage_status,
             query_source: retrieved_context.length > 0 ? query_source : (query_source === 'error' ? 'error' : 'none'), // Refine source logic
             message_for_gpt: message_for_gpt,

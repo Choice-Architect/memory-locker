@@ -344,12 +344,11 @@
             "type": "string",
             "enum": [
               "vector_store",
-              "postgres_fallback_metadata",
               "postgres_fallback_text",
               "none",
               "error"
             ],
-            "description": "Indicates the source of the retrieved context (vector search, specific postgres fallbacks, or none/error)."
+            "description": "Indicates the source of the retrieved context (vector search, FTS fallback, or none/error)."
           },
           "message_for_gpt": {
             "type": "string",

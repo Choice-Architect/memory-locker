@@ -146,22 +146,43 @@ For each test case:
 
 ---
 
-**Test Case 8: Explicit Metadata - Language (Arabic)**
+**Test Case 8: Dictation Handling (Email Rewrite & Store)**
 
-*   **Objective:** Test storage of explicitly provided language (Arabic).
-*   **Input Text:** "تذكير: اجتماع فريق المشروع غداً الساعة 10 صباحاً في قاعة المؤتمرات الرئيسية. اللغة: ar."
+*   **Objective:** Test dictation handling: GPT rewriting a long email draft and storing the rewritten version, as per instructions.
+*   **Input Text (User provides this):** "hey can u help me write an email to the boss, mr henderson... kinda wanna summarize the project zeta meeting from this morning with lisa and mike... basically we decided the launch is def gonna be delayed, maybe push to sept? need to confirm that timeline still fits with marketing team (ask jen maybe?). also tech team found that bug in the login module (big relief!), should be fixed by tomorrow eod. lisa's handling the updated budget numbers, she'll send em over soon. just make it sound professional, ok? thx"
 *   **Expected GPT Behavior:**
-    *   `mode`: `store`
-    *   `topics`: ["اجتماع فريق المشروع"] (or translation)
-    *   `locations`: ["قاعة المؤتمرات الرئيسية"] (or translation)
-    *   `dates`: ["غداً الساعة 10 صباحاً"]
-    *   `language`: "ar"
-    *   `type`: "reminder" / "meeting"
-    *   `sentiment`: "neutral"
-    *   `priority`: None
+    *   **Internal Rewrite (Example):** GPT should first rewrite the user's informal request into a professional email. The exact wording will vary, but the structure and content should be similar to:
+        ```
+        Subject: Project Zeta Meeting Summary & Updates
+
+        Dear Mr. Henderson,
+
+        This email summarizes the key outcomes from this morning's Project Zeta meeting attended by Lisa Chen, Mike Davis, and myself.
+
+        We determined that the project launch requires rescheduling, potentially moving to September. We will confirm this revised timeline's feasibility with the marketing team, possibly consulting Jen Simmons.
+
+        On a positive note, the technical team has identified the bug within the login module. A fix is anticipated by the end of day tomorrow.
+
+        Lisa Chen is preparing the updated budget figures and will circulate them shortly.
+
+        Best regards,
+        [Your Name/Placeholder]
+        ```
+    *   **Action Call Payload:** GPT should then call the `memory-action` with the *rewritten* text.
+        *   `mode`: `store`
+        *   `query_text`: (The *rewritten* email text GPT generated)
+        *   `extracted_entities`: (Extracted *from the rewritten text*)
+            *   `people`: ["Mr. Henderson", "Lisa Chen", "Mike Davis", "Jen Simmons"]
+            *   `topics`: ["Project Zeta", "launch rescheduling", "timeline", "marketing team", "login module bug", "budget figures"]
+            *   `dates`: ["this morning", "September", "end of day tomorrow", "shortly"] (Strings passed)
+            *   `type`: "dictated_email" (Crucial inference)
+            *   `sentiment`: "neutral"
+            *   `language`: "en"
+            *   `priority`: None
+    *   **Final Response to User:** After successful storage, GPT should present the rewritten email to the user and acknowledge it has been stored.
 *   **Expected Backend State:**
-    *   `files` table: `file_metadata` includes `language: "ar"` and an `EnhancedNormalizedDate` for "غداً الساعة 10 صباحاً". Text content stored as provided.
-    *   `transcript_embeddings` table: Mirrored `metadata` including `language: "ar"`. Embeddings generated from Arabic text.
+    *   `files` table: 1 row containing the **rewritten** email text in `text_content`. `file_metadata` reflects entities extracted *from the rewritten text*, including `type: "dictated_email"` and corresponding `EnhancedNormalizedDate` objects for dates parsed from the rewrite (e.g., "this morning", "September", "tomorrow EOD").
+    *   `transcript_embeddings` table: 1+ rows linked to the file, containing chunks of the **rewritten** text, embeddings, `chunk_index`, and mirrored metadata derived from the rewrite.
 
 ---
 
