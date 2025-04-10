@@ -120,11 +120,11 @@
     *   **Findings:** The extraction of `people`, `locations`, `topics`, `type`, `sentiment`, `language`, `priority`, and `organizations` performs reliably and meets current requirements. The classification of specific businesses as `locations` is acceptable for now. The non-extraction of `conversation_id`/`thread_id` from user input is confirmed as the correct behavior due to backend UUID constraints.
     *   **Status:** Stable. These non-date entity handling aspects are considered the baseline and should not be altered in future `store` mode modifications unless explicitly specified.
 
-4.  **Refine Date Parsing (`store` mode) (Implementation Required - v1.4 Revised):**
-    *   **Goal:** Implement the revised v1.4 date parsing strategy (detailed in `learnings/02_enhancement_plan.md`) to accurately extract individual date/time components, handle granularity/uncertainty correctly (using `normalized: null`), ignore specified qualifiers, and fix identified parsing errors.
-    *   **Approach:** Modify `parseDateStringToEnhanced` in `memory-action.ts` per the revised v1.4 plan. Update `openapi.json` (remove UUID fields, add `week_number`) and `gpt_instructions.md` (prohibit UUID extraction).
-    *   **Rationale:** Correct parsing errors identified in Test 2, ensure accurate date component storage for reliable v1.3 relevance ranking, and prevent backend UUID errors.
-    *   **Status:** **Required.** The initial v1.4 implementation was only partially successful and requires significant rework based on Test 2 findings and clarified requirements.
+4.  **Refine Date Parsing (`store` mode) (v1.4 Revised - Completed):**
+    *   **Goal:** Implement the revised v1.4 date parsing strategy (detailed in `learnings/02_enhancement_plan.md` & `learnings/03_test_observations.md`) to accurately extract individual date/time components, handle granularity/uncertainty correctly (using `normalized: null`), ignore specified qualifiers, and fix identified parsing errors.
+    *   **Approach:** Modified `parseDateStringToEnhanced` in `memory-action.ts` per the revised v1.4 plan. Updated `openapi.json` (removed UUID fields, added `week_number`). Updated `gpt_instructions.md` (prohibited UUID extraction).
+    *   **Rationale:** Corrected parsing errors identified in Test 2, ensuring accurate date component storage for reliable v1.3 relevance ranking, and preventing backend UUID errors.
+    *   **Status:** **Completed.**
 
 5.  **Future Considerations (Backlog):**
     *   Advanced Retrieval (Hybrid search, time decay, more sophisticated boosting).

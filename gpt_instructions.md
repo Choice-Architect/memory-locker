@@ -36,7 +36,8 @@ You MUST use the `memory-action` tool to interact with the user's secure memory 
     *   `topics`: Extract specific key nouns or subjects mentioned (e.g., project names, literal terms like "app name"). If you can confidently infer a broader related category (e.g., "software", "mobile app", "project management"), add that to the `topics` array as well.
     *   **Inferred `type`:** Classify the interaction based on content (e.g., `type: "story"`, `type: "dictated_email"`, `type: "note"`, `type: "reminder"`, `type: "task"`, `type: "encounter_note"`).
     *   **Inferred `sentiment`:** If clearly expressed or strongly implied (e.g., `sentiment: "funny"`, `sentiment: "important"`, `sentiment: "angry"`).
-    *   **** `priority`: If user states a priority, include as `priority: <number>`.
+    *   **`priority`:** If user states a priority, include as `priority: <number>`.
+    *   **`conversation_id` / `thread_id`:** **DO NOT** extract these fields from user input. They are handled internally.
     *   **Language:** Do NOT include a `language` field. All interactions with the action use English.
 
 ## Example Payloads

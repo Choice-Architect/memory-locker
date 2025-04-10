@@ -18,6 +18,7 @@ import {
     subWeeks,
     subMonths,
     subYears,
+    addYears,
     isFuture,
     isPast,
     isSameDay,
@@ -28,7 +29,8 @@ import {
     set,
     format,
     setDay,
-    addMonths
+    addMonths,
+    getWeek
 } from 'date-fns';
 import * as chrono from 'chrono-node';
 
@@ -51,6 +53,7 @@ interface EnhancedNormalizedDate {
     month?: number;          // e.g., 4 (1-12)
     day?: number;            // e.g., 2 (1-31)
     day_of_week?: number;    // e.g., 2 (0=Sun, 1=Mon, 2=Tue...)
+    week_number?: number;    // e.g., 14 (ISO 8601 week number, 1-53)
     time_hour?: number;      // e.g., 15 (0-23)
     time_minute?: number;    // e.g., 0
     time_second?: number;    // e.g., 0
@@ -248,330 +251,364 @@ function deriveDateRange(dates: EnhancedNormalizedDate[] | undefined, referenceD
                 potentialStart = startOfDay(subDays(referenceDate, 1));
                 potentialEnd = endOfDay(subDays(referenceDate, 1));
                 console.log(`Derived range from relative term: yesterday/last day`);
-            }
-             else if (/\bweek\b/.test(lowerOriginal)) {
-                potentialStart = startOfWeek(subWeeks(referenceDate, 1)); // Consider locale for start of week
-                potentialEnd = endOfWeek(subWeeks(referenceDate, 1));
-                console.log(`Derived range from relative term: last week`);
-            }
-             else if (/\bmonth\b/.test(lowerOriginal)) {
-                potentialStart = startOfMonth(subMonths(referenceDate, 1));
-                potentialEnd = endOfMonth(subMonths(referenceDate, 1));
-                console.log(`Derived range from relative term: last month`);
-            }
-             else if (/\byear\b/.test(lowerOriginal)) {
-                potentialStart = startOfYear(subYears(referenceDate, 1));
-                potentialEnd = endOfYear(subYears(referenceDate, 1));
-                console.log(`Derived range from relative term: last year`);
+            } else if (/\bweek\b/.test(lowerOriginal)) {
+                const startOfLastWeek = startOfWeek(subWeeks(referenceDate, 1));
+                potentialStart = startOfLastWeek;
+                potentialEnd = endOfWeek(startOfLastWeek);
+                 console.log(`Derived range from relative term: last week`);
+            } else if (/\bmonth\b/.test(lowerOriginal)) {
+                const startOfLastMonth = startOfMonth(subMonths(referenceDate, 1));
+                potentialStart = startOfLastMonth;
+                potentialEnd = endOfMonth(startOfLastMonth);
+                 console.log(`Derived range from relative term: last month`);
+            } else if (/\byear\b/.test(lowerOriginal)) {
+                const startOfLastYear = startOfYear(subYears(referenceDate, 1));
+                potentialStart = startOfLastYear;
+                potentialEnd = endOfYear(startOfLastYear);
+                 console.log(`Derived range from relative term: last year`);
             }
         }
 
-        // If we found a valid past range, return it (prioritizing the first one found)
-        if (potentialStart && potentialEnd && isValid(potentialStart) && isValid(potentialEnd) && isPast(potentialEnd)) {
+        if (potentialStart && potentialEnd) {
+            console.log(`Final derived range: ${formatISO(potentialStart)} to ${formatISO(potentialEnd)}`);
             return {
                 startDate: formatISO(potentialStart),
                 endDate: formatISO(potentialEnd),
             };
+        } else {
+             console.log(`Could not derive a specific past range from: ${dateInfo.original}`);
         }
     }
 
-    console.log("No specific, historical date range could be derived.");
-    return null; // No suitable range found
+    console.log("No suitable past date range found for filtering.");
+    return null;
 }
 
-// NEW checkOverlap helper function for re-ranking
 /**
- * Checks if two arrays share at least one common element.
- * Performs case-insensitive comparison for strings.
- * Handles null/undefined arrays gracefully.
+ * Checks if any element in arr1 exists in arr2 (case-insensitive for strings).
  */
 function checkOverlap(arr1?: any[], arr2?: any[]): boolean {
     if (!arr1 || !arr2 || arr1.length === 0 || arr2.length === 0) {
         return false;
     }
-
-    const set1 = new Set(arr1.map(item => (typeof item === 'string' ? item.toLowerCase() : item)));
-
-    for (const item2 of arr2) {
-        const normalizedItem2 = typeof item2 === 'string' ? item2.toLowerCase() : item2;
-        if (set1.has(normalizedItem2)) {
-            return true;
-        }
-    }
-
-    return false;
+    const set2 = new Set(arr2.map(item => typeof item === 'string' ? item.toLowerCase() : item));
+    return arr1.some(item => set2.has(typeof item === 'string' ? item.toLowerCase() : item));
 }
 
 /**
- * Refined date parsing function (v1.4).
- * Assumes input 'dateString' is English (due to GPT pre-translation).
- * Uses chrono-node for initial parsing, then date-fns for corrections and specific resolutions.
- * Aims to return accurate year, month, day, and time components, with a correctly formatted normalized string.
+ * v1.4: Revised Date Parsing Function
+ * Parses a date string, attempts to extract components, and handles uncertainty.
+ * Prioritizes component accuracy and sets normalized=null if day is uncertain.
+ * Assumes input is English (GPT handles translation).
  */
 function parseDateStringToEnhanced(dateString: string, referenceDate: Date): EnhancedNormalizedDate {
-    // Input Assumption: dateString is assumed to be English.
+    console.log(`Parsing date string: "${dateString}" with reference: ${referenceDate.toISOString()}`);
+    const originalString = dateString; // Keep original for reference and output
 
-    const results = chrono.parse(dateString, referenceDate, { forwardDate: true });
-
-    if (results.length === 0) {
-        return { original: dateString, note: "No date components found" };
-    }
-
-    const result = results[0];
-    const components = result.start;
-    const chronoDate = result.date(); // Get the initial Date object from chrono
-
-    // Use ?? undefined to handle potential null returns from .get()
-    let correctedYear: number | undefined = components.get('year') ?? undefined;
-    let correctedMonth: number | undefined = components.get('month') ?? undefined; // 1-12
-    let correctedDay: number | undefined = components.get('day') ?? undefined;
-    let correctedHour: number | undefined = undefined;
-    let correctedMinute: number | undefined = undefined;
-    let correctedSecond: number | undefined = undefined;
-
-    let dateIsCertain = false;
-    let timeIsCertain = false;
-    let finalDate: Date | null = null; // To store the date-fns calculated date
-
-    // --- 1. Day Boundary Correction ---
-    // If chrono resolved to the *next* day for end-of-day phrases, correct it back to referenceDate's day.
-    const lowerCaseDateString = dateString.toLowerCase();
-    if (/\b(end of day|tonight|eod)\b/.test(lowerCaseDateString)) {
-        if (isValid(chronoDate) && !isSameDay(chronoDate, referenceDate)) {
-            console.log(`Correcting day boundary for '${dateString}'`);
-            correctedYear = referenceDate.getFullYear();
-            correctedMonth = referenceDate.getMonth() + 1; // JS month is 0-indexed
-            correctedDay = referenceDate.getDate();
-        } else if (isValid(chronoDate) && isSameDay(chronoDate, referenceDate)) {
-            // If it's already the same day, keep chrono's components
-            correctedYear = chronoDate.getFullYear();
-            correctedMonth = chronoDate.getMonth() + 1;
-            correctedDay = chronoDate.getDate();
+    // 1. Define qualifiers to strip (case-insensitive)
+    const qualifiers = [
+        "early", "late", "end of", "eod", "cob", "sometime", "around",
+        "beginning of", "first week of", "last two weeks of", // Granularity/Range - strip before parsing main date part
+        "this morning", "tonight", "this evening", "this afternoon", // Boundary terms - handle AFTER initial parse
+        "before", "after", // Relative indicators - potentially handle contextually, strip for now
+    ];
+    let cleanedDateString = dateString;
+    const foundQualifiers: string[] = [];
+    qualifiers.forEach(q => {
+        const regex = new RegExp(`\\b${q}\\b`, 'gi');
+        if (regex.test(cleanedDateString)) {
+            foundQualifiers.push(q.toLowerCase()); // Store found qualifiers for later logic
+            cleanedDateString = cleanedDateString.replace(regex, '').trim();
         }
-         else {
-             // Fallback if chronoDate invalid
-             correctedYear = referenceDate.getFullYear();
-             correctedMonth = referenceDate.getMonth() + 1;
-             correctedDay = referenceDate.getDate();
-         }
-        // Explicitly unset time for these phrases
-        correctedHour = undefined;
-        correctedMinute = undefined;
-        correctedSecond = undefined;
-    }
+    });
+    // Clean up extra spaces left by removal
+    cleanedDateString = cleanedDateString.replace(/\s{2,}/g, ' ').trim();
+    console.log(`Cleaned string: "${cleanedDateString}", Found qualifiers: ${foundQualifiers.join(', ')}`);
 
-    // --- 2. Relative Date Resolution (using date-fns) ---
-    let calculatedDate: Date | null = null; // Use this to store date-fns results
+    // Initialize result object
+    const result: EnhancedNormalizedDate = { original: originalString };
 
-    // Check chrono certainty vs. keywords
-    if (components.isCertain('weekday') && !components.isCertain('day')) {
-        const weekday = components.get('weekday') ?? referenceDate.getDay(); // Default to current day if null
-        if (/\bnext\b/i.test(dateString)) {
-            calculatedDate = setDay(referenceDate, weekday, { weekStartsOn: 1 }); // Assuming week starts Monday
-             if (calculatedDate && (isBefore(calculatedDate, referenceDate) || isSameDay(calculatedDate, referenceDate))) {
-                  calculatedDate = addWeeks(calculatedDate, 1);
-             }
-             console.log(`Resolved 'next weekday' for '${dateString}'`);
-        } else if (/\blast\b/i.test(dateString)) {
-            calculatedDate = setDay(referenceDate, weekday, { weekStartsOn: 1 });
-            if (calculatedDate && (isAfter(calculatedDate, referenceDate) || isSameDay(calculatedDate, referenceDate))) {
-                 calculatedDate = subWeeks(calculatedDate, 1);
-            }
-            console.log(`Resolved 'last weekday' for '${dateString}'`);
+    // 2. Attempt initial parsing with chrono-node on the *cleaned* string
+    const chronoResults = chrono.parse(cleanedDateString, referenceDate, { forwardDate: true });
+    console.log("Chrono results:", JSON.stringify(chronoResults));
+
+    if (chronoResults.length > 0) {
+        const parsedResult = chronoResults[0];
+        const start = parsedResult.start;
+        const text = parsedResult.text; // The part chrono matched
+
+        // --- 3. Refine components using date-fns and context ---
+        let year = start.get('year');
+        let month = start.get('month'); // 1-12
+        let day = start.get('day');     // 1-31
+        let hour = start.get('hour');
+        let minute = start.get('minute');
+        let second = start.get('second');
+        let dayOfWeek = start.get('weekday'); // 0=Sun, 1=Mon... (may differ from date-fns)
+
+        let isCertainDay = start.isCertain('day');
+        let isCertainMonth = start.isCertain('month');
+        let isCertainYear = start.isCertain('year');
+        let isCertainHour = start.isCertain('hour');
+
+        let calculatedDate = start.date(); // Initial date object from chrono
+
+        // --- 3a. Handle Day Boundary Qualifiers ---
+        // If specific boundary terms were found, force date to reference date and set time hints
+        if (foundQualifiers.includes('this morning') || foundQualifiers.includes('this afternoon') || foundQualifiers.includes('this evening') || foundQualifiers.includes('tonight') || foundQualifiers.includes('end of') || foundQualifiers.includes('eod') || foundQualifiers.includes('cob')) {
+            console.log("Handling day boundary term.");
+            year = referenceDate.getFullYear();
+            month = referenceDate.getMonth() + 1;
+            day = referenceDate.getDate();
+            isCertainDay = true;
+            isCertainMonth = true;
+            isCertainYear = true;
+            calculatedDate = set(calculatedDate, { year, month: month - 1, date: day }); // Update calculatedDate
+
+            if ((foundQualifiers.includes('this morning')) && !isCertainHour) result.period = 'Morning';
+            if ((foundQualifiers.includes('this afternoon') || foundQualifiers.includes('cob')) && !isCertainHour) result.period = 'Afternoon';
+            if ((foundQualifiers.includes('this evening') || foundQualifiers.includes('tonight') || foundQualifiers.includes('end of') || foundQualifiers.includes('eod')) && !isCertainHour) result.period = 'Evening'; // Or Night? Chose Evening.
         }
-        // If just a weekday name without 'next'/'last', chrono might get it right, but let's check
-        else if (isValid(chronoDate) && isSameDay(chronoDate, referenceDate) && referenceDate.getDay() !== weekday) {
-             // Chrono might default to today, use setDay to be sure
-             calculatedDate = setDay(referenceDate, weekday, { weekStartsOn: 1 });
-             // Ambiguous - assume future? Or nearest? Let's assume nearest future/past based on chrono guess
-             if(calculatedDate) {
-                 if(isAfter(chronoDate, referenceDate)) { // Chrono guessed future
-                    if (isBefore(calculatedDate, referenceDate) || isSameDay(calculatedDate, referenceDate)) {
-                        calculatedDate = addWeeks(calculatedDate, 1);
-                    }
-                 } else { // Chrono guessed past or today
-                     if (isAfter(calculatedDate, referenceDate) || isSameDay(calculatedDate, referenceDate)) {
-                        calculatedDate = subWeeks(calculatedDate, 1);
-                     }
+
+
+        // --- 3b. Relative Date Resolution (Yesterday, Today, Tomorrow, Weekdays) ---
+        // Chrono often handles these well, but let's verify/refine using date-fns logic if needed
+        // Check chrono's tag for specific relative terms it might have identified
+        if (parsedResult.tags().has('ENRelativeDateRule')) {
+            console.log("Chrono identified relative date rule.");
+             // Trust chrono's components for these simpler relative terms for now
+             // but ensure day/month/year certainty is set correctly
+             isCertainDay = isCertainDay || start.isCertain('day');
+             isCertainMonth = isCertainMonth || start.isCertain('month');
+             isCertainYear = isCertainYear || start.isCertain('year');
+        }
+        // Special case for past specific dates (e.g., "April 8th" when ref is April 10th)
+        // Chrono's `forwardDate: true` might push it to next year. Check if the parsed date is significantly
+        // *after* the reference date but the *text* implies a recent past date.
+        if (isCertainDay && isCertainMonth && !isCertainYear && /^[a-zA-Z]+\s+\d+(?:st|nd|rd|th)?$/.test(text.trim())) {
+             if (month !== null && day !== null) {
+                 const potentialPastDate = set(referenceDate, { month: month - 1, date: day });
+                 if (isBefore(potentialPastDate, referenceDate) && !isSameDay(potentialPastDate, referenceDate)) {
+                     console.log("Adjusting specific M/D date to current year context (past).");
+                     year = referenceDate.getFullYear();
+                     isCertainYear = true;
+                     calculatedDate = set(calculatedDate, { year });
                  }
              }
-             console.log(`Resolved specific weekday '${dateString}'`);
         }
 
 
-    } else if (/\btomorrow\b/i.test(dateString)) {
-        calculatedDate = addDays(referenceDate, 1);
-        console.log(`Resolved 'tomorrow' for '${dateString}'`);
-    } else if (/\byesterday\b/i.test(dateString)) {
-        calculatedDate = subDays(referenceDate, 1);
-        console.log(`Resolved 'yesterday' for '${dateString}'`);
-    } else if (/\blast week\b/i.test(dateString)) {
-        // Get year/month of start of last week. Day becomes uncertain.
-        const startOfLastWeek = startOfWeek(subWeeks(referenceDate, 1), { weekStartsOn: 1 });
-        correctedYear = startOfLastWeek.getFullYear();
-        correctedMonth = startOfLastWeek.getMonth() + 1;
-        correctedDay = undefined; // Day is uncertain
-        console.log(`Resolved 'last week' for '${dateString}'`);
-    } else if (/\bnext week\b/i.test(dateString)) {
-         const startOfNextWeek = startOfWeek(addWeeks(referenceDate, 1), { weekStartsOn: 1 });
-         correctedYear = startOfNextWeek.getFullYear();
-         correctedMonth = startOfNextWeek.getMonth() + 1;
-         correctedDay = undefined;
-         console.log(`Resolved 'next week' for '${dateString}'`);
-    } else if (/\blast month\b/i.test(dateString)) {
-        const startOfLastMonth = startOfMonth(subMonths(referenceDate, 1));
-        correctedYear = startOfLastMonth.getFullYear();
-        correctedMonth = startOfLastMonth.getMonth() + 1;
-        correctedDay = undefined;
-        console.log(`Resolved 'last month' for '${dateString}'`);
-    } else if (/\bnext month\b/i.test(dateString)) {
-        const startOfNextMonth = startOfMonth(addMonths(referenceDate, 1));
-        correctedYear = startOfNextMonth.getFullYear();
-        correctedMonth = startOfNextMonth.getMonth() + 1;
-        correctedDay = undefined;
-        console.log(`Resolved 'next month' for '${dateString}'`);
-    }
-    // ... add more relative resolutions if needed ...
+        // --- 3c/d/e. Relative Week/Month/Year Resolution & Granularity ---
+        // If chrono didn't find a specific day, handle broader relative terms
+        const lowerCleaned = cleanedDateString.toLowerCase();
+        if (!isCertainDay) {
+            console.log("Day is uncertain, checking for week/month/year terms.");
+            if (lowerCleaned.includes('last week')) {
+                calculatedDate = subWeeks(referenceDate, 1);
+                year = calculatedDate.getFullYear();
+                month = calculatedDate.getMonth() + 1; // Month of the week's start/end may vary
+                day = null;
+                result.week_number = getWeek(calculatedDate); // Use date-fns getWeek
+                isCertainDay = false;
+                isCertainMonth = false; // Month is also uncertain w.r.t the whole week
+                isCertainYear = true;
+                console.log("Resolved to 'last week'.");
+            } else if (lowerCleaned.includes('next week')) {
+                 calculatedDate = addWeeks(referenceDate, 1);
+                 year = calculatedDate.getFullYear();
+                 month = calculatedDate.getMonth() + 1;
+                 day = null;
+                 result.week_number = getWeek(calculatedDate);
+                 isCertainDay = false;
+                 isCertainMonth = false;
+                 isCertainYear = true;
+                 console.log("Resolved to 'next week'.");
+            } else if (lowerCleaned.includes('this week')) {
+                 calculatedDate = referenceDate; // Keep ref date context
+                 year = calculatedDate.getFullYear();
+                 month = calculatedDate.getMonth() + 1;
+                 day = null;
+                 result.week_number = getWeek(calculatedDate);
+                 isCertainDay = false;
+                 isCertainMonth = false; // Still uncertain which month if week spans boundary
+                 isCertainYear = true;
+                 console.log("Resolved to 'this week'.");
+            } else if (lowerCleaned.includes('last month')) {
+                calculatedDate = subMonths(referenceDate, 1);
+                year = calculatedDate.getFullYear();
+                month = calculatedDate.getMonth() + 1;
+                day = null;
+                isCertainDay = false;
+                isCertainMonth = true;
+                isCertainYear = true;
+                console.log("Resolved to 'last month'.");
+            } else if (lowerCleaned.includes('next month')) {
+                 calculatedDate = addMonths(referenceDate, 1);
+                 year = calculatedDate.getFullYear();
+                 month = calculatedDate.getMonth() + 1;
+                 day = null;
+                 isCertainDay = false;
+                 isCertainMonth = true;
+                 isCertainYear = true;
+                 console.log("Resolved to 'next month'.");
+            } else if (lowerCleaned.includes('this month') || (isCertainMonth && !isCertainDay && !isCertainYear) /*e.g. "September"*/) {
+                // If chrono found a month but not day/year, treat as 'this month' contextually or explicit month name
+                 if (month !== null) {
+                     calculatedDate = set(referenceDate, { month: month - 1 }); // Use chrono's parsed month if available, in context of ref year
+                 }
+                 year = calculatedDate.getFullYear();
+                 // month already set from chrono or ref month
+                 day = null;
+                 isCertainDay = false;
+                 isCertainMonth = true; // Month is now certain
+                 isCertainYear = true; // Year is certain (reference year)
+                 console.log("Resolved to 'this month' or specific month name.");
+            } else if (lowerCleaned.includes('last year')) {
+                calculatedDate = subYears(referenceDate, 1);
+                year = calculatedDate.getFullYear();
+                month = null;
+                day = null;
+                isCertainDay = false;
+                isCertainMonth = false;
+                isCertainYear = true;
+                console.log("Resolved to 'last year'.");
+            } else if (lowerCleaned.includes('next year')) {
+                 calculatedDate = addYears(referenceDate, 1);
+                 year = calculatedDate.getFullYear();
+                 month = null;
+                 day = null;
+                 isCertainDay = false;
+                 isCertainMonth = false;
+                 isCertainYear = true;
+                 console.log("Resolved to 'next year'.");
+            } else if (lowerCleaned.includes('this year') || (isCertainYear && !isCertainMonth && !isCertainDay) /* e.g. "2025" */) {
+                 calculatedDate = referenceDate; // Keep ref date context
+                 year = calculatedDate.getFullYear();
+                 month = null;
+                 day = null;
+                 isCertainDay = false;
+                 isCertainMonth = false;
+                 isCertainYear = true; // Year is certain
+                 console.log("Resolved to 'this year' or specific year.");
+            }
+        }
 
-    // If date-fns calculated a date, use its components
-    if (calculatedDate && isValid(calculatedDate)) {
-        correctedYear = calculatedDate.getFullYear();
-        correctedMonth = calculatedDate.getMonth() + 1;
-        correctedDay = calculatedDate.getDate();
-        finalDate = calculatedDate; // Store for normalization
-    } else if (isValid(chronoDate)) {
-        // If no specific relative rule matched, but chrono gave a valid date, use it
-        // Re-apply boundary correction if it happened
-         if (/\b(end of day|tonight|eod)\b/.test(lowerCaseDateString) && !isSameDay(chronoDate, referenceDate)) {
-             finalDate = set(referenceDate, { hours: 0, minutes: 0, seconds: 0, milliseconds: 0 });
-             correctedYear = finalDate.getFullYear();
-             correctedMonth = finalDate.getMonth() + 1;
-             correctedDay = finalDate.getDate();
-         } else {
-             finalDate = chronoDate;
-             // Use chrono's components if not overridden by boundary correction
-             correctedYear = correctedYear ?? finalDate.getFullYear();
-             correctedMonth = correctedMonth ?? finalDate.getMonth() + 1;
-             correctedDay = correctedDay ?? finalDate.getDate();
+        // --- 3f. Handle Specific Date Explicit Components (Month/Day/Year) ---
+        // Ensure explicit components override relative guesses if both exist.
+        // Chrono usually gets this right if the format is clear (e.g., "April 10, 2025").
+        // If chrono found M/D/Y, trust its certainty flags mostly.
+        // Re-check the past date case for M/D/Y formats too.
+         if (isCertainDay && isCertainMonth && isCertainYear && isBefore(start.date(), referenceDate)) {
+             // It's a specific past date, chrono should have handled it correctly unless 'forwardDate' interfered significantly.
+             // If start.date() year is > refDate year, it's likely the forwardDate issue on M/D only input.
+             if (start.date().getFullYear() > referenceDate.getFullYear() && /^[a-zA-Z]+\s+\d+(?:st|nd|rd|th)?(?:,\s*\d{4})?$/.test(text.trim())) {
+                 console.log("Adjusting specific M/D(/Y) date assumed future, likely past.");
+                 year = referenceDate.getFullYear(); // Assume current year if only M/D given and it's past
+                 calculatedDate = set(calculatedDate, { year });
+             }
          }
-    }
 
 
-    // --- 3. Time Component Handling ---
-    // Use ?? undefined to handle potential null returns
-    timeIsCertain = components.isCertain('hour');
-    if (timeIsCertain) {
-        correctedHour = components.get('hour') ?? undefined;
-        // Only set minute/second if hour is certain AND they are provided/certain
-        if (correctedHour !== undefined) {
-             correctedMinute = components.get('minute') ?? 0; // Default minute/second to 0 if hour is certain but they aren't
-             correctedSecond = components.get('second') ?? 0;
+        // --- 3g. Explicit Anchor Prioritization ---
+        // If the *cleaned* string contains an explicit year (e.g., "August 2025")
+        // ensure that year overrides any relative calculation for the year component.
+        const yearMatch = cleanedDateString.match(/\b(20\d{2})\b/);
+        if (yearMatch) {
+            const explicitYear = parseInt(yearMatch[1], 10);
+            if (year !== explicitYear) {
+                 console.log(`Prioritizing explicit year ${explicitYear} from string over calculated year ${year}.`);
+                 year = explicitYear;
+                 isCertainYear = true;
+                 // Adjust calculatedDate if needed, careful not to break month/day if they were also explicit
+                 if (start.isCertain('year') && start.get('year') !== year) {
+                    calculatedDate = set(calculatedDate, { year });
+                 }
+            }
+        }
+        // Similar logic for explicit month names if needed, though chrono usually handles this.
+
+
+        // --- 4. Populate Result Object ---
+        result.year = isCertainYear && year !== null ? year : undefined;
+        result.month = isCertainMonth && month !== null ? month : undefined;
+        result.day = isCertainDay && day !== null ? day : undefined;
+        if (result.year && result.month && result.day) {
+            // Only calculate dayOfWeek if we have a full date
+            try {
+                 const finalDate = new Date(result.year, result.month - 1, result.day);
+                 if (isValid(finalDate)) {
+                    result.day_of_week = finalDate.getDay(); // 0=Sun, 6=Sat
+                 }
+            } catch (e) { console.warn("Could not create final date for day_of_week calculation"); }
+        }
+        // Week number is potentially set in step 3c
+
+        // --- 5. Time Component Handling ---
+        if (isCertainHour) {
+            result.time_hour = hour !== null ? hour : undefined;
+            result.time_minute = start.isCertain('minute') && minute !== null ? minute : (hour !== null ? 0 : undefined); // Default minute to 0 if hour is certain but minute isn't
+            result.time_second = start.isCertain('second') && second !== null ? second : (hour !== null ? 0 : undefined); // Default second to 0
+            // Determine AM/PM if not already set by boundary logic
+            if (!result.period) {
+                if (hour !== null && hour < 12) result.period = 'AM';
+                if (hour !== null && hour >= 12) result.period = 'PM';
+            }
         } else {
-            // If hour became undefined somehow, reset others
-             timeIsCertain = false;
-             correctedMinute = undefined;
-             correctedSecond = undefined;
+            // If hour is uncertain, clear all time components, but keep period if set by boundary logic
+            result.time_hour = undefined;
+            result.time_minute = undefined;
+            result.time_second = undefined;
+            // result.period might still be 'Morning', 'Afternoon', etc. from boundary terms
         }
 
-        // Apply time to the finalDate if it exists
-        if (finalDate) {
-            finalDate = set(finalDate, {
-                hours: correctedHour,
-                minutes: correctedMinute,
-                seconds: correctedSecond,
-                milliseconds: 0 // Ensure ms is 0 for consistency
-            });
+
+        // --- 6. Set `normalized` Field ---
+        if (result.year !== undefined && result.month !== undefined && result.day !== undefined) {
+            // We have a specific date
+            try {
+                let dateToFormat = new Date(result.year, result.month - 1, result.day);
+                 if (result.time_hour !== undefined) {
+                     dateToFormat = set(dateToFormat, {
+                         hours: result.time_hour,
+                         minutes: result.time_minute ?? 0,
+                         seconds: result.time_second ?? 0
+                     });
+                     result.normalized = formatISO(dateToFormat); // Include time
+                 } else {
+                     result.normalized = format(dateToFormat, 'yyyy-MM-dd'); // Date only
+                 }
+                 console.log(`Normalized to: ${result.normalized}`);
+            } catch (e) {
+                 console.error("Error formatting ISO string:", e);
+                 result.normalized = null;
+                 result.note = 'Error during final ISO formatting.';
+            }
+        } else {
+            // Date is uncertain (missing year, month, or day)
+            console.log("Date is uncertain (missing Y, M, or D), setting normalized = null.");
+            result.normalized = null;
+             if (!result.note) { // Add a note if one isn't already present
+                 result.note = "Date components incomplete; normalization skipped.";
+             }
         }
 
     } else {
-        correctedHour = undefined;
-        correctedMinute = undefined;
-        correctedSecond = undefined;
-        // Remove time components from finalDate if it exists
-        if (finalDate) {
-             finalDate = startOfDay(finalDate);
+        // Chrono failed to parse anything
+        console.log("Chrono parsing failed.");
+        result.normalized = null;
+        result.note = 'Failed to parse date string.';
+    }
+
+    // Clean up undefined fields before returning
+    Object.keys(result).forEach(key => {
+        if (result[key as keyof EnhancedNormalizedDate] === undefined) {
+            delete result[key as keyof EnhancedNormalizedDate];
         }
-    }
-
-    // --- 4. Explicit Anchor Prioritization ---
-    // If chrono was certain about year/month from the text, ensure they override relative calculations
-    // Use ?? undefined
-    const chronoCertainYear = components.get('year') ?? undefined;
-    const chronoCertainMonth = components.get('month') ?? undefined;
-
-    if (components.isCertain('year') && chronoCertainYear !== correctedYear) {
-         console.log(`Prioritizing explicit year ${chronoCertainYear} for '${dateString}'`);
-         correctedYear = chronoCertainYear;
-         // If year changes, day might become invalid if month is Feb etc. Recalculate finalDate if possible.
-         if(correctedMonth && correctedDay && finalDate) {
-             try {
-                 finalDate = set(finalDate, { year: correctedYear });
-                 if (!isValid(finalDate)) finalDate = null; // Invalidate if date is wrong (e.g. Feb 30)
-             } catch { finalDate = null; }
-         } else { finalDate = null; } // Cannot determine full date anymore
-    }
-     if (components.isCertain('month') && chronoCertainMonth !== correctedMonth) {
-         console.log(`Prioritizing explicit month ${chronoCertainMonth} for '${dateString}'`);
-         correctedMonth = chronoCertainMonth;
-         // Recalculate finalDate if possible
-         if(correctedYear && correctedDay && correctedMonth && finalDate) {
-             try {
-                // date-fns month is 0-indexed
-                finalDate = set(finalDate, { month: correctedMonth - 1 });
-                if (!isValid(finalDate)) finalDate = null;
-             } catch { finalDate = null; }
-         } else { finalDate = null; }
-    }
-    // Re-check date certainty after anchor prioritization potentially changed things
-    dateIsCertain = correctedYear !== undefined && correctedMonth !== undefined && correctedDay !== undefined && finalDate !== null && isValid(finalDate);
+    });
 
 
-    // --- 5. Normalize Output String ---
-    let normalized: string | null = null;
-    if (dateIsCertain && finalDate) {
-        if (timeIsCertain) {
-            normalized = formatISO(finalDate); // Full ISO string with time
-        } else {
-            normalized = format(finalDate, 'yyyy-MM-dd'); // Date only
-        }
-    } else {
-        // Per Option A: normalized remains null if the exact day isn't certain,
-        // even if year/month are known. Year/Month components are still populated.
-        normalized = null;
-    }
-
-
-    // --- 6. Construct Final Object (Simplified Output) ---
-    const output: EnhancedNormalizedDate = {
-        original: dateString,
-        normalized: normalized,
-        note: results[0]?.text !== dateString ? `Parsed section: "${results[0]?.text}"` : undefined,
-        year: correctedYear,
-        month: correctedMonth,
-        day: correctedDay,
-        day_of_week: finalDate ? (finalDate.getDay()) : (components.get('weekday') ?? undefined), // Use calculated day of week if possible, handle null
-        period: components.get('meridiem') === 0 ? 'AM' : components.get('meridiem') === 1 ? 'PM' : undefined, // Map meridiem if available
-        // Only include time if it was certain
-        ...(timeIsCertain && correctedHour !== undefined && {
-            time_hour: correctedHour,
-            time_minute: correctedMinute,
-            time_second: correctedSecond,
-        })
-    };
-
-    // Add a note if parsing was partial or uncertain
-    if (!dateIsCertain && !timeIsCertain && !output.note) {
-         output.note = "Could not fully resolve date/time components.";
-    } else if (!dateIsCertain && timeIsCertain && !output.note) {
-         output.note = "Could not fully resolve date components, but time was specified.";
-    } else if (dateIsCertain && !timeIsCertain && !output.note && components.isCertain('hour')) {
-        // This case happens if time was found but explicitly removed (e.g., "end of day")
-        output.note = "Date resolved, time components ignored due to phrasing.";
-     }
-
-
-    console.log(`Parsed '${dateString}' ->`, JSON.stringify(output));
-    return output;
+    console.log("Final parsed date object:", JSON.stringify(result));
+    return result;
 }
 
 /**

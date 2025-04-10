@@ -134,16 +134,6 @@
             "maximum": 10,
             "description": "User-assigned priority level (1-10, 10 = highest)",
             "nullable": true
-          },
-          "conversation_id": {
-            "type": "string",
-            "description": "Identifier for the ongoing conversation session (if available)",
-            "nullable": true
-          },
-          "thread_id": {
-             "type": "string",
-             "description": "Identifier for a specific topic thread within a conversation (if available and distinct)",
-             "nullable": true
           }
         },
         "additionalProperties": {
@@ -191,6 +181,11 @@
           "day_of_week": {
             "type": "integer",
             "description": "Day of week component (e.g., 0=Sun, 1=Mon...).",
+            "nullable": true
+          },
+          "week_number": {
+            "type": "integer",
+            "description": "ISO week number of the year (1-53).",
             "nullable": true
           },
           "time_hour": {
