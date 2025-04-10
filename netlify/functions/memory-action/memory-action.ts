@@ -96,6 +96,8 @@ interface ContextObject {
     file_id?: string; // Reference to the source file (Corrected: UUID as string)
     chunk_id?: string; // Reference to the specific chunk (Corrected: UUID as string)
     chunk_index?: number; // Added: Index of the chunk within its file
+    similarity?: number; // Added: Optional similarity score from vector search
+    rank?: number; // Added: Optional rank score from FTS
 }
 
 interface SuccessResponse {
@@ -128,6 +130,7 @@ interface FallbackResultItem {
     created_at: string | null;
     // file_metadata from DB should now contain ProcessedEntities structure
     file_metadata: ProcessedEntities | null;
+    rank?: number; // Added: Optional rank score from FTS
 }
 
 // NEW Interface for internal re-ranking
@@ -482,16 +485,30 @@ async function rerankResults(
 
     console.log(`Re-ranking ${candidates.length} candidates from source: ${query_source}`);
 
+    // Pre-calculate date range once if needed for FTS date boost
+    let queryDateRange: { startDate: string; endDate: string } | null = null;
+    if (query_source === 'postgres_fallback_text') {
+        queryDateRange = deriveDateRange(queryMetadata.dates);
+        if (queryDateRange) {
+            console.log(`Re-ranking: Derived query date range for FTS boost: ${queryDateRange.startDate} to ${queryDateRange.endDate}`);
+        } else {
+             console.log("Re-ranking: No specific past date range derived from query for FTS boost.");
+        }
+    }
+
     const scoredCandidates: ScoredContextObject[] = candidates.map(candidate => {
         // a. Map to Scored Objects & b. Calculate initial_score
         let initial_score = 0;
         if (query_source === 'vector_store') {
-            // Attempt to access similarity, default to 0 if not present
-            initial_score = (candidate as any).similarity || 0;
+            // Use similarity score from vector search (already mapped in ContextObject)
+            initial_score = candidate.similarity || 0;
             // Ensure similarity is within 0-1 range (clamp if necessary, though unlikely)
             initial_score = Math.max(0, Math.min(1, initial_score));
         } else { // postgres_fallback_text
-            initial_score = 0.5; // Assign fixed base score for FTS results
+            // Use rank score from FTS (already mapped in ContextObject)
+            initial_score = candidate.rank || 0;
+             // Assume rank is already normalized (0-1). If not, normalization needed here.
+             initial_score = Math.max(0, Math.min(1, initial_score)); // Clamp just in case
         }
 
         // c. Calculate metadata_boost_score
@@ -513,6 +530,24 @@ async function rerankResults(
         if (queryMetadata.dates && queryMetadata.dates.length > 0 && candidateEntities?.dates && candidateEntities.dates.length > 0) metadata_boost_score += 0.05;
 
         // Language is explicitly excluded
+
+        // NEW: Apply Date Range Boost (FTS Only)
+        if (query_source === 'postgres_fallback_text' && queryDateRange) {
+            try {
+                const candidateTimestamp = parseISO(candidate.timestamp);
+                const rangeStart = parseISO(queryDateRange.startDate);
+                const rangeEnd = parseISO(queryDateRange.endDate);
+
+                if (isValid(candidateTimestamp) && isValid(rangeStart) && isValid(rangeEnd)) {
+                    if (candidateTimestamp >= rangeStart && candidateTimestamp <= rangeEnd) {
+                        console.log(`Applying +0.10 date boost to FTS result (timestamp: ${candidate.timestamp})`);
+                        metadata_boost_score += 0.10;
+                    }
+                }
+            } catch (e) {
+                console.warn(`Error comparing dates for FTS boost for timestamp ${candidate.timestamp}:`, e);
+            }
+        }
 
         // d. Calculate final_score
         let final_score = Math.min(1.0, initial_score + metadata_boost_score);
@@ -795,6 +830,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                     chunk: result.content_chunk,
                     timestamp: result.metadata?.created_at ?? new Date(0).toISOString(),
                     chunk_index: result.chunk_index,
+                    similarity: result.similarity,
                     entities_in_chunk: typeof result.metadata === 'object' && result.metadata !== null
                         ? { // Reconstruct entities
                             people: result.metadata.people,
@@ -855,6 +891,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             .limit(FALLBACK_MATCH_COUNT);
 
                         // --- START: Integrate Conditional Date Filtering (Task 2b) ---
+                        /*
                         const dateRange = deriveDateRange(queryMetadata.dates); // Pass the processed dates
                         if (dateRange) {
                              console.log(`Applying FTS date range filter: ${dateRange.startDate} to ${dateRange.endDate}`);
@@ -864,6 +901,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                          else {
                             console.log("No date range filter applied to FTS.");
                         }
+                        */
                         // --- END: Integrate Conditional Date Filtering ---
 
                         // 4. Execute the FTS query
@@ -890,9 +928,10 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             // Map results - Ensure dates handled as EnhancedNormalizedDate[]
                             retrieved_context = typedTextResults.map((file) => ({
                                 file_id: file.id,
-                                chunk: file.transcript_text, // Use full transcript for now
+                                chunk: file.transcript_text.substring(0, 3000) + (file.transcript_text.length > 3000 ? '...' : ''),
+                                rank: file.rank,
                                 timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
-                                chunk_index: undefined, // FTS is on the whole file
+                                chunk_index: undefined,
                                 entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
                                     ? { /* Reconstruction logic */
                                         people: file.file_metadata.people,
@@ -939,20 +978,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             // --- END: Integrate Re-ranking Call ---
 
         } // End of 'query'/'combined' block
-
-        // ADJUST final message generation to use notes from EnhancedNormalizedDate
-        let dateParseNotes: string[] = [];
-        if (processedMetadata.dates && Array.isArray(processedMetadata.dates)) {
-            dateParseNotes = (processedMetadata.dates as EnhancedNormalizedDate[])
-                // Capture notes that indicate partial parses or errors
-                .filter(d => d.note && d.note !== "Parsed successfully." && !d.note.startsWith("Parsed successfully. Time component was implied"))
-                .map(d => `For date '${d.original}': ${d.note}`);
-        }
-        if (dateParseNotes.length > 0) {
-            const noteMessage = `Notes on date parsing: ${dateParseNotes.join('; ')}`;
-            message_for_gpt = message_for_gpt ? `${message_for_gpt} ${noteMessage}` : noteMessage;
-            console.log("Appending date parsing notes message:", noteMessage);
-        }
 
         // Final response construction
         console.log(`DEBUG: Final retrieved_context count after potential re-ranking: ${retrieved_context.length}`);

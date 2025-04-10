@@ -10,8 +10,6 @@
 *   **Backend:** Supabase (PostgreSQL Database + pgvector Extension)
 *   **APIs:** OpenAI API (for Action calls), Supabase API
 
-**Note on Updates:** *When requesting updates to learning documents, the expectation is a thorough alignment of all relevant details (descriptions, logic summaries, statuses, etc.) across all related files (`01_project_roadmap.md`, `03_consolidated_enhancement_plan.md`, `04_date_refactor_plan.md`, etc.) to reflect the current state accurately, not just marking items as complete.*
-
 ---
 
 ### Phase 1: Foundation & Setup (Completed)
@@ -50,7 +48,7 @@
         *   Uses `chrono-node` library within `parseDateStringToEnhanced` function to parse various date/time formats relative to the current timestamp.
         *   Outputs `EnhancedNormalizedDate` objects containing components (year, month, day, hour, etc.) and potentially a normalized ISO string.
         *   These `EnhancedNormalizedDate` objects are stored in the `dates` array within metadata JSONB columns (`files.file_metadata` and `transcript_embeddings.metadata`).
-    *   **Query (`query`/`combined`) - Strategy v1.3 (Pending Implementation):**
+    *   **Query (`query`/`combined`) - (Implemented):**
         *   Implements a **Simplified Query Strategy with Application-Layer Re-ranking**:
             1.  **Primary Retrieval - Vector Search:** Calls `search_memory_chunks` RPC with query embedding. Assume RPC returns `similarity`. Retrieves top `VECTOR_MATCH_COUNT` (15) candidates.
             2.  **Fallback Retrieval - FTS:** If Vector Search fails or returns no results, queries the `files` table using `textSearch` against `transcript_tsv` (using `'english'` config and query entities *excluding language*). Select the `ts_rank_cd` score as `rank`. Retrieves top `FALLBACK_MATCH_COUNT` (20) candidates.
@@ -98,24 +96,24 @@
 
 **Objective:** Improve quality, performance, and features beyond the current core functionality.
 
-1.  **Refactor Date Handling (Completed - Filtering Removed):** 
+1.  **Refactor Date Handling (Completed):** 
     *   **Goal:** Modify date handling to parse and store structured date/time components.
     *   **Approach:** Integrated `chrono-node`, defined `EnhancedNormalizedDate`, updated storage logic. SQL function and Netlify function query logic were updated to *remove* date component filtering during initial retrieval.
     *   **Rationale:** Retains detailed date information for relevance boosting during re-ranking rather than strict pre-filtering.
     *   **Status:** Completed.
 
-2.  **Implement Relevance Boosting (Application Layer) (Next Step - Plan v1.3):**
-    *   **Goal:** Improve relevance ranking of query results using stored metadata, vector similarity, FTS rank, and date matching *after* initial broad retrieval, following the simplified fallback and re-ranking strategy (v1.3).
-    *   **Approach:** Implement the logic detailed in **`learnings/02_enhancement_plan.md`** (v1.3) within the Netlify function (`memory-action.ts`). Key implementation tasks include:
-        *   Updating constants (`VECTOR_MATCH_COUNT=15`, `FALLBACK_MATCH_COUNT=20`, `FINAL_MATCH_COUNT=5`).
-        *   Updating relevant TypeScript interfaces (`SearchResultItem`, `FallbackResultItem`, `ContextObject`).
+2.  **Implement Relevance Boosting (Application Layer) (Completed):**
+    *   **Goal:** Improve relevance ranking of query results using stored metadata, vector similarity, FTS rank, and date matching *after* initial broad retrieval, following the simplified fallback and re-ranking strategy.
+    *   **Approach:** Implement the revised re-ranking logic within the Netlify function (`memory-action.ts`). Key aspects include:
+        *   Updated retrieval result counts.
+        *   Updated relevant TypeScript interfaces.
         *   Ensuring FTS query selects `rank` and does not pre-filter by date.
-        *   Updating mapping logic to preserve scores (`similarity`, `rank`) and truncate FTS chunks.
-        *   Implementing the enhanced `rerankResults` function: calculate `initial_score` (similarity or rank), `metadata_boost_score` (additive, +0.05 per overlap type excluding language, +0.10 for FTS date range match), and `final_score`.
+        *   Updating mapping logic to preserve scores and truncate FTS chunks.
+        *   Implementing the enhanced `rerankResults` function (calculating initial score, metadata boost score including FTS date boost, and final score).
         *   Integrating the `rerankResults` call after initial retrieval.
         *   Removing date parsing note logic from the final response.
     *   **Rationale:** Leverages both semantic similarity and text relevance scores, provides flexible metadata/date-driven ranking (excluding language), and simplifies query logic.
-    *   **Status:** Planned.
+    *   **Status:** Completed.
 
 3.  **Future Considerations (Backlog):**
     *   Advanced Retrieval (Hybrid search, time decay, more sophisticated boosting).

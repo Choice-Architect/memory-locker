@@ -1,6 +1,6 @@
 # Memory Locker: Enhancement Implementation Plan v1.3
 
-**Date:** 2025-04-11 (Revised)
+**Version:** 1.3 (Revised)
 
 **Goal:** Implement the revised query and relevance enhancement strategy (v1.3) within the `memory-action.ts` Netlify function. This involves simplifying the fallback mechanism and implementing application-layer relevance re-ranking that incorporates FTS rank scores, vector similarity scores, and dynamic date range boosting.
 
@@ -47,9 +47,9 @@ The following steps detail the required modifications within the `netlify/functi
         *   Uses `{ config: 'english' }` in `.textSearch`.
 
 **4. Modify Result Mapping Logic:**
-    *   **Vector Search Mapping (around line 782):**
+    *   **Vector Search Mapping:**
         *   When mapping `SearchResultItem` to `ContextObject`, include `similarity: result.similarity`.
-    *   **FTS Fallback Mapping (around line 887):**
+    *   **FTS Fallback Mapping:**
         *   When mapping `FallbackResultItem` to `ContextObject`:
             *   Include `rank: file.rank`.
             *   Truncate the chunk: `chunk: file.transcript_text.substring(0, 3000) + (file.transcript_text.length > 3000 ? '...' : '')`.
@@ -86,7 +86,7 @@ The following steps detail the required modifications within the `netlify/functi
     *   Ensure `rerankResults` is called after `retrieved_context` is populated and before the `SuccessResponse` is constructed. Assign the result back to `retrieved_context`.
 
 **8. Remove Date Parsing Notes Logic:**
-    *   Delete the code block (lines 923-932) that calculates `dateParseNotes` and appends them to `message_for_gpt`.
+    *   Delete the code block that calculates `dateParseNotes` and appends them to `message_for_gpt`.
 
 ---
 
@@ -102,7 +102,4 @@ The following steps detail the required modifications within the `netlify/functi
 *   Confirm `message_for_gpt` no longer contains date parsing notes.
 
 ---
-
-## Post-Implementation
-
 *   Update `learnings/01_project_roadmap.md` to reflect the completed implementation status of this revised plan.
