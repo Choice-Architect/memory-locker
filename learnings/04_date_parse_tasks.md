@@ -75,16 +75,16 @@
 *   **Manual Verification (Alternative):** If unit tests aren\'t feasible immediately, manually test these cases using simulated calls to the Netlify function or by isolating the function logic. Document results, potentially updating `learnings/03_test_granular_analysis.md` or a new test log.
 
 **Test Cases:**
-*   `parseDateStringToEnhanced(\"end of day\", referenceDate)` -> Should return object with Y/M/D matching `referenceDate`, undefined time components, correct `normalized` (YYYY-MM-DD), no relative markers.
-*   `parseDateStringToEnhanced(\"tonight\", referenceDate)` -> Same as above.
-*   `parseDateStringToEnhanced(\"next Wednesday\", referenceDate)` -> Should return object with correct future Y/M/D, undefined time, correct `normalized` (YYYY-MM-DD).
-*   `parseDateStringToEnhanced(\"last Tuesday\", referenceDate)` -> Should return object with correct past Y/M/D, undefined time, correct `normalized` (YYYY-MM-DD).
-*   `parseDateStringToEnhanced(\"tomorrow\", referenceDate)` -> Correct Y/M/D for next day.
-*   `parseDateStringToEnhanced(\"yesterday\", referenceDate)` -> Correct Y/M/D for previous day.
-*   `parseDateStringToEnhanced(\"last week\", referenceDate)` -> Returns correct Year/Month (maybe week number), `day` is undefined, `normalized` is null or YYYY-MM / YYYY-Www.
-*   `parseDateStringToEnhanced(\"next month\", referenceDate)` -> Returns correct Year/Month, `day` is undefined, `normalized` is null or YYYY-MM.
-*   `parseDateStringToEnhanced(\"last two weeks of August 2025\", referenceDate)` -> Returns Year=2025, Month=8, `day` likely undefined, `normalized` likely null or `2025-08`.
-*   `parseDateStringToEnhanced(\"April 28th, 2025 from 2am to 4am UTC\", referenceDate)` -> Returns Year=2025, Month=4, Day=28, Hour=2, Minute=0, `normalized` includes date and time (ISO format).
+*   `parseDateStringToEnhanced("end of day", referenceDate)` -> Should return object with Y/M/D matching `referenceDate`, undefined time components, correct `normalized` (YYYY-MM-DD), no relative markers.
+*   `parseDateStringToEnhanced("tonight", referenceDate)` -> Same as above.
+*   `parseDateStringToEnhanced("next Wednesday", referenceDate)` -> Should return object with correct future Y/M/D, undefined time, correct `normalized` (YYYY-MM-DD).
+*   `parseDateStringToEnhanced("last Tuesday", referenceDate)` -> Should return object with correct past Y/M/D, undefined time, correct `normalized` (YYYY-MM-DD).
+*   `parseDateStringToEnhanced("tomorrow", referenceDate)` -> Correct Y/M/D for next day, `normalized` (YYYY-MM-DD).
+*   `parseDateStringToEnhanced("yesterday", referenceDate)` -> Correct Y/M/D for previous day, `normalized` (YYYY-MM-DD).
+*   `parseDateStringToEnhanced("last week", referenceDate)` -> Returns correct Year/Month (maybe week number), `day` is undefined, `normalized` is null.
+*   `parseDateStringToEnhanced("next month", referenceDate)` -> Returns correct Year/Month, `day` is undefined, `normalized` is null.
+*   `parseDateStringToEnhanced("last two weeks of August 2025", referenceDate)` -> Returns Year=2025, Month=8, `day` likely undefined, `normalized` is null.
+*   `parseDateStringToEnhanced("April 28th, 2025 from 2am to 4am UTC", referenceDate)` -> Returns Year=2025, Month=4, Day=28, Hour=2, Minute=0, `normalized` includes date and time (ISO format).
 *   Verify `relative_marker` and `relative_unit` are consistently absent in all outputs.
 
 ---

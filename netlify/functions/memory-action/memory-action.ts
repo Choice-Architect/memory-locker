@@ -534,14 +534,10 @@ function parseDateStringToEnhanced(dateString: string, referenceDate: Date): Enh
         } else {
             normalized = format(finalDate, 'yyyy-MM-dd'); // Date only
         }
-    } else if (correctedYear !== undefined && correctedMonth !== undefined) {
-        // Allow YYYY-MM if day is uncertain but month/year known (e.g., "last month")
-        // normalized = format(new Date(correctedYear, correctedMonth - 1), 'yyyy-MM'); // Might be useful later?
-        normalized = null; // For now, require day certainty for a normalized string
-    } else if (correctedYear !== undefined) {
-         // Allow YYYY if only year known
-         // normalized = format(new Date(correctedYear, 0), 'yyyy');
-         normalized = null;
+    } else {
+        // Per Option A: normalized remains null if the exact day isn't certain,
+        // even if year/month are known. Year/Month components are still populated.
+        normalized = null;
     }
 
 

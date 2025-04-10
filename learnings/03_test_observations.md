@@ -1,5 +1,7 @@
 # Test Observations Summary (v1.3 Store Mode)
 
+**Important Note:** The observations below, particularly those in Section B regarding Date/Time Entity Performance, reflect the system state *before* the v1.4 date parsing refinements (detailed in `02_enhancement_plan.md` and `04_date_parse_tasks.md`) were implemented. These observations identified the issues that the v1.4 changes aimed to address. The decision to keep `normalized: null` when the day is uncertain (Option A) was also made *after* these tests.
+
 This report summarizes the key observations and issues identified during the testing of the `store` mode functionality, based on the detailed analysis in `learnings/03_test_learnings.md`.
 
 ## Section A: Non-Date Entity Performance & Issues
