@@ -39,6 +39,7 @@ The following steps detail the required modifications within the `netlify/functi
     *   Add `rank?: number;` to `FallbackResultItem`.
     *   Add `similarity?: number;` and `rank?: number;` to `ContextObject`.
     *   Define the `ScoredContextObject` interface extending `ContextObject` with `initial_score`, `metadata_boost_score`, and `final_score`.
+    *   **(Date Parsing Related):** Ensure the `EnhancedNormalizedDate` interface includes `week_number?: number;` (required for relative week logic). Optionally, consider removing the `normalized?: string | null;` field if it's confirmed to be unused downstream, per the revised strategy.
 
 **3. Modify FTS Query Logic (`query`/`combined` modes):**
     *   Ensure the FTS fallback query (`ftsQueryBuilder`):
@@ -59,7 +60,7 @@ The following steps detail the required modifications within the `netlify/functi
     *   Ensure `checkOverlap(arr1?: any[], arr2?: any[]): boolean` is present and handles case-insensitivity for strings.
     *   Ensure `deriveDateRange(dates: EnhancedNormalizedDate[]): { startDate: string; endDate: string } | null` is present (it's needed for re-ranking now).
 
-*Note: Subsequent testing (`learnings/03_test_observations.md`, Section A) confirmed that the necessary metadata entities (`people`, `locations`, `topics`, `type`, `sentiment`) are reliably extracted during the `store` process, validating the prerequisite for the metadata boosting described below. The testing also confirmed reliable `language` extraction, supporting its intentional exclusion from the boost score.*
+*Note: Date metadata boosting during re-ranking (Step 6c) relies on the accuracy of the date components stored. Implementing the revised date parsing strategy below is crucial for its effectiveness.*
 
 **6. Enhance `rerankResults` Function:**
     *   **Signature:** Remains the same.
@@ -94,86 +95,85 @@ The following steps detail the required modifications within the `netlify/functi
 
 ---
 
-# Enhancement Implementation Plan v1.4: Store Mode Date Parsing Refinement (Revised)
+# Enhancement Implementation Plan v1.5: Store Mode Date Parsing Refactor (Pattern-Driven)
 
-**Version:** 1.4 (Revised Post-Test 2)
+**Version:** 1.5 (Supersedes v1.4)
 
-**Prerequisite Assumption:** The controlling GPT (`gpt_instructions.md`) will be updated to:
-1.  Translate all user input (`query_text`) to English before sending it to the `memory-action` in `store` or `combined` mode.
-2.  The `memory-action` function only needs to handle English date expressions.
+**Prerequisite Assumption:** The controlling GPT (`gpt_instructions.md`) translates user input (`query_text`) to English before sending it to `memory-action`. The `memory-action` function only needs to handle English date expressions.
 
-**Goal:** Refine the `parseDateStringToEnhanced` function within `memory-action.ts` to accurately extract and store individual date/time **components** (`year`, `month`, `day`, `day_of_week`, `week_number`, `period`, `time_hour`, etc.) based on the clarified requirements in `learnings/03_test_observations.md` (Section C). Prioritize component accuracy over generating a `normalized` string, setting `normalized: null` when date certainty is insufficient.
+**Goal:** Refactor the `parseDateStringToEnhanced` function within `memory-action.ts` to reliably extract date/time **components** (`year`, `month`, `day`, `day_of_week`, `week_number`, `period`, `time_hour`, etc.) by using a pattern-driven approach, prioritizing `date-fns` for calculations over interpreting `chrono-node`'s internal state.
 
-**Rationale:** Address the specific date parsing failures and requirement mismatches identified in `learnings/03_test_observations.md` (Section B) to ensure accurate date components are stored for effective v1.3 relevance re-ranking.
+**Rationale:** Address the regressions and failures identified in v1.4 testing (`learnings/05_test_observations_v1.4.md`). This approach focuses directly on extracting the required components for metadata and querying, removing the complexity and potential inaccuracies of the previous method and the need for a `normalized` ISO string output.
 
 ---
 
-## Implementation Steps (`memory-action.ts`)
+## Implementation Steps (`memory-action.ts` - Refactoring `parseDateStringToEnhanced`)
 
-The following steps detail required modifications within the `parseDateStringToEnhanced` function in `netlify/functions/memory-action/memory-action.ts`.
+The following steps detail the required refactoring within the `parseDateStringToEnhanced` function:
 
-**1. Implement Pre-Parsing Qualifier Stripping:**
-    *   **Action:** Add logic at the beginning of the function to identify and remove defined non-date qualifiers (e.g., "early", "late", "end of", "EOD", "COB", "sometime", "around", "beginning of", "first week of", "last two weeks of") from the input `dateString`. Store the cleaned string for subsequent parsing.
+**1. Qualifier Stripping (Keep & Verify):**
+    *   **Action:** Maintain the logic to strip defined qualifiers (e.g., "early", "late", "EOD", "first week of", "last two weeks of", "around", "before", "after") from the input `dateString`. Ensure the list of qualifiers is accurate and the stripping mechanism is robust.
+    *   **Purpose:** Obtain a `cleanedDateString` containing the core date phrase.
 
-**2. Refine `parseDateStringToEnhanced` Post-`chrono.parse` Logic:**
-    *   **Input Assumption:** Acknowledge via comments that the (cleaned) `dateString` argument is assumed to be English.
-    *   **Retain Initial Parse:** Use `chrono.parse` on the *cleaned* `dateString` for an initial attempt.
-    *   **Refine Components using `date-fns`:** Implement the following logic steps, using the `chrono` results, the cleaned `dateString`, the `referenceDate`, and `date-fns` for calculations and corrections. Focus on populating the individual component fields accurately.
-        *   **a. Day Boundary Correction:**
-            *   **Trigger:** Check if the *original* (uncleaned) `dateString` contains boundary terms like "end of day", "tonight", "this morning".
-            *   **Action:** Force the `year`, `month`, `day` components to match the `referenceDate`. Set `period` appropriately (e.g., `PM` for "tonight", `AM` for "this morning").
-        *   **b. Relative Date Resolution (Specific):**
-            *   **Trigger:** For terms like "yesterday", "today", "tomorrow", relative weekdays ("next Tuesday", "last Friday").
-            *   **Action:** Use `date-fns` (e.g., `addDays`, `subDays`, `nextTuesday`, `lastFriday`) to calculate the specific target `year`, `month`, `day`, and `day_of_week`.
-        *   **c. Relative Week Resolution (Uncertain Day):**
-            *   **Trigger:** For terms like "last week", "next week", "this week".
-            *   **Action:** Use `date-fns` (e.g., `subWeeks`, `addWeeks`, `startOfWeek`, `getWeek`) to calculate `year`, `month` (of week start), and `week_number`. Ensure `day` is `undefined`.
-        *   **d. Relative Month Resolution (Uncertain Day):**
-            *   **Trigger:** For terms like "last month", "next month", "this month", or standalone month names ("September", "August").
-            *   **Action:** Use `date-fns` (e.g., `subMonths`, `addMonths`, `startOfMonth`) or parse month name to calculate `year` and `month`. Ensure `day` is `undefined`.
-        *   **e. Relative Year Resolution (Uncertain Month/Day):**
-            *   **Trigger:** For terms like "last year", "next year", "this year".
-            *   **Action:** Use `date-fns` (e.g., `subYears`, `addYears`) to calculate `year`. Ensure `month` and `day` are `undefined`.
-        *   **f. Specific Date Handling (Month/Day/Year):**
-            *   **Trigger:** For explicit dates like "April 8th", "April 10, 2025".
-            *   **Action:** Parse components. **Crucially:** Handle past dates correctly – if "April 8th" is parsed and the reference date is April 10th, 2025, the result should be `Year=2025, Month=4, Day=8`, *not* 2026.
-        *   **g. Explicit Anchor Prioritization:**
-            *   **Action:** When parsing complex phrases (post-stripping, e.g., "August 2025"), ensure the explicitly mentioned components (Year=2025, Month=8) take precedence and correctly frame the context for any remaining (potentially stripped) relative parts, rather than defaulting to reference date context. (This likely interacts heavily with the qualifier stripping). Ensure Day remains `undefined` if not specified.
-        *   **h. Time Component Handling:**
-            *   **Action:** Only populate `time_hour`, `time_minute`, `time_second` if `chrono` initially found them with certainty (`result.start.isCertain('hour')`). Otherwise, leave them `undefined`. Set `period` if determined (e.g., from boundary terms or certain time).
-        *   **i. Set `normalized` Field:**
-            *   **Action:** After determining all components, check if `year`, `month`, *and* `day` are all defined.
-                *   If YES, format `normalized` using `date-fns.formatISO` (include time if `time_hour` is defined).
-                *   If NO (any of year, month, day is `undefined`), set `normalized = null`.
+**2. Date Phrase Identification (Leverage Chrono):**
+    *   **Action:** Run `chrono.parse(cleanedDateString, referenceDate, { forwardDate: true })`.
+    *   **Purpose:** Primarily use the result (`parsedResult`) to extract the `parsedResult.text` – the actual substring Chrono identified as the date/time phrase (e.g., "next Friday", "August 2025", "11 PM").
+    *   **Note:** Avoid relying on `parsedResult.start.get(...)` components or certainty flags to drive the main logic flow.
 
-**3. Update `EnhancedNormalizedDate` Interface:**
-    *   **Action:** Locate the interface definition within `memory-action.ts`.
-        *   Ensure `relative_marker` and `relative_unit` properties are removed.
-        *   Add `week_number?: number;`.
+**3. Implement Pattern Matching & Component Calculation (New Core Logic):**
+    *   **Action:** Replace the existing complex post-chrono logic block with a new structure based on pattern matching of `parsedResult.text` (or the `originalString` for boundary cases). Use `date-fns` for reliable calculations.
+    *   Initialize an empty `result: EnhancedNormalizedDate = { original: originalString }`.
+    *   Use `if/else if` blocks with regex or string checks:
+        *   **Pattern: Specific Full Dates** (e.g., "April 10, 2025", "2025-04-10", "10 Apr 2025", "Friday 15th"):
+            *   Action: Use `date-fns.parse` (with appropriate format strings) or identify components. Prioritize these specific patterns over simpler ones.
+            *   Components: `year`, `month`, `day`, `day_of_week`.
+        *   **Pattern: Month/Day Only** (e.g., "April 10", "10th April"):
+            *   Action: Identify components, use `referenceDate` for `year`. **Verify Past Date Logic:** Ensure recent past dates (e.g., "April 8th" when ref is Apr 11th) use `referenceDate` year, not `year + 1`.
+            *   Components: `year`, `month`, `day`, `day_of_week`.
+        *   **Pattern: Specific Relative Days** (`tomorrow`, `yesterday`, `today`):
+            *   Action: Use `addDays(ref, 1)`, `subDays(ref, 1)`, `ref`.
+            *   Components: `year`, `month`, `day`, `day_of_week`.
+        *   **Pattern: Relative Weekdays** (`/(next|last)\s+(monday|tuesday...)/i`, standalone weekdays e.g., "on Wednesday"):
+            *   Action: Use `nextFriday(ref)`, `lastTuesday(ref)`, etc. For standalone weekdays, assume *next* instance (document this assumption).
+            *   Components: `year`, `month`, `day`, `day_of_week`.
+        *   **Pattern: Relative Weeks** (`/(last|next|this)\s+week/i`):
+            *   Action: Use `subWeeks`, `addWeeks`, `getWeek`, `startOfWeek`.
+            *   Components: `year`, `month`, `week_number`.
+        *   **Pattern: Relative Months** (`/(last|next|this)\s+month/i` or standalone month name):
+            *   Action: Use `subMonths`, `addMonths`, `setMonth`.
+            *   Components: `year`, `month`.
+        *   **Pattern: Relative Years** (`/(last|next|this)\s+year/i` or standalone year e.g., "2026"):
+            *   Action: Use `subYears`, `addYears`, `parseInt`.
+            *   Components: `year`. Set `month = undefined`, `day = undefined`.
+        *   **Pattern: Day Boundary Terms (check `originalString`)** (`end of day`, `tonight`, `this morning`, `evening`, `afternoon`, `EOD`, `COB`):
+            *   Action: Check `originalString`. If found *without* a specific date pattern, force Y/M/D from `referenceDate` & set `period`. If found *with* a specific date pattern (e.g., "EOD Friday"), prioritize the specific date's Y/M/D, and use the boundary term only to set the `period`.
+            *   Components: `year`, `month`, `day`, `period`.
+        *   **Pattern: Specific Times** (e.g., "3 PM", "15:00", "10:30:15", "noon", "midnight"):
+            *   Action: Parse using regex or time parsing logic.
+            *   Components: `time_hour`, `time_minute`, `time_second`, `period`. (Combine with date components if date pattern also matched).
+        *   **(Add other common patterns like "in 2 days", "3 weeks ago" if desired)**
+    *   **Failure Case:** If Chrono fails to parse (`chronoResults.length === 0`) or no pattern matches, the `result` object will only contain the `original` string (and potentially a `note`).
 
-**4. Testing Requirements:**
-    *   Update unit tests/manual test cases based on the specific failures noted in `learnings/03_test_observations.md` (Section B) and the requirements in Section C. Verify:
-        *   Qualifier stripping works correctly.
-        *   Day boundary terms resolve to the reference date.
-        *   Relative week/month/year terms resolve to the correct components with `Day` (and `Month` if applicable) `undefined`.
-        *   `week_number` is correctly calculated and stored.
-        *   Explicit anchors are prioritized.
-        *   Past dates resolve within the correct year context.
-        *   `normalized` is `null` when day is uncertain.
+**4. Remove `normalized` String Logic:**
+    *   **Action:** Delete the entire code block that previously checked for component completeness and attempted to format/set the `normalized` ISO string property.
 
-**6. Update Dependent Files (`openapi.json`, `gpt_instructions.md`):**
-    *   **`openapi.json`:**
-        *   Remove `conversation_id` and `thread_id` properties from the `#/components/schemas/ExtractedEntities` definition.
-        *   Update the `#/components/schemas/EnhancedNormalizedDate` definition to include `week_number?: number;`.
-    *   **`gpt_instructions.md`:**
-        *   Explicitly instruct the GPT *not* to extract `conversation_id` or `thread_id` from user input.
+**5. Update `EnhancedNormalizedDate` Interface (Optional but Recommended):**
+    *   **Action:** Remove the `normalized?: string | null;` field from the interface definition as it's no longer being generated or used.
+    *   **Verify:** Ensure `week_number?: number;` is present.
 
-**7. Update Project Roadmap & Task List:**
-    *   Update Phase 5, Item 4 in `learnings/01_project_roadmap.md` to reflect the *revised* goal and approach for date parsing refinement.
+**6. Update Testing:**
+    *   **Action:** Revise unit tests and manual test cases (`04_test_results_v1.4_raw.csv`, `05_test_observations_v1.4.md`) to focus solely on the presence and accuracy of the **component** fields (`year`, `month`, `day`, `week_number`, `period`, etc.) based on the expected outcome for each input pattern. Ignore the `normalized` field.
 
-**8. Impact Statement:**
-*   Successfully implementing this revised plan (including code, schema, and instruction changes) will result in more accurate and reliable date components being stored, aligning with clarified project requirements, improving the effectiveness of the v1.3 query re-ranking logic, and preventing UUID-related backend errors.
+**7. Update Dependent Files (`openapi.json`, `gpt_instructions.md`):**
+    *   **`openapi.json`:** Ensure the `EnhancedNormalizedDate` schema definition reflects the interface changes (removal of `normalized`, presence of `week_number`).
+    *   **`gpt_instructions.md`:** No changes likely needed, as it instructs extraction based on user input, not specific internal formats.
+
+**8. Update Project Roadmap & Task List (`learnings/01_project_roadmap.md`):**
+    *   Update Phase 5, Item 4 to reflect this **new v1.5 refactoring approach**, superseding the previous v1.4 plan.
+
+**Impact Statement:**
+*   Implementing this refactor will create a more robust, maintainable, and accurate date component extraction system aligned with the primary goal of populating metadata fields. It eliminates problematic dependencies on `chrono-node`'s internal state and removes unused `normalized` string logic.
 
 ---
 
-**Status:** **Completed.** The required changes to `memory-action.ts`, `openapi.json`, `gpt_instructions.md`, and `learnings/01_project_roadmap.md` have been implemented.
+**Status:** **Pending Implementation.** This v1.5 plan replaces the previous v1.4 approach.

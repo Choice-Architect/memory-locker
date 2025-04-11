@@ -1,4 +1,4 @@
-## Memory Locker: Custom GPT Product Development Roadmap (v1.4)
+## Memory Locker: Custom GPT Product Development Roadmap (v1.5)
 
 **Goal:** Create a Custom GPT within the official ChatGPT application that allows a user to store and retrieve personal memories, notes, and information using natural language, voice, and potentially file uploads. The GPT will leverage Actions to interact with a Supabase backend via a Netlify Function.
 
@@ -41,25 +41,22 @@
 3.  **Core Function Logic:**
     *   **Storage (`store`/`combined`):**
         *   Generates `text-embedding-3-small` embeddings for text chunks (`CHUNK_SIZE=1000`, `CHUNK_OVERLAP=200`).
-        *   Stores file info and `file_metadata` in the `files` table. Metadata includes extracted entities like `priority`, `language`, and `dates` (as `EnhancedNormalizedDate` objects after refactor).
+        *   Stores file info and `file_metadata` in the `files` table. Metadata includes extracted entities like `priority`, `language`, and `dates`.
         *   `conversation_id` and `thread_id` are stored in top-level columns on the `files` table for efficient filtering.
-        *   Stores chunks, embeddings, `chunk_index`, and chunk-level `metadata` (mirroring `file_metadata`) in `transcript_embeddings`. **Note:** Chunk metadata redundantly includes `conversation_id`/`thread_id` from `file_metadata` for potential future chunk-specific context needs.
-    *   **Date Handling (Current Implementation - Post Refactor):**
-        *   Uses `chrono-node` library within `parseDateStringToEnhanced` function to parse various date/time formats relative to the current timestamp.
-        *   Outputs `EnhancedNormalizedDate` objects containing components (year, month, day, hour, etc.) and potentially a normalized ISO string.
-        *   These `EnhancedNormalizedDate` objects are stored in the `dates` array within metadata JSONB columns (`files.file_metadata` and `transcript_embeddings.metadata`).
-    *   **Query (`query`/`combined`) - (Implemented):**
+        *   Stores chunks, embeddings, `chunk_index`, and chunk-level `metadata` (mirroring `file_metadata`) in `transcript_embeddings`.
+    *   **Date Handling (Previous Implementation):**
+        *   Initial versions used `chrono-node` and complex post-processing to attempt extraction of date components (`year`, `month`, `day`, etc.) into `EnhancedNormalizedDate` objects stored in metadata. This approach proved unreliable and introduced regressions (Ref: `learnings/05_test_observations_v1.4.md`).
+    *   **Query (`query`/`combined`) - (Implemented v1.3):**
         *   Implements a **Simplified Query Strategy with Application-Layer Re-ranking**:
             1.  **Primary Retrieval - Vector Search:** Calls `search_memory_chunks` RPC with query embedding. Assume RPC returns `similarity`. Retrieves top `VECTOR_MATCH_COUNT` (15) candidates.
             2.  **Fallback Retrieval - FTS:** If Vector Search fails or returns no results, queries the `files` table using `textSearch` against `transcript_tsv` (using `'english'` config and query entities *excluding language*). Select the `ts_rank_cd` score as `rank`. Retrieves top `FALLBACK_MATCH_COUNT` (20) candidates.
             3.  **Mapping & Truncation:** Map results to `ContextObject`s, preserving `similarity` (from vector) or `rank` (from FTS). Truncate FTS `chunk` text to 3000 chars.
             4.  **Application-Layer Re-ranking:** After retrieval and mapping, the Netlify function (`memory-action.ts`) re-ranks the candidates using `rerankResults`.
                 *   Calculates `initial_score` based on `similarity` (vector) or `rank` (FTS).
-                *   Calculates `metadata_boost_score` by summing increments for overlapping metadata (`people`, `locations`, `topics`, `type`, `sentiment`; *language excluded*; `+0.05` each) and adding a hierarchical boost for date matching (Day +0.05, Month +0.03, Year +0.01). For FTS results, adds an additional `+0.10` if the candidate's `timestamp` falls within a past date range derived from the query.
+                *   Calculates `metadata_boost_score` by summing increments for overlapping metadata (`people`, `locations`, `topics`, `type`, `sentiment`; *language excluded*; `+0.05` each) and adding a hierarchical boost for date matching (Day +0.05, Month +0.03, Year +0.01) based on stored date components. For FTS results, adds an additional `+0.10` if the candidate's `timestamp` falls within a past date range derived from the query.
                 *   Calculates `final_score = min(1.0, initial_score + metadata_boost_score)`.
             5.  **Final Selection:** The top `FINAL_MATCH_COUNT` (5) results based on `final_score` are selected and returned.
         *   The source of the result (`vector_store`, `postgres_fallback_text`, `none`) is tracked in the response (`query_source`).
-        *   **Note:** Date parsing notes (e.g., "Partial parse...") from `chrono-node` are present within the `EnhancedNormalizedDate` objects returned in `retrieved_context`, but are not used for ranking and are no longer separately included in the top-level `message_for_gpt` field.
 4.  **Error Handling & Logging:** Implemented try/catch blocks, basic Netlify function logging, and consistent error responses.
 5.  **Deployment & Initial Testing:** Function deployed and tested via endpoint.
 
@@ -76,9 +73,9 @@
     *   Handle dictation by rewriting internally before storing.
     *   Extract standard entities (`people`, `dates` as strings, `locations`, etc.).
     *   Infer `type` and `sentiment`.
-    *   Extract `priority`, `language`, `conversation_id`, `thread_id`.
+    *   Extract `priority`, `language`. (Note: Extraction of `conversation_id`, `thread_id` from user input was disabled due to backend constraints).
     *   Handle responses (synthesize context, acknowledge storage/errors).
-3.  **Action Schema Definition (`openapi.json`):** Created OpenAPI v3.1.0 spec defining the server URL, path, method, request body (`ExtractedEntities` for input dates), response (`SuccessResponse` containing `ContextObject`s, which in turn use `OutputProcessedEntities` referencing `EnhancedNormalizedDate` for output dates), and API key authentication (`x-api-key`).
+3.  **Action Schema Definition (`openapi.json`):** Created OpenAPI v3.1.0 spec defining the server URL, path, method, request body (`ExtractedEntities`), response (`SuccessResponse` containing `ContextObject`s referencing `EnhancedNormalizedDate` for output dates), and API key authentication (`x-api-key`). Schema reflects `EnhancedNormalizedDate` structure (including `week_number`, potentially excluding `normalized`).
 4.  **Action Configuration:** Added schema to GPT config, configured API key authentication. Schema validated in editor.
 
 ---
@@ -88,7 +85,7 @@
 **Objective:** Tested the end-to-end flow and refined implementation based on results.
 
 1.  **End-to-End Testing:** Performed various tests (store, query, complex scenarios, fallbacks) via the ChatGPT interface.
-2.  **Refinement & Bug Fixing:** *(Details to be populated after testing v1.2 implementation)*
+2.  **Refinement & Bug Fixing:** Addressed initial issues found during integration.
 
 ---
 
@@ -96,35 +93,31 @@
 
 **Objective:** Improve quality, performance, and features beyond the current core functionality.
 
-1.  **Refactor Date Handling (Completed):** 
-    *   **Goal:** Modify date handling to parse and store structured date/time components.
-    *   **Approach:** Integrated `chrono-node`, defined `EnhancedNormalizedDate`, updated storage logic. SQL function and Netlify function query logic were updated to *remove* date component filtering during initial retrieval.
-    *   **Rationale:** Retains detailed date information for relevance boosting during re-ranking rather than strict pre-filtering.
-    *   **Status:** Completed.
+1.  **(Obsolete) Refactor Date Handling (Original Attempt):** Previous attempts (culminating in plan v1.4) involved complex post-processing of `chrono-node` results to extract structured components. This proved unreliable and introduced regressions.
 
-2.  **Implement Relevance Boosting (Application Layer) (Completed):**
-    *   **Goal:** Improve relevance ranking of query results using stored metadata, vector similarity, FTS rank, and date matching *after* initial broad retrieval, following the simplified fallback and re-ranking strategy.
-    *   **Approach:** Implement the revised re-ranking logic within the Netlify function (`memory-action.ts`). Key aspects include:
-        *   Updated retrieval result counts.
-        *   Updated relevant TypeScript interfaces.
-        *   Ensuring FTS query selects `rank` and does not pre-filter by date.
-        *   Updating mapping logic to preserve scores and truncate FTS chunks.
-        *   Implementing the enhanced `rerankResults` function (calculating initial score, metadata boost score including hierarchical date matching, FTS date range boost, and final score).
-        *   Integrating the `rerankResults` call after initial retrieval.
-        *   Removing date parsing note logic from the final response.
+2.  **Implement Relevance Boosting (Application Layer) (Completed v1.3):**
+    *   **Goal:** Improve relevance ranking of query results using stored metadata, vector similarity, FTS rank, and date matching *after* initial broad retrieval.
+    *   **Approach:** Implemented the re-ranking logic within the Netlify function (`memory-action.ts`), incorporating similarity/rank scores and boosting based on metadata/date component overlap. (Details in Phase 2 & `learnings/02_enhancement_plan.md`).
     *   **Rationale:** Leverages both semantic similarity and text relevance scores, provides flexible metadata/date-driven ranking (excluding language), including hierarchical date matching, and simplifies query logic.
-    *   **Status:** Completed.
+    *   **Status:** Completed. Relies on accurate date components from the storage process.
 
-3.  **Non-Date Entity Extraction (`store` mode) - Status Confirmed:**
-    *   **Goal:** Confirm the stability and acceptance of non-date entity extraction in the `store` mode based on recent testing (ref: `learnings/03_test_observations.md`).
-    *   **Findings:** The extraction of `people`, `locations`, `topics`, `type`, `sentiment`, `language`, `priority`, and `organizations` performs reliably and meets current requirements. The classification of specific businesses as `locations` is acceptable for now. The non-extraction of `conversation_id`/`thread_id` from user input is confirmed as the correct behavior due to backend UUID constraints.
-    *   **Status:** Stable. These non-date entity handling aspects are considered the baseline and should not be altered in future `store` mode modifications unless explicitly specified.
+3.  **Non-Date Entity Extraction (`store` mode) (Completed & Stable):**
+    *   **Goal:** Confirm reliable extraction of non-date entities.
+    *   **Findings:** Based on testing (`learnings/05_test_observations_v1.4.md`), extraction of `people`, `locations`, `topics`, `type`, `sentiment`, `language`, `priority`, `organizations` meets requirements.
+    *   **Status:** Stable baseline.
 
-4.  **Refine Date Parsing (`store` mode) (v1.4 Revised - Completed):**
-    *   **Goal:** Implement the revised v1.4 date parsing strategy (detailed in `learnings/02_enhancement_plan.md` & `learnings/03_test_observations.md`) to accurately extract individual date/time components, handle granularity/uncertainty correctly (using `normalized: null`), ignore specified qualifiers, and fix identified parsing errors.
-    *   **Approach:** Modified `parseDateStringToEnhanced` in `memory-action.ts` per the revised v1.4 plan. Updated `openapi.json` (removed UUID fields, added `week_number`). Updated `gpt_instructions.md` (prohibited UUID extraction).
-    *   **Rationale:** Corrected parsing errors identified in Test 2, ensuring accurate date component storage for reliable v1.3 relevance ranking, and preventing backend UUID errors.
-    *   **Status:** **Completed.**
+4.  **Refactor Date Parsing (`store` mode) (v1.5 - Pending):**
+    *   **Goal:** Reliably extract accurate date/time **components** (year, month, day, week_number, period, etc.) for storage in metadata, resolving issues from previous attempts.
+    *   **Approach (Pattern-Driven):** Refactor `parseDateStringToEnhanced` in `memory-action.ts` to:
+        1.  Strip defined qualifiers (e.g., "early", "EOD").
+        2.  Use `chrono-node` primarily to identify the date text phrase.
+        3.  Use pattern matching (regex/string checks) on the identified phrase.
+        4.  Based on the pattern, use `date-fns` directly to calculate components (e.g., `nextFriday`, `lastTuesday`, `getWeek`, `subMonths`).
+        5.  Populate only the reliably calculated components into `EnhancedNormalizedDate`.
+        6.  Remove the generation of the `normalized` ISO string.
+    *   (Full details in `learnings/02_enhancement_plan.md`, v1.5 section).
+    *   **Rationale:** Creates a more robust and maintainable date component extraction system focused on the primary goal, avoiding complex interpretation of `chrono-node` internals.
+    *   **Status:** **Pending Implementation.**
 
 5.  **Future Considerations (Backlog):**
     *   Advanced Retrieval (Hybrid search, time decay, more sophisticated boosting).
@@ -133,6 +126,6 @@
 
 ### Phase 6: Documentation & Launch (Pending)
 
-1.  **Final Checks:** Perform regression testing, review security configurations.
+1.  **Final Checks:** Perform regression testing (especially after date parsing refactor), review security configurations.
 
 --- 
