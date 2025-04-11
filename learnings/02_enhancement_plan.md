@@ -58,7 +58,6 @@ The following steps detail the required modifications within the `netlify/functi
 
 **5. Implement/Enhance Helper Functions:**
     *   Ensure `checkOverlap(arr1?: any[], arr2?: any[]): boolean` is present and handles case-insensitivity for strings.
-    *   Ensure `deriveDateRange(dates: EnhancedNormalizedDate[]): { startDate: string; endDate: string } | null` is present (it's needed for re-ranking now).
 
 *Note: Date metadata boosting during re-ranking (Step 6c) relies on the accuracy of the date components stored. Implementing the revised date parsing strategy below is crucial for its effectiveness.*
 
@@ -71,13 +70,17 @@ The following steps detail the required modifications within the `netlify/functi
             *   If `query_source === 'postgres_fallback_text'`, use `initial_score = candidate.rank ?? 0;`.
         *   **c. Calculate `metadata_boost_score`:**
             *   Initialize `metadata_boost_score = 0.0`.
-            *   Apply additive boosts (`+= 0.05`) for overlaps between `candidate.entities_in_chunk` and `queryMetadata` for: `people`, `locations`, `topics` (using `checkOverlap`), `type` (exact match), `sentiment` (exact match).
-            *   **Apply Hierarchical Date Matching Boost:** Implement logic to iterate through `queryMetadata.dates`. For each query date, check for matches in `candidate.entities_in_chunk.dates` at the Day (+0.05), Month (+0.03), or Year (+0.01) level, adding the highest match found for that query date to the boost score.
-            *   **Apply Date Range Boost (FTS Only):** If `query_source === 'postgres_fallback_text'`:
-                *   Call `deriveDateRange(queryMetadata.dates)` once to get potential past ranges.
-                *   Parse `candidate.timestamp` to a `Date` object.
-                *   Check if the candidate's timestamp falls within *any* of the derived ranges.
-                *   If it falls within a range, add `+= 0.10` to `metadata_boost_score`.
+            *   Apply additive boosts (`+= 0.05`) for overlaps: `people`, `locations`, `topics`, `type`, `sentiment`.
+            *   **Apply Hierarchical Date Matching Boost:** Iterate through `queryMetadata.dates`. For each query date, check for matches in `candidate.entities_in_chunk.dates` at the Day (+0.05), Month (+0.03), or Year (+0.01) level, adding the highest match found.
+            *   **Apply Date Range Boost (FTS Only - Revised Logic):** If `query_source === 'postgres_fallback_text'`:
+                *   Iterate through `queryMetadata.dates`.
+                *   For each query date with specific `year`, `month`, and `day` components:
+                    *   Create a `Date` object representing that specific day.
+                    *   Check if this date is in the past using `date-fns.isPast()`.
+                    *   If it is a valid past date, determine the `startOfDay` and `endOfDay` for this date.
+                    *   Parse the `candidate.timestamp` to a `Date` object.
+                    *   Check if the candidate's timestamp falls within the `startOfDay` / `endOfDay` range.
+                    *   If it falls within the range, add `+= 0.10` to `metadata_boost_score` and break the inner loop (boost applied once per candidate).
             *   **Note:** Explicitly *do not* add a boost based on `language` overlap.
         *   **d. Calculate `final_score`:** `final_score = Math.min(1.0, initial_score + metadata_boost_score)`.
         *   **e. Populate Scored Object:** Store calculated scores.
@@ -91,7 +94,6 @@ The following steps detail the required modifications within the `netlify/functi
 
 **8. Remove Date Parsing Notes Logic:**
     *   Delete the code block that calculates `dateParseNotes` and appends them to `message_for_gpt`.
-
 
 ---
 
@@ -176,4 +178,4 @@ The following steps detail the required refactoring within the `parseDateStringT
 
 ---
 
-**Status:** **Pending Implementation.** This v1.5 plan replaces the previous v1.4 approach.
+**Status:** **Implemented.** This v1.5 plan replaced the previous v1.4 approach.

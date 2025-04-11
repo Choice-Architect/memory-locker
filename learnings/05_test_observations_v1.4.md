@@ -1,4 +1,8 @@
-# Test Observations (v1.4 Implementation)
+# Test Observations (v1.4 Implementation) - HISTORICAL
+
+**NOTE:** The observations and analysis below pertain to the **previous v1.4 date parsing implementation** within `memory-action.ts`. These issues, particularly regarding inaccurate component extraction and reliance on a fragile `normalized` string, **have been addressed by the v1.5 pattern-driven refactor** implemented using `chrono-node` for identification and `date-fns` for component calculation. This file is retained for historical context only.
+
+---
 
 ## Analysis for Input: "I had a productive meeting with Sarah Chen at Starbucks yesterday afternoon about the Q3 marketing strategy due next Friday."
 

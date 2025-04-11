@@ -103,21 +103,21 @@
 
 3.  **Non-Date Entity Extraction (`store` mode) (Completed & Stable):**
     *   **Goal:** Confirm reliable extraction of non-date entities.
-    *   **Findings:** Based on testing (`learnings/05_test_observations_v1.4.md`), extraction of `people`, `locations`, `topics`, `type`, `sentiment`, `language`, `priority`, `organizations` meets requirements.
+    *   **Findings:** Extraction of `people`, `locations`, `topics`, `type`, `sentiment`, `language`, `priority`, `organizations` meets requirements.
     *   **Status:** Stable baseline.
 
-4.  **Refactor Date Parsing (`store` mode) (v1.5 - Pending):**
+4.  **Refactor Date Parsing (`store` mode) (v1.5 - Completed):**
     *   **Goal:** Reliably extract accurate date/time **components** (year, month, day, week_number, period, etc.) for storage in metadata, resolving issues from previous attempts.
-    *   **Approach (Pattern-Driven):** Refactor `parseDateStringToEnhanced` in `memory-action.ts` to:
-        1.  Strip defined qualifiers (e.g., "early", "EOD").
+    *   **Approach (Pattern-Driven):** Refactored `parseDateStringToEnhanced` in `memory-action.ts` to:
+        1.  Strip defined qualifiers.
         2.  Use `chrono-node` primarily to identify the date text phrase.
         3.  Use pattern matching (regex/string checks) on the identified phrase.
-        4.  Based on the pattern, use `date-fns` directly to calculate components (e.g., `nextFriday`, `lastTuesday`, `getWeek`, `subMonths`).
+        4.  Based on the pattern, use `date-fns` directly to calculate components.
         5.  Populate only the reliably calculated components into `EnhancedNormalizedDate`.
         6.  Remove the generation of the `normalized` ISO string.
     *   (Full details in `learnings/02_enhancement_plan.md`, v1.5 section).
-    *   **Rationale:** Creates a more robust and maintainable date component extraction system focused on the primary goal, avoiding complex interpretation of `chrono-node` internals.
-    *   **Status:** **Pending Implementation.**
+    *   **Rationale:** Created a more robust and maintainable date component extraction system focused on the primary goal, avoiding complex interpretation of `chrono-node` internals and removing unused `normalized` string logic.
+    *   **Status:** **Completed.**
 
 5.  **Future Considerations (Backlog):**
     *   Advanced Retrieval (Hybrid search, time decay, more sophisticated boosting).
@@ -126,6 +126,6 @@
 
 ### Phase 6: Documentation & Launch (Pending)
 
-1.  **Final Checks:** Perform regression testing (especially after date parsing refactor), review security configurations.
+1.  **Final Checks:** Perform regression testing, review security configurations.
 
 --- 

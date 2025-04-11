@@ -30,24 +30,36 @@ import {
     format,
     setDay,
     addMonths,
-    getWeek
+    getWeek,
+    getYear,
+    getMonth,
+    getDate,
+    getDay,
+    nextMonday,
+    nextTuesday,
+    nextWednesday,
+    nextThursday,
+    nextFriday,
+    nextSaturday,
+    nextSunday,
+    previousMonday,
+    previousTuesday,
+    previousWednesday,
+    previousThursday,
+    previousFriday,
+    previousSaturday,
+    previousSunday,
+    parse as dateFnsParse,
+    differenceInCalendarDays
 } from 'date-fns';
 import * as chrono from 'chrono-node';
 
 // --- Interfaces for API Contract ---
 
-// Updated Interface for normalized date object (Old - will be replaced by EnhancedNormalizedDate in outputs)
-interface NormalizedDate {
-    original: string;
-    normalized: string | null; // ISO 8601 format or null if failed
-    note?: string; // Added: Reason for failure (e.g., 'vague', 'parse_error')
-}
-
-// NEW Interface for Enhanced Date Handling with Components
+// REVISED Interface for Enhanced Date Handling with Components (v1.5)
 interface EnhancedNormalizedDate {
     original: string;        // The original string like "last Tuesday afternoon"
-    normalized?: string | null; // ISO 8601 if fully resolved, else null
-    note?: string;           // Explanation if partial or failed (e.g., "Partial parse: Day and period identified relative to reference date")
+    note?: string;           // Explanation if partial or failed (e.g., "Partial parse: Day and period identified relative to reference date", "Failed to parse date string")
     // --- Component Fields (all optional) ---
     year?: number;           // e.g., 2024
     month?: number;          // e.g., 4 (1-12)
@@ -57,22 +69,21 @@ interface EnhancedNormalizedDate {
     time_hour?: number;      // e.g., 15 (0-23)
     time_minute?: number;    // e.g., 0
     time_second?: number;    // e.g., 0
-    period?: 'AM' | 'PM' | 'Morning' | 'Afternoon' | 'Evening' | 'Night'; // e.g., "Afternoon"
+    period?: 'Morning' | 'Afternoon' | 'Evening' | 'Night'; // Simplified Periods derived from boundary terms or time
 }
 
 interface ExtractedEntities {
     people?: string[];
-    // Input can still be flexible string or NormalizedDate for initial capture
-    // but will be processed into EnhancedNormalizedDate internally.
-    dates?: (string | NormalizedDate)[];
+    // Input uses flexible date types, processed internally into EnhancedNormalizedDate
+    dates?: (string | { original: string; normalized?: string | null; note?: string })[]; // Allow basic normalized or string
     locations?: string[];
     topics?: string[];
-    type?: string; // Added based on schema
-    sentiment?: string; // Added based on schema
-    priority?: number; // Added: Optional user-assigned priority (1-10)
-    conversation_id?: string; // Added: Optional conversation identifier
-    thread_id?: string; // Added: Optional thread identifier
-    [key: string]: any; // Allow flexible entity types, keep for now
+    type?: string;
+    sentiment?: string;
+    priority?: number;
+    conversation_id?: string;
+    thread_id?: string;
+    [key: string]: any; // Allow flexible entity types
 }
 
 // Interface for entities AFTER internal processing (using EnhancedNormalizedDate)
@@ -141,9 +152,9 @@ interface FallbackResultItem {
     rank?: number; // Added: Optional rank score from FTS
 }
 
-// NEW Interface for internal re-ranking
+// Interface for internal re-ranking
 interface ScoredContextObject extends ContextObject {
-    initial_score: number; // Normalized initial score (0-1)
+    initial_score: number; // Combined vector similarity or FTS rank
     metadata_boost_score: number; // Calculated boost
     final_score: number;  // Score after boost
 }
@@ -208,407 +219,358 @@ const initializeClients = () => {
 
 // --- Utility Functions ---
 
-// ADD NEW deriveDateRange function
 /**
- * Analyzes an array of EnhancedNormalizedDate objects to derive a specific,
- * historical date range suitable for filtering.
- * Prefers the first specific, past range found.
- * Returns null if no suitable range can be determined.
- */
-function deriveDateRange(dates: EnhancedNormalizedDate[] | undefined, referenceDate: Date = new Date()): { startDate: string; endDate: string } | null {
-    if (!dates || dates.length === 0) {
-        return null;
-    }
-
-    console.log("Deriving date range from:", JSON.stringify(dates));
-
-    for (const dateInfo of dates) {
-        let potentialStart: Date | null = null;
-        let potentialEnd: Date | null = null;
-
-        // Try using chrono's parsed date directly if fully specified and in the past
-        if (dateInfo.normalized && dateInfo.year && dateInfo.month && dateInfo.day) {
-            try {
-                const parsed = parseISO(dateInfo.normalized);
-                if (isValid(parsed) && isPast(parsed)) {
-                    // Use the specific day
-                    potentialStart = startOfDay(parsed);
-                    potentialEnd = endOfDay(parsed);
-                    console.log(`Derived range from normalized date: ${dateInfo.original}`);
-                } else {
-                     console.log(`Normalized date ${dateInfo.normalized} is invalid or in the future, skipping.`);
-                }
-            } catch (e) {
-                console.warn(`Error parsing normalized date ${dateInfo.normalized}, ignoring.`);
-            }
-        }
-
-        // Handle specific relative terms if no date derived yet
-        // Check keywords in the original string instead of removed properties
-        const lowerOriginal = dateInfo.original.toLowerCase();
-        if (!potentialStart && /\blast\b/.test(lowerOriginal)) {
-            if (/\bday\b/.test(lowerOriginal) || /yesterday/i.test(lowerOriginal)) {
-                potentialStart = startOfDay(subDays(referenceDate, 1));
-                potentialEnd = endOfDay(subDays(referenceDate, 1));
-                console.log(`Derived range from relative term: yesterday/last day`);
-            } else if (/\bweek\b/.test(lowerOriginal)) {
-                const startOfLastWeek = startOfWeek(subWeeks(referenceDate, 1));
-                potentialStart = startOfLastWeek;
-                potentialEnd = endOfWeek(startOfLastWeek);
-                 console.log(`Derived range from relative term: last week`);
-            } else if (/\bmonth\b/.test(lowerOriginal)) {
-                const startOfLastMonth = startOfMonth(subMonths(referenceDate, 1));
-                potentialStart = startOfLastMonth;
-                potentialEnd = endOfMonth(startOfLastMonth);
-                 console.log(`Derived range from relative term: last month`);
-            } else if (/\byear\b/.test(lowerOriginal)) {
-                const startOfLastYear = startOfYear(subYears(referenceDate, 1));
-                potentialStart = startOfLastYear;
-                potentialEnd = endOfYear(startOfLastYear);
-                 console.log(`Derived range from relative term: last year`);
-            }
-        }
-
-        if (potentialStart && potentialEnd) {
-            console.log(`Final derived range: ${formatISO(potentialStart)} to ${formatISO(potentialEnd)}`);
-            return {
-                startDate: formatISO(potentialStart),
-                endDate: formatISO(potentialEnd),
-            };
-        } else {
-             console.log(`Could not derive a specific past range from: ${dateInfo.original}`);
-        }
-    }
-
-    console.log("No suitable past date range found for filtering.");
-    return null;
-}
-
-/**
- * Checks if any element in arr1 exists in arr2 (case-insensitive for strings).
+ * Checks if there's any overlap between two arrays.
+ * Case-insensitive comparison for strings.
  */
 function checkOverlap(arr1?: any[], arr2?: any[]): boolean {
-    if (!arr1 || !arr2 || arr1.length === 0 || arr2.length === 0) {
-        return false;
-    }
-    const set2 = new Set(arr2.map(item => typeof item === 'string' ? item.toLowerCase() : item));
-    return arr1.some(item => set2.has(typeof item === 'string' ? item.toLowerCase() : item));
+    if (!arr1 || !arr2) return false;
+    const set1 = new Set(arr1.map(item => typeof item === 'string' ? item.toLowerCase() : item));
+    return arr2.some(item => set1.has(typeof item === 'string' ? item.toLowerCase() : item));
 }
 
 /**
- * v1.4: Revised Date Parsing Function
- * Parses a date string, attempts to extract components, and handles uncertainty.
- * Prioritizes component accuracy and sets normalized=null if day is uncertain.
- * Assumes input is English (GPT handles translation).
+ * REFACTORED (v1.5): Parses a natural language date/time string into components
+ * using chrono-node for identification and date-fns for reliable calculation.
+ * Prioritizes extracting components.
+ * @param dateString The raw date string from user input or entities.
+ * @param referenceDate The reference date (usually now) for resolving relative dates.
+ * @returns An EnhancedNormalizedDate object with extracted components.
  */
 function parseDateStringToEnhanced(dateString: string, referenceDate: Date): EnhancedNormalizedDate {
-    console.log(`Parsing date string: "${dateString}" with reference: ${referenceDate.toISOString()}`);
-    const originalString = dateString; // Keep original for reference and output
+    console.log(`Parsing date string: "${dateString}" with reference date: ${referenceDate.toISOString()}`);
+    const result: EnhancedNormalizedDate = { original: dateString };
 
-    // 1. Define qualifiers to strip (case-insensitive)
+    // 1. Define and Strip Qualifiers
     const qualifiers = [
-        "early", "late", "end of", "eod", "cob", "sometime", "around",
-        "beginning of", "first week of", "last two weeks of", // Granularity/Range - strip before parsing main date part
-        "this morning", "tonight", "this evening", "this afternoon", // Boundary terms - handle AFTER initial parse
-        "before", "after", // Relative indicators - potentially handle contextually, strip for now
+        // Order matters slightly - longer phrases first
+        "first week of", "last two weeks of", "end of day", "end of the day", "by end of day",
+        "this morning", "this afternoon", "this evening", "tonight",
+        "early", "late", "around", "before", "after", "by", "on", "at", "in", "for", "EOD", "COB"
     ];
-    let cleanedDateString = dateString;
+    let cleanedDateString = dateString.toLowerCase();
     const foundQualifiers: string[] = [];
     qualifiers.forEach(q => {
         const regex = new RegExp(`\\b${q}\\b`, 'gi');
         if (regex.test(cleanedDateString)) {
-            foundQualifiers.push(q.toLowerCase()); // Store found qualifiers for later logic
+            foundQualifiers.push(q.toUpperCase());
             cleanedDateString = cleanedDateString.replace(regex, '').trim();
         }
     });
-    // Clean up extra spaces left by removal
-    cleanedDateString = cleanedDateString.replace(/\s{2,}/g, ' ').trim();
+    cleanedDateString = cleanedDateString.replace(/\s+/g, ' ').trim();
     console.log(`Cleaned string: "${cleanedDateString}", Found qualifiers: ${foundQualifiers.join(', ')}`);
 
-    // Initialize result object
-    const result: EnhancedNormalizedDate = { original: originalString };
-
-    // 2. Attempt initial parsing with chrono-node on the *cleaned* string
+    // 2. Date Phrase Identification (Leverage Chrono)
     const chronoResults = chrono.parse(cleanedDateString, referenceDate, { forwardDate: true });
-    console.log("Chrono results:", JSON.stringify(chronoResults));
 
-    if (chronoResults.length > 0) {
-        const parsedResult = chronoResults[0];
-        const start = parsedResult.start;
-        const text = parsedResult.text; // The part chrono matched
-
-        // --- 3. Refine components using date-fns and context ---
-        let year = start.get('year');
-        let month = start.get('month'); // 1-12
-        let day = start.get('day');     // 1-31
-        let hour = start.get('hour');
-        let minute = start.get('minute');
-        let second = start.get('second');
-        let dayOfWeek = start.get('weekday'); // 0=Sun, 1=Mon... (may differ from date-fns)
-
-        let isCertainDay = start.isCertain('day');
-        let isCertainMonth = start.isCertain('month');
-        let isCertainYear = start.isCertain('year');
-        let isCertainHour = start.isCertain('hour');
-
-        let calculatedDate = start.date(); // Initial date object from chrono
-
-        // --- 3a. Handle Day Boundary Qualifiers ---
-        // If specific boundary terms were found, force date to reference date and set time hints
-        if (foundQualifiers.includes('this morning') || foundQualifiers.includes('this afternoon') || foundQualifiers.includes('this evening') || foundQualifiers.includes('tonight') || foundQualifiers.includes('end of') || foundQualifiers.includes('eod') || foundQualifiers.includes('cob')) {
-            console.log("Handling day boundary term.");
-            year = referenceDate.getFullYear();
-            month = referenceDate.getMonth() + 1;
-            day = referenceDate.getDate();
-            isCertainDay = true;
-            isCertainMonth = true;
-            isCertainYear = true;
-            calculatedDate = set(calculatedDate, { year, month: month - 1, date: day }); // Update calculatedDate
-
-            if ((foundQualifiers.includes('this morning')) && !isCertainHour) result.period = 'Morning';
-            if ((foundQualifiers.includes('this afternoon') || foundQualifiers.includes('cob')) && !isCertainHour) result.period = 'Afternoon';
-            if ((foundQualifiers.includes('this evening') || foundQualifiers.includes('tonight') || foundQualifiers.includes('end of') || foundQualifiers.includes('eod')) && !isCertainHour) result.period = 'Evening'; // Or Night? Chose Evening.
-        }
-
-
-        // --- 3b. Relative Date Resolution (Yesterday, Today, Tomorrow, Weekdays) ---
-        // Chrono often handles these well, but let's verify/refine using date-fns logic if needed
-        // Check chrono's tag for specific relative terms it might have identified
-        if (parsedResult.tags().has('ENRelativeDateRule')) {
-            console.log("Chrono identified relative date rule.");
-             // Trust chrono's components for these simpler relative terms for now
-             // but ensure day/month/year certainty is set correctly
-             isCertainDay = isCertainDay || start.isCertain('day');
-             isCertainMonth = isCertainMonth || start.isCertain('month');
-             isCertainYear = isCertainYear || start.isCertain('year');
-        }
-        // Special case for past specific dates (e.g., "April 8th" when ref is April 10th)
-        // Chrono's `forwardDate: true` might push it to next year. Check if the parsed date is significantly
-        // *after* the reference date but the *text* implies a recent past date.
-        if (isCertainDay && isCertainMonth && !isCertainYear && /^[a-zA-Z]+\s+\d+(?:st|nd|rd|th)?$/.test(text.trim())) {
-             if (month !== null && day !== null) {
-                 const potentialPastDate = set(referenceDate, { month: month - 1, date: day });
-                 if (isBefore(potentialPastDate, referenceDate) && !isSameDay(potentialPastDate, referenceDate)) {
-                     console.log("Adjusting specific M/D date to current year context (past).");
-                     year = referenceDate.getFullYear();
-                     isCertainYear = true;
-                     calculatedDate = set(calculatedDate, { year });
-                 }
-             }
-        }
-
-
-        // --- 3c/d/e. Relative Week/Month/Year Resolution & Granularity ---
-        // If chrono didn't find a specific day, handle broader relative terms
-        const lowerCleaned = cleanedDateString.toLowerCase();
-        if (!isCertainDay) {
-            console.log("Day is uncertain, checking for week/month/year terms.");
-            if (lowerCleaned.includes('last week')) {
-                calculatedDate = subWeeks(referenceDate, 1);
-                year = calculatedDate.getFullYear();
-                month = calculatedDate.getMonth() + 1; // Month of the week's start/end may vary
-                day = null;
-                result.week_number = getWeek(calculatedDate); // Use date-fns getWeek
-                isCertainDay = false;
-                isCertainMonth = false; // Month is also uncertain w.r.t the whole week
-                isCertainYear = true;
-                console.log("Resolved to 'last week'.");
-            } else if (lowerCleaned.includes('next week')) {
-                 calculatedDate = addWeeks(referenceDate, 1);
-                 year = calculatedDate.getFullYear();
-                 month = calculatedDate.getMonth() + 1;
-                 day = null;
-                 result.week_number = getWeek(calculatedDate);
-                 isCertainDay = false;
-                 isCertainMonth = false;
-                 isCertainYear = true;
-                 console.log("Resolved to 'next week'.");
-            } else if (lowerCleaned.includes('this week')) {
-                 calculatedDate = referenceDate; // Keep ref date context
-                 year = calculatedDate.getFullYear();
-                 month = calculatedDate.getMonth() + 1;
-                 day = null;
-                 result.week_number = getWeek(calculatedDate);
-                 isCertainDay = false;
-                 isCertainMonth = false; // Still uncertain which month if week spans boundary
-                 isCertainYear = true;
-                 console.log("Resolved to 'this week'.");
-            } else if (lowerCleaned.includes('last month')) {
-                calculatedDate = subMonths(referenceDate, 1);
-                year = calculatedDate.getFullYear();
-                month = calculatedDate.getMonth() + 1;
-                day = null;
-                isCertainDay = false;
-                isCertainMonth = true;
-                isCertainYear = true;
-                console.log("Resolved to 'last month'.");
-            } else if (lowerCleaned.includes('next month')) {
-                 calculatedDate = addMonths(referenceDate, 1);
-                 year = calculatedDate.getFullYear();
-                 month = calculatedDate.getMonth() + 1;
-                 day = null;
-                 isCertainDay = false;
-                 isCertainMonth = true;
-                 isCertainYear = true;
-                 console.log("Resolved to 'next month'.");
-            } else if (lowerCleaned.includes('this month') || (isCertainMonth && !isCertainDay && !isCertainYear) /*e.g. "September"*/) {
-                // If chrono found a month but not day/year, treat as 'this month' contextually or explicit month name
-                 if (month !== null) {
-                     calculatedDate = set(referenceDate, { month: month - 1 }); // Use chrono's parsed month if available, in context of ref year
-                 }
-                 year = calculatedDate.getFullYear();
-                 // month already set from chrono or ref month
-                 day = null;
-                 isCertainDay = false;
-                 isCertainMonth = true; // Month is now certain
-                 isCertainYear = true; // Year is certain (reference year)
-                 console.log("Resolved to 'this month' or specific month name.");
-            } else if (lowerCleaned.includes('last year')) {
-                calculatedDate = subYears(referenceDate, 1);
-                year = calculatedDate.getFullYear();
-                month = null;
-                day = null;
-                isCertainDay = false;
-                isCertainMonth = false;
-                isCertainYear = true;
-                console.log("Resolved to 'last year'.");
-            } else if (lowerCleaned.includes('next year')) {
-                 calculatedDate = addYears(referenceDate, 1);
-                 year = calculatedDate.getFullYear();
-                 month = null;
-                 day = null;
-                 isCertainDay = false;
-                 isCertainMonth = false;
-                 isCertainYear = true;
-                 console.log("Resolved to 'next year'.");
-            } else if (lowerCleaned.includes('this year') || (isCertainYear && !isCertainMonth && !isCertainDay) /* e.g. "2025" */) {
-                 calculatedDate = referenceDate; // Keep ref date context
-                 year = calculatedDate.getFullYear();
-                 month = null;
-                 day = null;
-                 isCertainDay = false;
-                 isCertainMonth = false;
-                 isCertainYear = true; // Year is certain
-                 console.log("Resolved to 'this year' or specific year.");
-            }
-        }
-
-        // --- 3f. Handle Specific Date Explicit Components (Month/Day/Year) ---
-        // Ensure explicit components override relative guesses if both exist.
-        // Chrono usually gets this right if the format is clear (e.g., "April 10, 2025").
-        // If chrono found M/D/Y, trust its certainty flags mostly.
-        // Re-check the past date case for M/D/Y formats too.
-         if (isCertainDay && isCertainMonth && isCertainYear && isBefore(start.date(), referenceDate)) {
-             // It's a specific past date, chrono should have handled it correctly unless 'forwardDate' interfered significantly.
-             // If start.date() year is > refDate year, it's likely the forwardDate issue on M/D only input.
-             if (start.date().getFullYear() > referenceDate.getFullYear() && /^[a-zA-Z]+\s+\d+(?:st|nd|rd|th)?(?:,\s*\d{4})?$/.test(text.trim())) {
-                 console.log("Adjusting specific M/D(/Y) date assumed future, likely past.");
-                 year = referenceDate.getFullYear(); // Assume current year if only M/D given and it's past
-                 calculatedDate = set(calculatedDate, { year });
-             }
-         }
-
-
-        // --- 3g. Explicit Anchor Prioritization ---
-        // If the *cleaned* string contains an explicit year (e.g., "August 2025")
-        // ensure that year overrides any relative calculation for the year component.
-        const yearMatch = cleanedDateString.match(/\b(20\d{2})\b/);
-        if (yearMatch) {
-            const explicitYear = parseInt(yearMatch[1], 10);
-            if (year !== explicitYear) {
-                 console.log(`Prioritizing explicit year ${explicitYear} from string over calculated year ${year}.`);
-                 year = explicitYear;
-                 isCertainYear = true;
-                 // Adjust calculatedDate if needed, careful not to break month/day if they were also explicit
-                 if (start.isCertain('year') && start.get('year') !== year) {
-                    calculatedDate = set(calculatedDate, { year });
-                 }
-            }
-        }
-        // Similar logic for explicit month names if needed, though chrono usually handles this.
-
-
-        // --- 4. Populate Result Object ---
-        result.year = isCertainYear && year !== null ? year : undefined;
-        result.month = isCertainMonth && month !== null ? month : undefined;
-        result.day = isCertainDay && day !== null ? day : undefined;
-        if (result.year && result.month && result.day) {
-            // Only calculate dayOfWeek if we have a full date
-            try {
-                 const finalDate = new Date(result.year, result.month - 1, result.day);
-                 if (isValid(finalDate)) {
-                    result.day_of_week = finalDate.getDay(); // 0=Sun, 6=Sat
-                 }
-            } catch (e) { console.warn("Could not create final date for day_of_week calculation"); }
-        }
-        // Week number is potentially set in step 3c
-
-        // --- 5. Time Component Handling ---
-        if (isCertainHour) {
-            result.time_hour = hour !== null ? hour : undefined;
-            result.time_minute = start.isCertain('minute') && minute !== null ? minute : (hour !== null ? 0 : undefined); // Default minute to 0 if hour is certain but minute isn't
-            result.time_second = start.isCertain('second') && second !== null ? second : (hour !== null ? 0 : undefined); // Default second to 0
-            // Determine AM/PM if not already set by boundary logic
-            if (!result.period) {
-                if (hour !== null && hour < 12) result.period = 'AM';
-                if (hour !== null && hour >= 12) result.period = 'PM';
-            }
+    if (chronoResults.length === 0) {
+        console.warn(`Chrono failed to parse cleaned string: "${cleanedDateString}". Checking original for boundary terms.`);
+        // Check original string for boundary terms if chrono fails
+        if (/\b(end of day|end of the day|by end of day|tonight|EOD)\b/i.test(dateString)) {
+            result.year = getYear(referenceDate);
+            result.month = getMonth(referenceDate) + 1;
+            result.day = getDate(referenceDate);
+            result.period = 'Evening';
+            result.note = "Inferred current date from boundary term.";
+            console.log("Set current date based on boundary term in original string.");
+        } else if (/\b(this morning)\b/i.test(dateString)) {
+            result.year = getYear(referenceDate);
+            result.month = getMonth(referenceDate) + 1;
+            result.day = getDate(referenceDate);
+            result.period = 'Morning';
+            result.note = "Inferred current date from boundary term.";
+            console.log("Set current date based on boundary term in original string.");
+        } else if (/\b(this afternoon|COB)\b/i.test(dateString)) {
+            result.year = getYear(referenceDate);
+            result.month = getMonth(referenceDate) + 1;
+            result.day = getDate(referenceDate);
+            result.period = 'Afternoon';
+            result.note = "Inferred current date from boundary term.";
+            console.log("Set current date based on boundary term in original string.");
         } else {
-            // If hour is uncertain, clear all time components, but keep period if set by boundary logic
-            result.time_hour = undefined;
-            result.time_minute = undefined;
-            result.time_second = undefined;
-            // result.period might still be 'Morning', 'Afternoon', etc. from boundary terms
+            result.note = "Failed to parse date string.";
         }
-
-
-        // --- 6. Set `normalized` Field ---
-        if (result.year !== undefined && result.month !== undefined && result.day !== undefined) {
-            // We have a specific date
-            try {
-                let dateToFormat = new Date(result.year, result.month - 1, result.day);
-                 if (result.time_hour !== undefined) {
-                     dateToFormat = set(dateToFormat, {
-                         hours: result.time_hour,
-                         minutes: result.time_minute ?? 0,
-                         seconds: result.time_second ?? 0
-                     });
-                     result.normalized = formatISO(dateToFormat); // Include time
-                 } else {
-                     result.normalized = format(dateToFormat, 'yyyy-MM-dd'); // Date only
-                 }
-                 console.log(`Normalized to: ${result.normalized}`);
-            } catch (e) {
-                 console.error("Error formatting ISO string:", e);
-                 result.normalized = null;
-                 result.note = 'Error during final ISO formatting.';
-            }
-        } else {
-            // Date is uncertain (missing year, month, or day)
-            console.log("Date is uncertain (missing Y, M, or D), setting normalized = null.");
-            result.normalized = null;
-             if (!result.note) { // Add a note if one isn't already present
-                 result.note = "Date components incomplete; normalization skipped.";
-             }
-        }
-
-    } else {
-        // Chrono failed to parse anything
-        console.log("Chrono parsing failed.");
-        result.normalized = null;
-        result.note = 'Failed to parse date string.';
+        return result;
     }
 
-    // Clean up undefined fields before returning
-    Object.keys(result).forEach(key => {
-        if (result[key as keyof EnhancedNormalizedDate] === undefined) {
-            delete result[key as keyof EnhancedNormalizedDate];
+    const parsedResult = chronoResults[0];
+    const identifiedText = parsedResult.text.toLowerCase();
+    console.log(`Chrono identified text: "${identifiedText}"`);
+
+    // 3. Pattern Matching & Component Calculation (using date-fns)
+    let parsedDate: Date | null = null;
+    let isRelativeWeekMonthYear = false; // Flag for patterns that don't yield a specific day
+
+    // --- Pattern Matching (Order matters: More specific first) ---
+    const datePatterns = [
+        { regex: /^\d{4}-\d{1,2}-\d{1,2}$/, format: 'yyyy-MM-dd' },
+        { regex: /^\d{1,2}\/\d{1,2}\/\d{4}$/, format: 'MM/dd/yyyy' },
+        { regex: /^\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{4}$/i, format: 'dd MMM yyyy' },
+        { regex: /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}(st|nd|rd|th)?,\s+\d{4}$/i, format: 'MMM do, yyyy'},
+        { regex: /^(monday|tuesday|wednesday|thursday|friday|saturday|sunday),\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}(st|nd|rd|th)?,\s+\d{4}$/i, format: 'EEEE, MMM do, yyyy'},
+    ];
+
+    let patternMatched = false;
+    for (const p of datePatterns) {
+        if (p.regex.test(identifiedText)) {
+            try {
+                parsedDate = dateFnsParse(identifiedText, p.format, referenceDate);
+                 if (isValid(parsedDate)) {
+                    console.log(`Pattern matched specific date format: ${p.format}`);
+                    patternMatched = true;
+                    break;
+                 } else {
+                     parsedDate = null;
+                     console.warn(`date-fns failed to parse "${identifiedText}" with format ${p.format}`);
+                 }
+            } catch (e) {
+                console.error(`Error parsing "${identifiedText}" with date-fns format ${p.format}:`, e);
+                parsedDate = null;
+            }
         }
-    });
+    }
 
+    if (!patternMatched) {
+        // Handle relative terms
+        if (identifiedText === 'today') {
+            parsedDate = referenceDate;
+            console.log("Pattern matched: today");
+        } else if (identifiedText === 'yesterday') {
+            parsedDate = subDays(referenceDate, 1);
+            console.log("Pattern matched: yesterday");
+        } else if (identifiedText === 'tomorrow') {
+            parsedDate = addDays(referenceDate, 1);
+            console.log("Pattern matched: tomorrow");
+        }
+        // Relative Weekdays (next/last/previous)
+        else if (identifiedText.startsWith('next ')) {
+            const dayPart = identifiedText.substring(5);
+            if (dayPart === 'monday') parsedDate = nextMonday(referenceDate);
+            else if (dayPart === 'tuesday') parsedDate = nextTuesday(referenceDate);
+            else if (dayPart === 'wednesday') parsedDate = nextWednesday(referenceDate);
+            else if (dayPart === 'thursday') parsedDate = nextThursday(referenceDate);
+            else if (dayPart === 'friday') parsedDate = nextFriday(referenceDate);
+            else if (dayPart === 'saturday') parsedDate = nextSaturday(referenceDate);
+            else if (dayPart === 'sunday') parsedDate = nextSunday(referenceDate);
+             if(parsedDate) console.log(`Pattern matched: next ${dayPart}`);
+        } else if (identifiedText.startsWith('last ')) { // Accept "last" as synonym for "previous"
+            const dayPart = identifiedText.substring(5);
+            if (dayPart === 'monday') parsedDate = previousMonday(referenceDate);
+            else if (dayPart === 'tuesday') parsedDate = previousTuesday(referenceDate);
+            else if (dayPart === 'wednesday') parsedDate = previousWednesday(referenceDate);
+            else if (dayPart === 'thursday') parsedDate = previousThursday(referenceDate);
+            else if (dayPart === 'friday') parsedDate = previousFriday(referenceDate);
+            else if (dayPart === 'saturday') parsedDate = previousSaturday(referenceDate);
+            else if (dayPart === 'sunday') parsedDate = previousSunday(referenceDate);
+            if(parsedDate) console.log(`Pattern matched: last/previous ${dayPart}`);
+        }
+         // Standalone weekdays (assume next instance)
+        else if (/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i.test(identifiedText)) {
+            const dayPart = identifiedText;
+            if (dayPart === 'monday') parsedDate = nextMonday(referenceDate);
+            else if (dayPart === 'tuesday') parsedDate = nextTuesday(referenceDate);
+            else if (dayPart === 'wednesday') parsedDate = nextWednesday(referenceDate);
+            else if (dayPart === 'thursday') parsedDate = nextThursday(referenceDate);
+            else if (dayPart === 'friday') parsedDate = nextFriday(referenceDate);
+            else if (dayPart === 'saturday') parsedDate = nextSaturday(referenceDate);
+            else if (dayPart === 'sunday') parsedDate = nextSunday(referenceDate);
+             if(parsedDate) console.log(`Pattern matched standalone weekday (assuming next): ${dayPart}`);
+        }
+         // Month/Day Only (Handle cautiously)
+        else if (parsedResult.start?.isCertain('month') && parsedResult.start?.isCertain('day') && !parsedResult.start?.isCertain('year')) {
+            const impliedChronoYear = parsedResult.start?.get('year');
+            const currentYear = getYear(referenceDate);
+            try {
+                // Use implied year if available, otherwise current year.
+                // This handles cases where chrono might guess future year for past M/D.
+                parsedDate = set(new Date(0), {
+                    year: impliedChronoYear ?? currentYear,
+                    month: parsedResult.start.get('month')! - 1, // Chrono month is 1-based
+                    date: parsedResult.start.get('day')!
+                });
+                // Simple sanity check: if date is > 180 days in future compared to ref, maybe chrono guessed wrong year?
+                // This logic is complex, keep basic approach for now.
+                 if(isValid(parsedDate)) {
+                    console.log(`Pattern matched: Month/Day only (using year ${getYear(parsedDate)})`);
+                 } else {
+                     parsedDate = null;
+                 }
+             } catch (e) { parsedDate = null; console.warn("Error setting Month/Day only", e); }
+        }
+        // Relative Weeks/Months/Years (Set components directly)
+        else if (identifiedText === 'next week') {
+            const nextWeekStart = startOfWeek(addWeeks(referenceDate, 1), { weekStartsOn: 1 });
+            result.year = getYear(nextWeekStart);
+            result.month = getMonth(nextWeekStart) + 1;
+            result.week_number = getWeek(nextWeekStart, { weekStartsOn: 1 });
+            result.day = undefined;
+            isRelativeWeekMonthYear = true;
+            console.log("Pattern matched: next week");
+        } else if (identifiedText === 'last week') {
+            const lastWeekStart = startOfWeek(subWeeks(referenceDate, 1), { weekStartsOn: 1 });
+            result.year = getYear(lastWeekStart);
+            result.month = getMonth(lastWeekStart) + 1;
+            result.week_number = getWeek(lastWeekStart, { weekStartsOn: 1 });
+            result.day = undefined;
+            isRelativeWeekMonthYear = true;
+             console.log("Pattern matched: last week");
+        }
+         // ... other relative week/month/year patterns ...
+          else if (identifiedText === 'this year') {
+            result.year = getYear(referenceDate);
+            result.month = undefined;
+            result.day = undefined;
+            isRelativeWeekMonthYear = true;
+            console.log("Pattern matched: this year");
+        }
+         // Standalone Year
+        else if (/^\d{4}$/.test(identifiedText)) {
+             result.year = parseInt(identifiedText, 10);
+             result.month = undefined;
+             result.day = undefined;
+             isRelativeWeekMonthYear = true;
+             console.log(`Pattern matched: standalone year ${identifiedText}`);
+        }
+          // Month Year (e.g., "August 2025")
+        else if (/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{4}$/i.test(identifiedText)) {
+             const parts = identifiedText.split(' ');
+             const monthIndex = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].findIndex(m => parts[0].startsWith(m));
+             result.year = parseInt(parts[1], 10);
+             result.month = monthIndex + 1;
+             result.day = undefined;
+             isRelativeWeekMonthYear = true;
+             console.log(`Pattern matched: month year ${identifiedText}`);
+        }
+    }
 
-    console.log("Final parsed date object:", JSON.stringify(result));
+    // 4. Populate Components from parsedDate
+    if (parsedDate && isValid(parsedDate) && !isRelativeWeekMonthYear) {
+        console.log(`Populating components from specific parsed date: ${parsedDate.toISOString()}`);
+        result.year = getYear(parsedDate);
+        result.month = getMonth(parsedDate) + 1;
+        result.day = getDate(parsedDate);
+        result.day_of_week = getDay(parsedDate);
+        try {
+            result.week_number = getWeek(parsedDate, { weekStartsOn: 1 });
+        } catch (e) { console.warn("Could not determine week number:", e)}
+    } else if (!isRelativeWeekMonthYear && !parsedDate) {
+        console.warn(`No specific date could be parsed or matched for "${identifiedText}".`);
+        result.note = result.note || "Failed to parse date string into specific components.";
+    } else if (isRelativeWeekMonthYear) {
+         console.log("Populated components for relative week/month/year.");
+         result.note = "Partial parse: Specific day not specified.";
+    }
+
+    // 5. Handle Time Components (if Chrono found them)
+    if (parsedResult.start?.isCertain('hour')) {
+        result.time_hour = parsedResult.start.get('hour') ?? undefined;
+        result.time_minute = parsedResult.start.get('minute') ?? 0;
+        result.time_second = parsedResult.start.get('second') ?? 0;
+        if (result.time_hour !== undefined) {
+            console.log(`Time components found: H=${result.time_hour}, M=${result.time_minute}, S=${result.time_second}`);
+        }
+    } else {
+        // Basic time keyword checks
+        if (/\b(noon)\b/i.test(identifiedText)) { result.time_hour = 12; result.time_minute = 0; }
+        else if (/\b(midnight)\b/i.test(identifiedText)) { result.time_hour = 0; result.time_minute = 0; }
+        const timeMatch = identifiedText.match(/(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(am|pm)/i);
+        if (timeMatch) {
+            let hour = parseInt(timeMatch[1], 10);
+            const minute = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+            const second = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
+            const period = timeMatch[4].toLowerCase();
+            if (period === 'pm' && hour < 12) hour += 12;
+            if (period === 'am' && hour === 12) hour = 0;
+            result.time_hour = hour;
+            result.time_minute = minute;
+            result.time_second = second;
+            console.log(`Time components parsed via regex: H=${result.time_hour}, M=${result.time_minute}, S=${result.time_second}`);
+        }
+    }
+
+    // 6. Determine Period (Based on Boundary Terms or Time)
+    let periodSetByBoundary = false;
+    // Check foundQualifiers derived from the original string
+    if (foundQualifiers.includes("EOD") || foundQualifiers.includes("END OF DAY") || foundQualifiers.includes("BY END OF DAY") || foundQualifiers.includes("TONIGHT")) {
+        result.period = 'Evening';
+        periodSetByBoundary = true;
+    } else if (foundQualifiers.includes("COB") || foundQualifiers.includes("THIS AFTERNOON")) {
+        result.period = 'Afternoon';
+        periodSetByBoundary = true;
+    } else if (foundQualifiers.includes("THIS MORNING")) {
+        result.period = 'Morning';
+        periodSetByBoundary = true;
+    }
+    // Infer from time_hour if not set by a specific boundary term
+    if (!periodSetByBoundary && result.time_hour !== undefined) {
+        if (result.time_hour >= 5 && result.time_hour < 12) result.period = 'Morning';
+        else if (result.time_hour >= 12 && result.time_hour < 18) result.period = 'Afternoon';
+        else if (result.time_hour >= 18 && result.time_hour < 22) result.period = 'Evening';
+        else result.period = 'Night';
+    }
+    if(result.period) console.log(`Period determined: ${result.period}`);
+
+    // Final Logging & Return
+    console.log("Final parsed components:", JSON.stringify(result));
     return result;
+}
+
+/**
+ * Maps a database result (from vector search or FTS) to a ContextObject.
+ * @param dbResult The result item from Supabase (SearchResultItem or FallbackResultItem).
+ * @param sourceType The source of the result ('vector_store' or 'postgres_fallback_text').
+ * @returns A ContextObject.
+ */
+function mapDbResultToContextObject(
+    dbResult: SearchResultItem | FallbackResultItem,
+    sourceType: 'vector_store' | 'postgres_fallback_text'
+): ContextObject {
+    let contextObject: Partial<ContextObject> = {}; // Use Partial for easier construction
+
+    if (sourceType === 'vector_store') {
+        const result = dbResult as SearchResultItem;
+        contextObject.file_id = result.file_id;
+        contextObject.chunk = result.content_chunk;
+        contextObject.timestamp = result.metadata?.created_at ?? new Date(0).toISOString();
+        contextObject.chunk_index = result.chunk_index;
+        contextObject.similarity = result.similarity;
+        contextObject.entities_in_chunk = typeof result.metadata === 'object' && result.metadata !== null
+            ? {
+                people: result.metadata.people,
+                dates: (result.metadata.dates as EnhancedNormalizedDate[]) || [],
+                locations: result.metadata.locations,
+                topics: result.metadata.topics,
+                type: result.metadata.type,
+                sentiment: result.metadata.sentiment,
+                priority: result.metadata.priority,
+              }
+            : {};
+    } else { // postgres_fallback_text
+        const file = dbResult as FallbackResultItem;
+        contextObject.file_id = file.id;
+        contextObject.chunk = file.transcript_text.substring(0, 3000) + (file.transcript_text.length > 3000 ? '...' : '');
+        contextObject.rank = file.rank;
+        contextObject.timestamp = file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString();
+        contextObject.chunk_index = undefined; // FTS results are file-level
+        contextObject.entities_in_chunk = typeof file.file_metadata === 'object' && file.file_metadata !== null
+            ? {
+                people: file.file_metadata.people,
+                dates: (file.file_metadata.dates as EnhancedNormalizedDate[]) || [],
+                locations: file.file_metadata.locations,
+                topics: file.file_metadata.topics,
+                type: file.file_metadata.type,
+                sentiment: file.file_metadata.sentiment,
+                priority: file.file_metadata.priority,
+              }
+            : {};
+    }
+
+    // Ensure all required fields are present (even if empty/default)
+    contextObject.chunk = contextObject.chunk ?? '';
+    contextObject.timestamp = contextObject.timestamp ?? new Date(0).toISOString();
+    contextObject.entities_in_chunk = contextObject.entities_in_chunk ?? {};
+
+    return contextObject as ContextObject; // Cast back to full type
 }
 
 /**
@@ -677,17 +639,6 @@ async function rerankResults(
     }
 
     console.log(`Re-ranking ${candidates.length} candidates from source: ${query_source}`);
-
-    // Pre-calculate date range once if needed for FTS date boost
-    let queryDateRange: { startDate: string; endDate: string } | null = null;
-    if (query_source === 'postgres_fallback_text') {
-        queryDateRange = deriveDateRange(queryMetadata.dates);
-        if (queryDateRange) {
-            console.log(`Re-ranking: Derived query date range for FTS boost: ${queryDateRange.startDate} to ${queryDateRange.endDate}`);
-        } else {
-             console.log("Re-ranking: No specific past date range derived from query for FTS boost.");
-        }
-    }
 
     const scoredCandidates: ScoredContextObject[] = candidates.map(candidate => {
         // a. Map to Scored Objects & b. Calculate initial_score
@@ -760,20 +711,28 @@ async function rerankResults(
         // Language is explicitly excluded
 
         // NEW: Apply Date Range Boost (FTS Only)
-        if (query_source === 'postgres_fallback_text' && queryDateRange) {
-            try {
-                const candidateTimestamp = parseISO(candidate.timestamp);
-                const rangeStart = parseISO(queryDateRange.startDate);
-                const rangeEnd = parseISO(queryDateRange.endDate);
+        if (query_source === 'postgres_fallback_text' && queryMetadata.dates && queryMetadata.dates.length > 0) {
+            let rangeBoostApplied = false;
+            for (const queryDate of queryMetadata.dates) {
+                // Derive potential range STARTING from queryDate (year, month, day if available)
+                if (queryDate.year && queryDate.month && queryDate.day) {
+                    try {
+                        const rangeDate = new Date(queryDate.year, queryDate.month - 1, queryDate.day);
+                        if (isValid(rangeDate) && isPast(rangeDate)) { // Only boost for past ranges
+                             const rangeStart = startOfDay(rangeDate);
+                             const rangeEnd = endOfDay(rangeDate);
+                             const candidateTimestamp = parseISO(candidate.timestamp);
 
-                if (isValid(candidateTimestamp) && isValid(rangeStart) && isValid(rangeEnd)) {
-                    if (candidateTimestamp >= rangeStart && candidateTimestamp <= rangeEnd) {
-                        console.log(`Applying +0.10 date boost to FTS result (timestamp: ${candidate.timestamp})`);
-                        metadata_boost_score += 0.10;
-                    }
+                            if (isValid(candidateTimestamp) && candidateTimestamp >= rangeStart && candidateTimestamp <= rangeEnd) {
+                                console.log(`Applying +0.10 date boost to FTS result (timestamp: ${candidate.timestamp} within ${formatISO(rangeStart)}-${formatISO(rangeEnd)})`);
+                                metadata_boost_score += 0.10;
+                                rangeBoostApplied = true;
+                                break; // Apply boost only once per candidate
+                            }
+                        }
+                    } catch (e) { console.warn(`Error creating date range for FTS boost from queryDate ${JSON.stringify(queryDate)}:`, e); }
                 }
-            } catch (e) {
-                console.warn(`Error comparing dates for FTS boost for timestamp ${candidate.timestamp}:`, e);
+                // Can add logic here for year/month ranges if needed
             }
         }
 
@@ -1047,25 +1006,10 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             } else if (typedSearchResults && typedSearchResults.length > 0) {
                 console.log(`Found ${typedSearchResults.length} chunks via vector search.`);
                 query_source = 'vector_store';
-                // Map results - Ensure dates are handled as EnhancedNormalizedDate[]
-                retrieved_context = typedSearchResults.map((result: SearchResultItem) => ({
-                    file_id: result.file_id,
-                    chunk: result.content_chunk,
-                    timestamp: result.metadata?.created_at ?? new Date(0).toISOString(),
-                    chunk_index: result.chunk_index,
-                    similarity: result.similarity,
-                    entities_in_chunk: typeof result.metadata === 'object' && result.metadata !== null
-                        ? { // Reconstruct entities
-                            people: result.metadata.people,
-                            dates: (result.metadata.dates as EnhancedNormalizedDate[]) || [],
-                            locations: result.metadata.locations,
-                            topics: result.metadata.topics,
-                            type: result.metadata.type,
-                            sentiment: result.metadata.sentiment,
-                            priority: result.metadata.priority,
-                          }
-                        : {},
-                }));
+                // USE HELPER FUNCTION FOR MAPPING
+                retrieved_context = typedSearchResults.map(result =>
+                    mapDbResultToContextObject(result, 'vector_store')
+                );
             } else {
                 console.log("Vector search yielded no results.");
             }
@@ -1112,20 +1056,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                             .order('rank', { ascending: false })
                             .limit(FALLBACK_MATCH_COUNT);
 
-                        // --- START: Integrate Conditional Date Filtering (Task 2b) ---
-                        /*
-                        const dateRange = deriveDateRange(queryMetadata.dates); // Pass the processed dates
-                        if (dateRange) {
-                             console.log(`Applying FTS date range filter: ${dateRange.startDate} to ${dateRange.endDate}`);
-                             ftsQueryBuilder = ftsQueryBuilder.gte('created_at', dateRange.startDate);
-                             ftsQueryBuilder = ftsQueryBuilder.lte('created_at', dateRange.endDate);
-                        }
-                         else {
-                            console.log("No date range filter applied to FTS.");
-                        }
-                        */
-                        // --- END: Integrate Conditional Date Filtering ---
-
                         // 4. Execute the FTS query
                         console.log("Executing Fallback FTS Query...");
                         const { data: ftsResults, error: ftsError } = await ftsQueryBuilder;
@@ -1147,25 +1077,10 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                                 message_for_gpt = `Found ${typedTextResults.length} potential match(es) via text search.`;
                             }
 
-                            // Map results - Ensure dates handled as EnhancedNormalizedDate[]
-                            retrieved_context = typedTextResults.map((file) => ({
-                                file_id: file.id,
-                                chunk: file.transcript_text.substring(0, 3000) + (file.transcript_text.length > 3000 ? '...' : ''),
-                                rank: file.rank,
-                                timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
-                                chunk_index: undefined,
-                                entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
-                                    ? { /* Reconstruction logic */
-                                        people: file.file_metadata.people,
-                                        dates: (file.file_metadata.dates as EnhancedNormalizedDate[]) || [],
-                                        locations: file.file_metadata.locations,
-                                        topics: file.file_metadata.topics,
-                                        type: file.file_metadata.type,
-                                        sentiment: file.file_metadata.sentiment,
-                                        priority: file.file_metadata.priority,
-                                      }
-                                    : {},
-                            }));
+                            // USE HELPER FUNCTION FOR MAPPING
+                            retrieved_context = typedTextResults.map(file =>
+                                mapDbResultToContextObject(file, 'postgres_fallback_text')
+                            );
                         } else {
                             console.log("Fallback FTS search also found no results.");
                             if (query_source !== 'error') {

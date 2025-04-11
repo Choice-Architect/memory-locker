@@ -1,23 +1,22 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Memory Locker Action API",
-    "version": "1.0.0",
-    "description": "API for storing and querying user memories via a Netlify function connected to Supabase."
+    "title": "Memory Locker Action",
+    "version": "1.5",
+    "description": "Stores or retrieves text memories with extracted entities, using vector search, FTS fallback, and application-layer re-ranking. Date handling focuses on extracting components."
   },
   "servers": [
     {
-      "url": "https://memory-locker-gpt.netlify.app",
-      "description": "Production Netlify Function endpoint"
+      "url": "https://your-netlify-site-name.netlify.app/.netlify/functions",
+      "description": "Netlify Function Endpoint"
     }
   ],
   "paths": {
-    "/.netlify/functions/memory-action": {
+    "/memory-action": {
       "post": {
+        "summary": "Store or query memories with entity extraction",
+        "description": "Accepts text and optional pre-extracted entities. In 'store' or 'combined' mode, it processes text, extracts/enhances entities (especially date components), generates embeddings, and stores the information. In 'query' or 'combined' mode, it generates a query embedding, performs vector search with an FTS fallback, re-ranks results based on similarity/rank and metadata overlap (including date components), and returns relevant context.",
         "operationId": "memoryAction",
-        "summary": "Store or query user memories",
-        "description": "Handles storing new information provided by the user or querying existing memories based on user questions. Requires an API key for authentication.",
-        "x-openai-isConsequential": false,
         "requestBody": {
           "required": true,
           "content": {
@@ -30,7 +29,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successful operation (store, query, or combined)",
+            "description": "Success",
             "content": {
               "application/json": {
                 "schema": {
@@ -40,7 +39,7 @@
             }
           },
           "400": {
-            "description": "Bad Request (e.g., invalid JSON, missing fields)",
+            "description": "Bad Request (e.g., invalid input, missing required fields)",
             "content": {
               "application/json": {
                 "schema": {
@@ -50,17 +49,7 @@
             }
           },
           "401": {
-            "description": "Unauthorized (e.g., missing or incorrect API key)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "405": {
-            "description": "Method Not Allowed (e.g., used GET instead of POST)",
+            "description": "Unauthorized (Invalid API Key)",
             "content": {
               "application/json": {
                 "schema": {
@@ -70,7 +59,7 @@
             }
           },
           "500": {
-            "description": "Internal Server Error (e.g., function error, database issue)",
+            "description": "Internal Server Error",
             "content": {
               "application/json": {
                 "schema": {
@@ -82,16 +71,50 @@
         },
         "security": [
           {
-            "apiKeyAuth": []
+            "apiKey": []
           }
         ]
       }
     }
   },
   "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key"
+      }
+    },
     "schemas": {
+      "RequestPayload": {
+        "type": "object",
+        "required": [
+          "query_text",
+          "extracted_entities",
+          "mode"
+        ],
+        "properties": {
+          "query_text": {
+            "type": "string",
+            "description": "The primary text content provided by the user."
+          },
+          "extracted_entities": {
+            "$ref": "#/components/schemas/ExtractedEntities"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "store",
+              "query",
+              "combined"
+            ],
+            "description": "Operation mode: 'store' only saves, 'query' only searches, 'combined' does both."
+          }
+        }
+      },
       "ExtractedEntities": {
         "type": "object",
+        "description": "Entities potentially extracted by the GPT before sending to the action. Dates will be re-processed into EnhancedNormalizedDate components by the action.",
         "properties": {
           "people": {
             "type": "array",
@@ -101,10 +124,24 @@
           },
           "dates": {
             "type": "array",
+            "description": "Dates extracted by the GPT. Can be strings or basic objects with an 'original' property. The action will parse these into EnhancedNormalizedDate components.",
             "items": {
-              "type": "string"
-            },
-            "description": "Date-related strings extracted from the user query."
+              "oneOf": [
+                {
+                  "type": "string",
+                  "description": "A natural language date string (e.g., \"next Tuesday\") or ISO string."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "original": { "type": "string" },
+                    "normalized": { "type": ["string", "null"], "format": "date-time", "description": "Optional, may be ignored by action"},
+                    "note": { "type": "string", "description": "Optional, may be ignored by action"}
+                  },
+                  "required": ["original"]
+                }
+              ]
+            }
           },
           "locations": {
             "type": "array",
@@ -120,107 +157,43 @@
           },
           "type": {
             "type": "string",
-            "description": "Inferred type of interaction (e.g., story, dictated_email, note, reminder, task)",
-            "nullable": true
+            "description": "Inferred type/category of the memory (e.g., meeting, note, reminder)."
           },
           "sentiment": {
             "type": "string",
-            "description": "Inferred sentiment if applicable (e.g., funny, important, angry)",
-            "nullable": true
+            "description": "Inferred sentiment (e.g., positive, negative, neutral)."
           },
           "priority": {
             "type": "integer",
+            "format": "int32",
             "minimum": 1,
             "maximum": 10,
-            "description": "User-assigned priority level (1-10, 10 = highest)",
-            "nullable": true
+            "description": "User-defined priority (1-10)."
+          },
+          "conversation_id": {
+            "type": "string",
+            "description": "Optional ID linking related memories or conversations."
+          },
+          "thread_id": {
+            "type": "string",
+            "description": "Optional ID linking related threads within a conversation."
+          },
+          "language": {
+            "type": "string",
+            "description": "Detected language of the query_text (e.g., 'en', 'fr'). Used for FTS config, excluded from FTS query terms & metadata boost."
           }
         },
-        "additionalProperties": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "description": "Flexible container for entities extracted from text, including inferred type/sentiment. Used in RequestPayload."
+        "additionalProperties": true
       },
-      "EnhancedNormalizedDate": {
+      "ProcessedEntities": {
         "type": "object",
-        "description": "Represents a parsed date, potentially with components, derived from an original string.",
-        "properties": {
-          "original": {
-            "type": "string",
-            "description": "The original date string provided."
-          },
-          "normalized": {
-            "type": "string",
-            "format": "date-time",
-            "description": "The date string normalized to ISO 8601 format, if fully resolved.",
-            "nullable": true
-          },
-          "note": {
-            "type": "string",
-            "description": "An optional note explaining partial parsing or failure (e.g., 'vague', 'parse_error', 'partial').",
-            "nullable": true
-          },
-          "year": {
-            "type": "integer",
-            "description": "Year component (e.g., 2024).",
-            "nullable": true
-          },
-          "month": {
-            "type": "integer",
-            "description": "Month component (1-12).",
-            "nullable": true
-          },
-          "day": {
-            "type": "integer",
-            "description": "Day of month component (1-31).",
-            "nullable": true
-          },
-          "day_of_week": {
-            "type": "integer",
-            "description": "Day of week component (e.g., 0=Sun, 1=Mon...).",
-            "nullable": true
-          },
-          "week_number": {
-            "type": "integer",
-            "description": "ISO week number of the year (1-53).",
-            "nullable": true
-          },
-          "time_hour": {
-            "type": "integer",
-            "description": "Hour component (0-23).",
-            "nullable": true
-          },
-          "time_minute": {
-            "type": "integer",
-            "description": "Minute component (0-59).",
-            "nullable": true
-          },
-          "time_second": {
-            "type": "integer",
-            "description": "Second component (0-59).",
-            "nullable": true
-          },
-          "period": {
-            "type": "string",
-            "enum": ["AM", "PM", "Morning", "Afternoon", "Evening", "Night"],
-            "description": "Time period if identified (e.g., 'Afternoon').",
-            "nullable": true
-          }
-        },
-        "required": [
-          "original"
-        ]
-      },
-      "OutputProcessedEntities": {
-        "type": "object",
-        "description": "Structure of entities after internal processing, as stored in metadata and returned within a ContextObject.",
+        "description": "Entities after processing by the action, stored in metadata and returned in context. Uses EnhancedNormalizedDate for dates.",
         "properties": {
           "people": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "dates": {
             "type": "array",
@@ -230,76 +203,166 @@
           },
           "locations": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "topics": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
-          "type": { "type": "string", "nullable": true },
-          "sentiment": { "type": "string", "nullable": true },
-          "priority": { "type": "integer", "nullable": true },
-          "conversation_id": { "type": "string", "nullable": true },
-          "thread_id": { "type": "string", "nullable": true }
+          "type": {
+            "type": "string"
+          },
+          "sentiment": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "conversation_id": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          }
         },
         "additionalProperties": true
       },
-      "RequestPayload": {
+      "EnhancedNormalizedDate": {
         "type": "object",
-        "required": [
-          "query_text",
-          "mode",
-          "extracted_entities"
-        ],
+        "description": "Enhanced date object containing extracted components derived by the action.",
         "properties": {
-          "query_text": {
+          "original": {
             "type": "string",
-            "description": "The core text content from the user to be stored or used for querying."
+            "description": "The original date string expression provided."
           },
-          "extracted_entities": {
-            "$ref": "#/components/schemas/ExtractedEntities"
+          "note": {
+            "type": "string",
+            "description": "Note regarding parsing (e.g., partial parse, failure reason)."
           },
-          "mode": {
+          "year": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Extracted year (e.g., 2024)."
+          },
+          "month": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "Extracted month (1-12)."
+          },
+          "day": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 31,
+            "description": "Extracted day of the month (1-31)."
+          },
+          "day_of_week": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0,
+            "maximum": 6,
+            "description": "Extracted day of the week (0=Sun, 1=Mon...)."
+          },
+          "week_number": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 53,
+            "description": "Extracted ISO 8601 week number (1-53)."
+          },
+          "time_hour": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0,
+            "maximum": 23,
+            "description": "Extracted hour (0-23)."
+          },
+          "time_minute": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0,
+            "maximum": 59,
+            "description": "Extracted minute (0-59)."
+          },
+          "time_second": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0,
+            "maximum": 59,
+            "description": "Extracted second (0-59)."
+          },
+          "period": {
             "type": "string",
             "enum": [
-              "store",
-              "query",
-              "combined"
+              "Morning",
+              "Afternoon",
+              "Evening",
+              "Night"
             ],
-            "description": "Specifies the operation mode for the action."
+            "description": "Inferred period of day (Morning, Afternoon, Evening, Night)."
           }
-        }
+        },
+        "required": [
+          "original"
+        ]
       },
       "ContextObject": {
         "type": "object",
         "properties": {
           "chunk": {
             "type": "string",
-            "description": "A relevant snippet of text retrieved from memory."
+            "description": "The relevant text chunk retrieved (or truncated file text for FTS fallback)."
           },
           "timestamp": {
             "type": "string",
             "format": "date-time",
-            "description": "Timestamp associated with the chunk or original file (e.g., chunk creation or file creation time)."
+            "description": "ISO 8601 timestamp of chunk/file creation."
           },
           "entities_in_chunk": {
-            "$ref": "#/components/schemas/OutputProcessedEntities",
-            "description": "Entities identified within this specific chunk, using EnhancedNormalizedDate objects."
+            "$ref": "#/components/schemas/ProcessedEntities"
           },
           "file_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The UUID of the original file this chunk belongs to."
+            "description": "UUID of the source file."
+          },
+          "chunk_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "UUID of the specific chunk (from vector search)."
           },
           "chunk_index": {
             "type": "integer",
-            "description": "The index (position) of this chunk within the original file (0-based). Present for vector search results.",
-            "nullable": true
+            "format": "int32",
+            "description": "Index of the chunk within its file (from vector search)."
+          },
+          "similarity": {
+            "type": "number",
+            "format": "float",
+            "description": "Vector similarity score (from vector search)."
+          },
+          "rank": {
+            "type": "number",
+            "format": "float",
+            "description": "FTS rank score (from FTS fallback)."
           }
         },
         "required": [
           "chunk",
-          "file_id"
+          "timestamp",
+          "entities_in_chunk"
         ]
       },
       "SuccessResponse": {
@@ -309,12 +372,11 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ContextObject"
-            },
-            "description": "An array of relevant memory chunks found."
+            }
           },
           "storage_status": {
             "type": "string",
-            "description": "Confirmation message about the storage operation status."
+            "description": "Status of the storage operation (e.g., 'Stored successfully', 'Storage skipped', 'Storage failed', 'No storage operation requested')."
           },
           "query_source": {
             "type": "string",
@@ -322,17 +384,17 @@
               "vector_store",
               "postgres_fallback_text",
               "none",
+              "combined",
               "error"
             ],
-            "description": "Indicates the source of the retrieved context (vector search, FTS fallback, or none/error)."
+            "description": "Indicates the primary source of the retrieved context (vector, FTS text) or if none was found/an error occurred."
           },
           "message_for_gpt": {
             "type": "string",
-            "description": "Optional additional message or instruction for the GPT's response generation."
+            "description": "Optional message providing additional context or status to the GPT (e.g., fallback reason, error details)."
           },
           "error": {
-            "type": "null",
-            "description": "Always null for a successful response."
+            "type": "null"
           }
         },
         "required": [
@@ -347,20 +409,12 @@
         "properties": {
           "error": {
             "type": "string",
-            "description": "A description of the error that occurred."
+            "description": "Description of the error."
           }
         },
         "required": [
           "error"
         ]
-      }
-    },
-    "securitySchemes": {
-      "apiKeyAuth": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "x-api-key",
-        "description": "API key provided by the user during Action configuration to authenticate requests to the Netlify function."
       }
     }
   }
