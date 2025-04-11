@@ -15,7 +15,7 @@
     "/memory-action": {
       "post": {
         "summary": "Store or query memories with entity extraction",
-        "description": "Accepts text and optional pre-extracted entities. In 'store' or 'combined' mode, it processes text, extracts/enhances entities (especially date components), generates embeddings, and stores the information. In 'query' or 'combined' mode, it generates a query embedding, performs vector search with an FTS fallback, re-ranks results based on similarity/rank and metadata overlap (including date components), and returns relevant context.",
+        "description": "Handles storing text/entities (extracting date components, embedding) and querying memories. Store Mode: Processes, extracts, embeds, saves info. Query Mode: Embeds query, performs vector search + FTS fallback, re-ranks results using similarity/rank/metadata/dates, returns relevant context.",
         "operationId": "memoryAction",
         "requestBody": {
           "required": true,
