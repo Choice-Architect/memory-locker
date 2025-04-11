@@ -178,4 +178,37 @@ The following steps detail the required refactoring within the `parseDateStringT
 
 ---
 
-**Status:** **Implemented.** This v1.5 plan replaced the previous v1.4 approach.
+**Status:** **Obsolete.** This v1.5 plan was implemented but found to have parsing failures (see `learnings/06_date_parsing_analysis_v1.5.md`). It was superseded by the v1.6 enhancements.
+
+---
+
+# Enhancement Implementation Plan v1.6: Store Mode Date Parsing Fixes & Filtering
+
+**Version:** 1.6
+
+**Goal:** Address the date parsing failures identified in v1.5 testing by enhancing the pattern-matching logic in `parseDateStringToEnhanced` and implementing filtering to discard results where parsing completely fails.
+
+**Rationale:** Improve date component extraction reliability for key patterns (full dates, relative+period, relative month/year, boundaries) and ensure only successfully (fully or partially) parsed date information is stored in metadata.
+
+## Implementation Steps (`memory-action.ts`)
+
+1.  **Add `date-fns` Imports:** Include `endOfWeek`, `startOfMonth`, `endOfMonth`, `startOfYear`, `endOfYear`, `subMonths`, `addMonths`, `subYears`, `addYears`, `setMonth`.
+2.  **Enhance `parseDateStringToEnhanced` Pattern Matching:**
+    *   Prioritize matching specific full date formats using `dateFnsParse` and a list of common format strings.
+    *   Implement logic to handle combined relative dates/weekdays and periods (e.g., identify "next Tuesday", then check for "morning" and set `period`).
+    *   Add regex and `date-fns` logic for relative months/years (`next month`, `last year`).
+    *   Add regex and `date-fns` logic for boundary phrases (`start of next week`, `end of last month`).
+    *   Add logic for standalone months and years.
+    *   Refine the order of `if/else if` checks (specific before general).
+3.  **Implement Filtering Logic (within main handler):**
+    *   After calling `parseDateStringToEnhanced` for each date string in the input:
+    *   Check if the returned `EnhancedNormalizedDate` object has a `note` field starting with "Failed".
+    *   If it does, log a warning and **discard** this object (do not add to `processedMetadata.dates`).
+    *   Otherwise, add the successfully parsed (or partially parsed) object to `processedMetadata.dates`.
+
+**Impact Statement:**
+*   This addresses the known parsing gaps from v1.5, making date extraction significantly more robust. Filtering ensures cleaner metadata by removing entries that only contain the original unparsed string.
+
+---
+
+**Status:** **Implemented.** This v1.6 plan addresses the shortcomings of v1.5.

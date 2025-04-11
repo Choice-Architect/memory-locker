@@ -230,9 +230,9 @@ function checkOverlap(arr1?: any[], arr2?: any[]): boolean {
 }
 
 /**
- * REFACTORED (v1.5): Parses a natural language date/time string into components
- * using chrono-node for identification and date-fns for reliable calculation.
- * Prioritizes extracting components.
+ * REFACTORED (v1.6): Parses a natural language date/time string into components
+ * using chrono-node for identification and enhanced pattern matching + date-fns.
+ * Addresses failures from v1.5.
  * @param dateString The raw date string from user input or entities.
  * @param referenceDate The reference date (usually now) for resolving relative dates.
  * @returns An EnhancedNormalizedDate object with extracted components.
@@ -241,9 +241,8 @@ function parseDateStringToEnhanced(dateString: string, referenceDate: Date): Enh
     console.log(`Parsing date string: "${dateString}" with reference date: ${referenceDate.toISOString()}`);
     const result: EnhancedNormalizedDate = { original: dateString };
 
-    // 1. Define and Strip Qualifiers
+    // 1. Define and Strip Qualifiers (Keep as is)
     const qualifiers = [
-        // Order matters slightly - longer phrases first
         "first week of", "last two weeks of", "end of day", "end of the day", "by end of day",
         "this morning", "this afternoon", "this evening", "tonight",
         "early", "late", "around", "before", "after", "by", "on", "at", "in", "for", "EOD", "COB"
@@ -260,33 +259,29 @@ function parseDateStringToEnhanced(dateString: string, referenceDate: Date): Enh
     cleanedDateString = cleanedDateString.replace(/\s+/g, ' ').trim();
     console.log(`Cleaned string: "${cleanedDateString}", Found qualifiers: ${foundQualifiers.join(', ')}`);
 
-    // 2. Date Phrase Identification (Leverage Chrono)
+    // Determine period early if specific boundary qualifiers were found
+    let periodFromQualifier: EnhancedNormalizedDate['period'] | undefined = undefined;
+    if (foundQualifiers.includes("EOD") || foundQualifiers.includes("END OF DAY") || foundQualifiers.includes("BY END OF DAY") || foundQualifiers.includes("TONIGHT")) {
+        periodFromQualifier = 'Evening';
+    } else if (foundQualifiers.includes("COB") || foundQualifiers.includes("THIS AFTERNOON")) {
+        periodFromQualifier = 'Afternoon';
+    } else if (foundQualifiers.includes("THIS MORNING")) {
+        periodFromQualifier = 'Morning';
+    }
+
+    // 2. Date Phrase Identification (Leverage Chrono - Keep as is)
     const chronoResults = chrono.parse(cleanedDateString, referenceDate, { forwardDate: true });
 
     if (chronoResults.length === 0) {
-        console.warn(`Chrono failed to parse cleaned string: "${cleanedDateString}". Checking original for boundary terms.`);
-        // Check original string for boundary terms if chrono fails
-        if (/\b(end of day|end of the day|by end of day|tonight|EOD)\b/i.test(dateString)) {
+        console.warn(`Chrono failed to parse cleaned string: "${cleanedDateString}".`);
+        // Try basic boundary check on original string if chrono fails completely
+        if (periodFromQualifier) {
             result.year = getYear(referenceDate);
             result.month = getMonth(referenceDate) + 1;
             result.day = getDate(referenceDate);
-            result.period = 'Evening';
+            result.period = periodFromQualifier;
             result.note = "Inferred current date from boundary term.";
-            console.log("Set current date based on boundary term in original string.");
-        } else if (/\b(this morning)\b/i.test(dateString)) {
-            result.year = getYear(referenceDate);
-            result.month = getMonth(referenceDate) + 1;
-            result.day = getDate(referenceDate);
-            result.period = 'Morning';
-            result.note = "Inferred current date from boundary term.";
-            console.log("Set current date based on boundary term in original string.");
-        } else if (/\b(this afternoon|COB)\b/i.test(dateString)) {
-            result.year = getYear(referenceDate);
-            result.month = getMonth(referenceDate) + 1;
-            result.day = getDate(referenceDate);
-            result.period = 'Afternoon';
-            result.note = "Inferred current date from boundary term.";
-            console.log("Set current date based on boundary term in original string.");
+            console.log("Set current date based on boundary term in original string (Chrono failed).");
         } else {
             result.note = "Failed to parse date string.";
         }
@@ -297,99 +292,198 @@ function parseDateStringToEnhanced(dateString: string, referenceDate: Date): Enh
     const identifiedText = parsedResult.text.toLowerCase();
     console.log(`Chrono identified text: "${identifiedText}"`);
 
-    // 3. Pattern Matching & Component Calculation (using date-fns)
+    // 3. Pattern Matching & Component Calculation (v1.6 Enhancements)
     let parsedDate: Date | null = null;
-    let isRelativeWeekMonthYear = false; // Flag for patterns that don't yield a specific day
+    let isRelativeBoundary = false; // Flag for patterns that define a range start/end but not a specific day
+    let isAmbiguousMonthOrYear = false; // Flag for month/year patterns without a specific day
+    // Declare potentially scoped variables here
+    let unit: string | undefined = undefined;
+    let boundary: string | undefined = undefined;
+    let direction: string | undefined = undefined;
 
     // --- Pattern Matching (Order matters: More specific first) ---
-    const datePatterns = [
-        { regex: /^\d{4}-\d{1,2}-\d{1,2}$/, format: 'yyyy-MM-dd' },
-        { regex: /^\d{1,2}\/\d{1,2}\/\d{4}$/, format: 'MM/dd/yyyy' },
-        { regex: /^\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{4}$/i, format: 'dd MMM yyyy' },
-        { regex: /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}(st|nd|rd|th)?,\s+\d{4}$/i, format: 'MMM do, yyyy'},
-        { regex: /^(monday|tuesday|wednesday|thursday|friday|saturday|sunday),\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}(st|nd|rd|th)?,\s+\d{4}$/i, format: 'EEEE, MMM do, yyyy'},
-    ];
 
-    let patternMatched = false;
-    for (const p of datePatterns) {
-        if (p.regex.test(identifiedText)) {
-            try {
-                parsedDate = dateFnsParse(identifiedText, p.format, referenceDate);
-                 if (isValid(parsedDate)) {
-                    console.log(`Pattern matched specific date format: ${p.format}`);
-                    patternMatched = true;
-                    break;
-                 } else {
-                     parsedDate = null;
-                     console.warn(`date-fns failed to parse "${identifiedText}" with format ${p.format}`);
-                 }
-            } catch (e) {
-                console.error(`Error parsing "${identifiedText}" with date-fns format ${p.format}:`, e);
-                parsedDate = null;
+    // 3.1 Specific Full Dates (Using date-fns parse)
+    const specificDateFormats = [
+        'yyyy-MM-dd', 'MM/dd/yyyy', 'M/d/yyyy', 'yyyy/MM/dd',
+        'dd MMM yyyy', 'd MMM yyyy', // 10 Jan 2025
+        'MMM dd, yyyy', 'MMM d, yyyy', // Jan 10, 2025
+        'MMMM dd, yyyy', 'MMMM d, yyyy', // January 10, 2025
+        'dd MMMM yyyy', 'd MMMM yyyy', // 10 January 2025
+        // With ordinals (requires careful handling or pre-processing typically)
+        // 'MMM do, yyyy', // Jan 10th, 2025 - date-fns parse might struggle, requires 'do' token
+        // 'MMMM do, yyyy' // January 10th, 2025
+    ];
+    // Attempt to strip ordinals crudely for parsing
+    const textWithoutOrdinals = identifiedText.replace(/(?<=\d)(st|nd|rd|th)/g, '');
+
+    for (const format of specificDateFormats) {
+        try {
+            // Try parsing the text (without ordinals first)
+            let potentialDate = dateFnsParse(textWithoutOrdinals, format, referenceDate);
+            if (isValid(potentialDate)) {
+                parsedDate = potentialDate;
+                console.log(`Pattern matched specific date format: ${format}`);
+                break; // Found a valid specific date
             }
+        } catch (e) { /* Ignore parse errors, try next format */ }
+    }
+
+    // 3.2 Relative Day/Weekday + Period Combinations
+    if (!parsedDate) {
+        const simpleRelativeMatch = identifiedText.match(/^(today|tomorrow|yesterday)/);
+        const weekdayRelativeMatch = identifiedText.match(/^(next|last|previous)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
+        const standaloneWeekdayMatch = identifiedText.match(/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/);
+
+        let baseDate: Date | null = null;
+        let periodText = '';
+
+        if (simpleRelativeMatch) {
+            const term = simpleRelativeMatch[0];
+            if (term === 'today') baseDate = referenceDate;
+            else if (term === 'tomorrow') baseDate = addDays(referenceDate, 1);
+            else if (term === 'yesterday') baseDate = subDays(referenceDate, 1);
+            periodText = identifiedText.substring(term.length).trim();
+            if(baseDate) console.log(`Pattern matched base: ${term}`);
+        } else if (weekdayRelativeMatch) {
+            const direction = weekdayRelativeMatch[1]; // next, last, previous
+            const day = weekdayRelativeMatch[2];
+            if (direction === 'next') {
+                if (day === 'monday') baseDate = nextMonday(referenceDate);
+                else if (day === 'tuesday') baseDate = nextTuesday(referenceDate);
+                // ... etc for other days
+                else if (day === 'sunday') baseDate = nextSunday(referenceDate);
+            } else { // last or previous
+                if (day === 'monday') baseDate = previousMonday(referenceDate);
+                else if (day === 'tuesday') baseDate = previousTuesday(referenceDate);
+                 // ... etc for other days
+                else if (day === 'sunday') baseDate = previousSunday(referenceDate);
+            }
+            periodText = identifiedText.substring(weekdayRelativeMatch[0].length).trim();
+             if(baseDate) console.log(`Pattern matched base: ${direction} ${day}`);
+        } else if (standaloneWeekdayMatch) {
+            const day = standaloneWeekdayMatch[0];
+             // Assume next instance
+            if (day === 'monday') baseDate = nextMonday(referenceDate);
+            else if (day === 'tuesday') baseDate = nextTuesday(referenceDate);
+            // ... etc for other days
+             else if (day === 'sunday') baseDate = nextSunday(referenceDate);
+             periodText = identifiedText.substring(day.length).trim();
+             if(baseDate) console.log(`Pattern matched base: standalone ${day} (assuming next)`);
+        }
+
+        if (baseDate) {
+            parsedDate = baseDate;
+            // Now check for period text immediately following the date part
+            if (periodText.includes('morning')) result.period = 'Morning';
+            else if (periodText.includes('afternoon') || periodText.includes('cob')) result.period = 'Afternoon';
+            else if (periodText.includes('evening') || periodText.includes('eod') || periodText.includes('night')) result.period = 'Evening'; // Combine evening/night here
+            else if (periodText.includes('noon')) { result.period = 'Afternoon'; result.time_hour = 12; result.time_minute = 0; }
+            else if (periodText.includes('midnight')) { result.period = 'Night'; result.time_hour = 0; result.time_minute = 0; }
+
+            if(result.period) console.log(`...with period: ${result.period}`);
         }
     }
 
-    if (!patternMatched) {
-        // Handle relative terms
-        if (identifiedText === 'today') {
-            parsedDate = referenceDate;
-            console.log("Pattern matched: today");
-        } else if (identifiedText === 'yesterday') {
-            parsedDate = subDays(referenceDate, 1);
-            console.log("Pattern matched: yesterday");
-        } else if (identifiedText === 'tomorrow') {
-            parsedDate = addDays(referenceDate, 1);
-            console.log("Pattern matched: tomorrow");
+    // 3.3 Relative Boundaries (start/end of week/month/year)
+    if (!parsedDate) {
+        const boundaryMatch = identifiedText.match(/^(start|end) of (next|last|this|the) (week|month|year)/);
+        if (boundaryMatch) {
+            boundary = boundaryMatch[1]; // Assign to higher scope var
+            direction = boundaryMatch[2]; // Assign to higher scope var
+            unit = boundaryMatch[3];      // Assign to higher scope var
+
+            let targetDate = referenceDate;
+            if (direction === 'next') {
+                if (unit === 'week') targetDate = addWeeks(referenceDate, 1);
+                else if (unit === 'month') targetDate = addMonths(referenceDate, 1);
+                else if (unit === 'year') targetDate = addYears(referenceDate, 1);
+            } else if (direction === 'last') {
+                if (unit === 'week') targetDate = subWeeks(referenceDate, 1);
+                else if (unit === 'month') targetDate = subMonths(referenceDate, 1);
+                else if (unit === 'year') targetDate = subYears(referenceDate, 1);
+            }
+            // 'this' or 'the' implies current unit relative to referenceDate
+
+            if (boundary === 'start') {
+                if (unit === 'week') parsedDate = startOfWeek(targetDate, { weekStartsOn: 1 });
+                else if (unit === 'month') parsedDate = startOfMonth(targetDate);
+                else if (unit === 'year') parsedDate = startOfYear(targetDate);
+            } else { // end
+                if (unit === 'week') parsedDate = endOfWeek(targetDate, { weekStartsOn: 1 });
+                else if (unit === 'month') parsedDate = endOfMonth(targetDate);
+                else if (unit === 'year') parsedDate = endOfYear(targetDate);
+            }
+            isRelativeBoundary = true; // Indicate this is a boundary, not necessarily a specific day for tasks
+            if(parsedDate) console.log(`Pattern matched relative boundary: ${boundary} of ${direction} ${unit}`);
         }
-        // Relative Weekdays (next/last/previous)
-        else if (identifiedText.startsWith('next ')) {
-            const dayPart = identifiedText.substring(5);
-            if (dayPart === 'monday') parsedDate = nextMonday(referenceDate);
-            else if (dayPart === 'tuesday') parsedDate = nextTuesday(referenceDate);
-            else if (dayPart === 'wednesday') parsedDate = nextWednesday(referenceDate);
-            else if (dayPart === 'thursday') parsedDate = nextThursday(referenceDate);
-            else if (dayPart === 'friday') parsedDate = nextFriday(referenceDate);
-            else if (dayPart === 'saturday') parsedDate = nextSaturday(referenceDate);
-            else if (dayPart === 'sunday') parsedDate = nextSunday(referenceDate);
-             if(parsedDate) console.log(`Pattern matched: next ${dayPart}`);
-        } else if (identifiedText.startsWith('last ')) { // Accept "last" as synonym for "previous"
-            const dayPart = identifiedText.substring(5);
-            if (dayPart === 'monday') parsedDate = previousMonday(referenceDate);
-            else if (dayPart === 'tuesday') parsedDate = previousTuesday(referenceDate);
-            else if (dayPart === 'wednesday') parsedDate = previousWednesday(referenceDate);
-            else if (dayPart === 'thursday') parsedDate = previousThursday(referenceDate);
-            else if (dayPart === 'friday') parsedDate = previousFriday(referenceDate);
-            else if (dayPart === 'saturday') parsedDate = previousSaturday(referenceDate);
-            else if (dayPart === 'sunday') parsedDate = previousSunday(referenceDate);
-            if(parsedDate) console.log(`Pattern matched: last/previous ${dayPart}`);
+    }
+
+    // 3.4 Relative Units (next/last/this month/year) - Populates components directly sometimes
+     if (!parsedDate) {
+        const relativeUnitMatch = identifiedText.match(/^(next|last|this) (month|year)/);
+        if (relativeUnitMatch) {
+            direction = relativeUnitMatch[1]; // Assign to higher scope var
+            unit = relativeUnitMatch[2];      // Assign to higher scope var
+            let targetDate = referenceDate;
+
+            if (direction === 'next') {
+                 if (unit === 'month') targetDate = addMonths(referenceDate, 1);
+                 else if (unit === 'year') targetDate = addYears(referenceDate, 1);
+            } else if (direction === 'last') {
+                 if (unit === 'month') targetDate = subMonths(referenceDate, 1);
+                 else if (unit === 'year') targetDate = subYears(referenceDate, 1);
+            }
+            // 'this' uses referenceDate
+
+            result.year = getYear(targetDate);
+            if (unit === 'month') {
+                result.month = getMonth(targetDate) + 1;
+            }
+            // Day is undefined for these relative units
+            isAmbiguousMonthOrYear = true;
+            console.log(`Pattern matched relative unit: ${direction} ${unit}`);
         }
-         // Standalone weekdays (assume next instance)
-        else if (/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i.test(identifiedText)) {
-            const dayPart = identifiedText;
-            if (dayPart === 'monday') parsedDate = nextMonday(referenceDate);
-            else if (dayPart === 'tuesday') parsedDate = nextTuesday(referenceDate);
-            else if (dayPart === 'wednesday') parsedDate = nextWednesday(referenceDate);
-            else if (dayPart === 'thursday') parsedDate = nextThursday(referenceDate);
-            else if (dayPart === 'friday') parsedDate = nextFriday(referenceDate);
-            else if (dayPart === 'saturday') parsedDate = nextSaturday(referenceDate);
-            else if (dayPart === 'sunday') parsedDate = nextSunday(referenceDate);
-             if(parsedDate) console.log(`Pattern matched standalone weekday (assuming next): ${dayPart}`);
+    }
+
+
+    // 3.5 Standalone Month / Month-Year / Month-Day
+     if (!parsedDate && !isAmbiguousMonthOrYear) {
+        // Month Year (e.g., "August 2025") - Handled by existing code is okay
+        const monthYearMatch = identifiedText.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+(\d{4})$/i);
+        if (monthYearMatch) {
+             const monthIndex = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].findIndex(m => monthYearMatch[1].startsWith(m));
+             result.year = parseInt(monthYearMatch[2], 10);
+             result.month = monthIndex + 1;
+             isAmbiguousMonthOrYear = true;
+             console.log(`Pattern matched: month year ${identifiedText}`);
         }
-         // Month/Day Only (Handle cautiously)
-        else if (parsedResult.start?.isCertain('month') && parsedResult.start?.isCertain('day') && !parsedResult.start?.isCertain('year')) {
+         // Standalone Month (e.g., "September")
+        else {
+            const monthIndex = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'].findIndex(m => m === identifiedText);
+             if (monthIndex !== -1) {
+                 const targetMonth = monthIndex; // 0-based
+                 const currentMonth = getMonth(referenceDate);
+                 const currentYear = getYear(referenceDate);
+                 // Assume upcoming month unless it's significantly past in current year
+                 result.year = (targetMonth < currentMonth) ? currentYear + 1 : currentYear;
+                 result.month = targetMonth + 1;
+                 isAmbiguousMonthOrYear = true;
+                  console.log(`Pattern matched: standalone month ${identifiedText} (year ${result.year})`);
+            }
+        }
+        // Month/Day Only (Handle cautiously - existing logic seems okay but relies on chrono)
+        // Keep the existing logic using chrono's certainty flags if no other pattern matched
+        if (!parsedDate && !isAmbiguousMonthOrYear && parsedResult.start?.isCertain('month') && parsedResult.start?.isCertain('day') && !parsedResult.start?.isCertain('year')) {
+             // ... (keep existing logic using set() and chrono values) ...
             const impliedChronoYear = parsedResult.start?.get('year');
             const currentYear = getYear(referenceDate);
             try {
-                // Use implied year if available, otherwise current year.
-                // This handles cases where chrono might guess future year for past M/D.
                 parsedDate = set(new Date(0), {
                     year: impliedChronoYear ?? currentYear,
-                    month: parsedResult.start.get('month')! - 1, // Chrono month is 1-based
+                    month: parsedResult.start.get('month')! - 1,
                     date: parsedResult.start.get('day')!
                 });
-                // Simple sanity check: if date is > 180 days in future compared to ref, maybe chrono guessed wrong year?
-                // This logic is complex, keep basic approach for now.
                  if(isValid(parsedDate)) {
                     console.log(`Pattern matched: Month/Day only (using year ${getYear(parsedDate)})`);
                  } else {
@@ -397,79 +491,63 @@ function parseDateStringToEnhanced(dateString: string, referenceDate: Date): Enh
                  }
              } catch (e) { parsedDate = null; console.warn("Error setting Month/Day only", e); }
         }
-        // Relative Weeks/Months/Years (Set components directly)
-        else if (identifiedText === 'next week') {
-            const nextWeekStart = startOfWeek(addWeeks(referenceDate, 1), { weekStartsOn: 1 });
-            result.year = getYear(nextWeekStart);
-            result.month = getMonth(nextWeekStart) + 1;
-            result.week_number = getWeek(nextWeekStart, { weekStartsOn: 1 });
-            result.day = undefined;
-            isRelativeWeekMonthYear = true;
-            console.log("Pattern matched: next week");
-        } else if (identifiedText === 'last week') {
-            const lastWeekStart = startOfWeek(subWeeks(referenceDate, 1), { weekStartsOn: 1 });
-            result.year = getYear(lastWeekStart);
-            result.month = getMonth(lastWeekStart) + 1;
-            result.week_number = getWeek(lastWeekStart, { weekStartsOn: 1 });
-            result.day = undefined;
-            isRelativeWeekMonthYear = true;
-             console.log("Pattern matched: last week");
-        }
-         // ... other relative week/month/year patterns ...
-          else if (identifiedText === 'this year') {
-            result.year = getYear(referenceDate);
-            result.month = undefined;
-            result.day = undefined;
-            isRelativeWeekMonthYear = true;
-            console.log("Pattern matched: this year");
-        }
-         // Standalone Year
-        else if (/^\d{4}$/.test(identifiedText)) {
-             result.year = parseInt(identifiedText, 10);
-             result.month = undefined;
-             result.day = undefined;
-             isRelativeWeekMonthYear = true;
+    }
+
+     // 3.6 Standalone Year
+    if (!parsedDate && !isAmbiguousMonthOrYear) {
+        const yearMatch = identifiedText.match(/^(\d{4})$/);
+        if (yearMatch) {
+             result.year = parseInt(yearMatch[1], 10);
+             isAmbiguousMonthOrYear = true;
              console.log(`Pattern matched: standalone year ${identifiedText}`);
         }
-          // Month Year (e.g., "August 2025")
-        else if (/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{4}$/i.test(identifiedText)) {
-             const parts = identifiedText.split(' ');
-             const monthIndex = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].findIndex(m => parts[0].startsWith(m));
-             result.year = parseInt(parts[1], 10);
-             result.month = monthIndex + 1;
-             result.day = undefined;
-             isRelativeWeekMonthYear = true;
-             console.log(`Pattern matched: month year ${identifiedText}`);
-        }
     }
 
-    // 4. Populate Components from parsedDate
-    if (parsedDate && isValid(parsedDate) && !isRelativeWeekMonthYear) {
+
+    // 4. Populate Components from parsedDate (if determined)
+    if (parsedDate && isValid(parsedDate)) {
         console.log(`Populating components from specific parsed date: ${parsedDate.toISOString()}`);
-        result.year = getYear(parsedDate);
-        result.month = getMonth(parsedDate) + 1;
-        result.day = getDate(parsedDate);
+        // Only populate if not already set by relative month/year logic
+        if (result.year === undefined) result.year = getYear(parsedDate);
+        if (result.month === undefined) result.month = getMonth(parsedDate) + 1;
+         // Only set day if it wasn't a boundary match or ambiguous month/year
+        if (!isRelativeBoundary && !isAmbiguousMonthOrYear) {
+            result.day = getDate(parsedDate);
+        }
         result.day_of_week = getDay(parsedDate);
         try {
-            result.week_number = getWeek(parsedDate, { weekStartsOn: 1 });
+             // Only set week if it makes sense (specific day or week boundary)
+             if (result.day !== undefined || unit === 'week') {
+                result.week_number = getWeek(parsedDate, { weekStartsOn: 1 });
+             }
         } catch (e) { console.warn("Could not determine week number:", e)}
-    } else if (!isRelativeWeekMonthYear && !parsedDate) {
-        console.warn(`No specific date could be parsed or matched for "${identifiedText}".`);
+
+         // Set note for boundary matches
+         if (isRelativeBoundary) {
+             result.note = `Boundary: ${boundary} of ${direction} ${unit}`;
+         }
+
+    } else if (!isAmbiguousMonthOrYear && !parsedDate) {
+        console.warn(`No specific date pattern could be parsed or matched for "${identifiedText}".`);
         result.note = result.note || "Failed to parse date string into specific components.";
-    } else if (isRelativeWeekMonthYear) {
-         console.log("Populated components for relative week/month/year.");
-         result.note = "Partial parse: Specific day not specified.";
+    } else if (isAmbiguousMonthOrYear) {
+         console.log("Populated components for relative/standalone month/year.");
+         result.note = result.note || "Partial parse: Specific day not specified.";
     }
 
-    // 5. Handle Time Components (if Chrono found them)
+
+    // 5. Handle Time Components (Keep existing logic, but use parsedDate if available)
+    const timeRefDate = parsedDate || referenceDate; // Use parsed date for time context if available
     if (parsedResult.start?.isCertain('hour')) {
         result.time_hour = parsedResult.start.get('hour') ?? undefined;
         result.time_minute = parsedResult.start.get('minute') ?? 0;
         result.time_second = parsedResult.start.get('second') ?? 0;
         if (result.time_hour !== undefined) {
-            console.log(`Time components found: H=${result.time_hour}, M=${result.time_minute}, S=${result.time_second}`);
+            console.log(`Time components found via Chrono: H=${result.time_hour}, M=${result.time_minute}, S=${result.time_second}`);
         }
-    } else {
+    }
+    // ... (keep regex time parsing logic as fallback) ...
+    else {
         // Basic time keyword checks
         if (/\b(noon)\b/i.test(identifiedText)) { result.time_hour = 12; result.time_minute = 0; }
         else if (/\b(midnight)\b/i.test(identifiedText)) { result.time_hour = 0; result.time_minute = 0; }
@@ -480,7 +558,7 @@ function parseDateStringToEnhanced(dateString: string, referenceDate: Date): Enh
             const second = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
             const period = timeMatch[4].toLowerCase();
             if (period === 'pm' && hour < 12) hour += 12;
-            if (period === 'am' && hour === 12) hour = 0;
+            if (period === 'am' && hour === 12) hour = 0; // 12 AM is 00 hours
             result.time_hour = hour;
             result.time_minute = minute;
             result.time_second = second;
@@ -488,27 +566,22 @@ function parseDateStringToEnhanced(dateString: string, referenceDate: Date): Enh
         }
     }
 
-    // 6. Determine Period (Based on Boundary Terms or Time)
-    let periodSetByBoundary = false;
-    // Check foundQualifiers derived from the original string
-    if (foundQualifiers.includes("EOD") || foundQualifiers.includes("END OF DAY") || foundQualifiers.includes("BY END OF DAY") || foundQualifiers.includes("TONIGHT")) {
-        result.period = 'Evening';
-        periodSetByBoundary = true;
-    } else if (foundQualifiers.includes("COB") || foundQualifiers.includes("THIS AFTERNOON")) {
-        result.period = 'Afternoon';
-        periodSetByBoundary = true;
-    } else if (foundQualifiers.includes("THIS MORNING")) {
-        result.period = 'Morning';
-        periodSetByBoundary = true;
+
+    // 6. Determine Period (Prioritize explicitly parsed period, then qualifier, then time)
+    // Period might have been set during combined relative date+period parsing (step 3.2)
+    if (!result.period) {
+        if (periodFromQualifier) {
+            result.period = periodFromQualifier; // Use period derived from initial qualifier stripping
+        } else if (result.time_hour !== undefined) {
+            // Infer from time_hour if not set by qualifier or combined parse
+            if (result.time_hour >= 5 && result.time_hour < 12) result.period = 'Morning';
+            else if (result.time_hour >= 12 && result.time_hour < 18) result.period = 'Afternoon';
+            else if (result.time_hour >= 18 && result.time_hour < 22) result.period = 'Evening';
+            else result.period = 'Night'; // Handles 22:00 to 04:59
+        }
     }
-    // Infer from time_hour if not set by a specific boundary term
-    if (!periodSetByBoundary && result.time_hour !== undefined) {
-        if (result.time_hour >= 5 && result.time_hour < 12) result.period = 'Morning';
-        else if (result.time_hour >= 12 && result.time_hour < 18) result.period = 'Afternoon';
-        else if (result.time_hour >= 18 && result.time_hour < 22) result.period = 'Evening';
-        else result.period = 'Night';
-    }
-    if(result.period) console.log(`Period determined: ${result.period}`);
+     if(result.period) console.log(`Period determined: ${result.period}`);
+
 
     // Final Logging & Return
     console.log("Final parsed components:", JSON.stringify(result));
@@ -797,58 +870,60 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
         // Initialize response variables
         let retrieved_context: ContextObject[] = [];
-        let storage_status: string = "No storage operation requested.";
+        let storage_status: string = "No storage operation performed.";
         let query_source: SuccessResponse['query_source'] = 'none';
-        let message_for_gpt: string | undefined = undefined;
-        let fileId: string | null = null;
+        let message_for_gpt: string = ""; // Initialize message for GPT
 
-        // 1. Pre-process extracted entities (normalize dates)
-        const referenceDateForNormalization = new Date();
-        console.log(`Parsing dates with reference: ${referenceDateForNormalization.toISOString()}`);
+        // Prepare the metadata object, processing dates carefully
+        const processedMetadata: ProcessedEntities = { ...payload.extracted_entities, dates: [] }; // Initialize dates as empty array
 
-        // FIX: Refactor processedMetadata initialization and date parsing assignment
-        const initialEntities = payload.extracted_entities;
-        // Initialize with other properties, dates will be added after parsing
-        let processedMetadata: ProcessedEntities = {
-            people: initialEntities.people,
-            locations: initialEntities.locations,
-            topics: initialEntities.topics,
-            type: initialEntities.type,
-            sentiment: initialEntities.sentiment,
-            priority: initialEntities.priority,
-            dates: undefined
-        };
+        // --- Date Parsing and Filtering Logic ---
+        const rawDates = payload.extracted_entities.dates;
+        const successfullyParsedDates: EnhancedNormalizedDate[] = [];
+        const referenceDate = new Date(); // Use current server time as reference
 
-        // Parse dates from the *original* payload's dates array
-        if (initialEntities.dates && Array.isArray(initialEntities.dates)) {
-            const parsedDates: EnhancedNormalizedDate[] = initialEntities.dates
-                .map(dateInput => {
-                    // SIMPLIFIED TYPE CHECKING:
-                    // 1. Handle string input directly
-                    if (typeof dateInput === 'string') {
-                        return parseDateStringToEnhanced(dateInput, referenceDateForNormalization);
+        console.log("Parsing dates with reference:", referenceDate.toISOString());
+
+        if (rawDates && Array.isArray(rawDates)) {
+            rawDates.forEach(dateInput => {
+                let dateString: string | undefined;
+                // Handle both string and object input formats safely
+                if (typeof dateInput === 'string') {
+                    dateString = dateInput;
+                } else if (dateInput && typeof dateInput === 'object' && typeof dateInput.original === 'string') {
+                    dateString = dateInput.original;
+                } else {
+                    console.warn("Skipping invalid date input format:", dateInput);
+                    return; // Skip this iteration
+                }
+
+                if (dateString) {
+                    try {
+                        const parsedDate = parseDateStringToEnhanced(dateString, referenceDate);
+                        // Check if parsing failed (indicated by the presence of a 'note')
+                        if (parsedDate.note && parsedDate.note.startsWith("Failed")) {
+                            // Log the failure server-side
+                            console.warn(`Failed to parse date string "${dateString}". Discarding from metadata.`);
+                            // Do NOT add to successfullyParsedDates
+                        } else {
+                            // Parsing succeeded or produced a partial result without critical failure note
+                            successfullyParsedDates.push(parsedDate);
+                        }
+                    } catch (parseError) {
+                        console.error(`Error during parsing date string "${dateString}":`, parseError);
+                        // Also treat errors during parsing as failure, discard
                     }
-                    // 2. Handle object input if it has a valid 'original' string property
-                    else if (typeof dateInput === 'object' && dateInput !== null && typeof dateInput.original === 'string') {
-                        console.warn(`Re-parsing object with 'original' property: ${JSON.stringify(dateInput)}`);
-                        return parseDateStringToEnhanced(dateInput.original, referenceDateForNormalization);
-                    }
-                    // 3. Handle any other format as unexpected/invalid
-                    else {
-                        console.warn(`Unexpected date format in extracted_entities: ${JSON.stringify(dateInput)}`);
-                        return null; // Invalid input format
-                    }
-                })
-                // Use type guard filter to ensure the result is EnhancedNormalizedDate[]
-                .filter((d): d is EnhancedNormalizedDate => d !== null);
-
-            processedMetadata.dates = parsedDates; // Assign the correctly typed array
-        } else {
-            processedMetadata.dates = []; // Ensure it's an empty array if no dates were input
+                }
+            });
         }
-
+        // Assign only the successfully parsed dates to the final metadata
+        processedMetadata.dates = successfullyParsedDates;
         console.log("Processed Metadata (Dates Enhanced):", JSON.stringify(processedMetadata));
+        // --- End Date Parsing and Filtering Logic ---
 
+        // Mode handling: store, query, combined
+        const mode = payload.mode;
+        let queryEmbedding: number[] | null = null; // Initialize query embedding
 
         // 2. Process based on mode
         if (payload.mode === 'store' || payload.mode === 'combined') {
@@ -892,7 +967,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                 console.error("Error inserting into files table:", fileError);
                 throw new Error(`Failed to store file record: ${fileError?.message || 'No ID returned'}`);
             }
-            fileId = fileData.id;
+            const fileId = fileData.id;
             console.log(`File record created with ID: ${fileId}`);
 
 
@@ -972,7 +1047,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                 input: queryText,
                 dimensions: EMBEDDING_DIMENSIONS,
             });
-            const queryEmbedding = queryEmbeddingResponse?.data[0]?.embedding;
+            queryEmbedding = queryEmbeddingResponse?.data[0]?.embedding;
 
             if (!queryEmbedding) {
                 throw new Error("Failed to generate query embedding.");

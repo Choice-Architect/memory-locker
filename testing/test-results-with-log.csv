@@ -1,0 +1,452 @@
+Test code;Action mode;Input;Actual response;Netlify log snippet;Notes
+T1;Store;I had a productive meeting with Sarah Chen at Starbucks yesterday afternoon about the Q3 marketing strategy due next Friday.;Stored. Logged your productive meeting with Sarah Chen at Starbucks yesterday afternoon regarding the Q3 marketing strategy, which is due next Friday.;"Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 124,
+  entities: {
+    people: [ 'Sarah Chen' ],
+    dates: [ 'yesterday afternoon', 'next Friday' ],
+    locations: [ 'Starbucks' ],
+    topics: [ 'Q3 marketing strategy' ],
+    type: 'story',
+    sentiment: 'positive',
+    priority: 0
+  }
+}
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Parsing dates with reference: 2025-04-11T09:02:30.226Z
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Parsing date string: ""yesterday afternoon"" with reference date: 2025-04-11T09:02:30.226Z
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Cleaned string: ""yesterday afternoon"", Found qualifiers:
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Chrono identified text: ""yesterday afternoon""
+Apr 11, 11:02:30 AM: 9c58d0b8 WARN   No specific date could be parsed or matched for ""yesterday afternoon"".
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Final parsed components: {""original"":""yesterday afternoon"",""note"":""Failed to parse date string into specific components.""}
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Parsing date string: ""next Friday"" with reference date: 2025-04-11T09:02:30.226Z
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Cleaned string: ""next friday"", Found qualifiers:
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Chrono identified text: ""next friday""
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Pattern matched: next friday
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Populating components from specific parsed date: 2025-04-18T09:02:30.226Z
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Final parsed components: {""original"":""next Friday"",""year"":2025,""month"":4,""day"":18,""day_of_week"":5,""week_number"":16}
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Processed Metadata (Dates Enhanced): {""people"":[""Sarah Chen""],""locations"":[""Starbucks""],""topics"":[""Q3 marketing strategy""],""type"":""story"",""sentiment"":""positive"",""priority"":0,""dates"":[{""original"":""yesterday afternoon"",""note"":""Failed to parse date string into specific components.""},{""original"":""next Friday"",""year"":2025,""month"":4,""day"":18,""day_of_week"":5,""week_number"":16}]}
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Processing 'store' mode...
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Storing File Metadata: {""people"":[""Sarah Chen""],""locations"":[""Starbucks""],""topics"":[""Q3 marketing strategy""],""type"":""story"",""sentiment"":""positive"",""priority"":0,""dates"":[{""original"":""yesterday afternoon"",""note"":""Failed to parse date string into specific components.""},{""original"":""next Friday"",""year"":2025,""month"":4,""day"":18,""day_of_week"":5,""week_number"":16}]}
+Apr 11, 11:02:30 AM: 9c58d0b8 INFO   Preparing to insert into files table with processed metadata...
+Apr 11, 11:02:31 AM: 9c58d0b8 INFO   File record created with ID: 7d13b952-8b21-487e-9e5f-e678efced076
+Apr 11, 11:02:31 AM: 9c58d0b8 INFO   Chunking text...
+Apr 11, 11:02:31 AM: 9c58d0b8 INFO   Generated 1 chunks.
+Apr 11, 11:02:31 AM: 9c58d0b8 INFO   Generating embeddings...
+Apr 11, 11:02:32 AM: 9c58d0b8 INFO   Inserting 1 embedding records...
+Apr 11, 11:02:32 AM: 9c58d0b8 INFO   Embedding records inserted successfully.
+Apr 11, 11:02:32 AM: 9c58d0b8 INFO   DEBUG: Final retrieved_context count after potential re-ranking: 0
+Apr 11, 11:02:32 AM: 9c58d0b8 Duration: 2243.15 ms	Memory Usage: 119 MB";Date error
+T2;Store;Remind me that John Smith and Emily White are presenting the Project Alpha findings next Tuesday morning in Conference Room B.;Noted. Reminder set: John Smith and Emily White will present the Project Alpha findings next Tuesday morning in Conference Room B.;"Apr 11, 11:03:09 AM: 03561d8f INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 126,
+  entities: {
+    people: [ 'John Smith', 'Emily White' ],
+    dates: [ 'next Tuesday morning' ],
+    locations: [ 'Conference Room B' ],
+    topics: [ 'Project Alpha findings' ],
+    type: 'reminder',
+    priority: 0
+  }
+}
+Apr 11, 11:03:09 AM: 03561d8f INFO   Parsing dates with reference: 2025-04-11T09:03:09.297Z
+Apr 11, 11:03:09 AM: 03561d8f INFO   Parsing date string: ""next Tuesday morning"" with reference date: 2025-04-11T09:03:09.297Z
+Apr 11, 11:03:09 AM: 03561d8f INFO   Cleaned string: ""next tuesday morning"", Found qualifiers:
+Apr 11, 11:03:09 AM: 03561d8f INFO   Chrono identified text: ""next tuesday morning""
+Apr 11, 11:03:09 AM: 03561d8f WARN   No specific date could be parsed or matched for ""next tuesday morning"".
+Apr 11, 11:03:09 AM: 03561d8f INFO   Final parsed components: {""original"":""next Tuesday morning"",""note"":""Failed to parse date string into specific components.""}
+Apr 11, 11:03:09 AM: 03561d8f INFO   Processed Metadata (Dates Enhanced): {""people"":[""John Smith"",""Emily White""],""locations"":[""Conference Room B""],""topics"":[""Project Alpha findings""],""type"":""reminder"",""priority"":0,""dates"":[{""original"":""next Tuesday morning"",""note"":""Failed to parse date string into specific components.""}]}
+Apr 11, 11:03:09 AM: 03561d8f INFO   Processing 'store' mode...
+Apr 11, 11:03:09 AM: 03561d8f INFO   Storing File Metadata: {""people"":[""John Smith"",""Emily White""],""locations"":[""Conference Room B""],""topics"":[""Project Alpha findings""],""type"":""reminder"",""priority"":0,""dates"":[{""original"":""next Tuesday morning"",""note"":""Failed to parse date string into specific components.""}]}
+Apr 11, 11:03:09 AM: 03561d8f INFO   Preparing to insert into files table with processed metadata...
+Apr 11, 11:03:09 AM: 03561d8f INFO   File record created with ID: edf5fda1-a7b3-4c3a-bf62-4c32839f019d
+Apr 11, 11:03:09 AM: 03561d8f INFO   Chunking text...
+Apr 11, 11:03:09 AM: 03561d8f INFO   Generated 1 chunks.
+Apr 11, 11:03:09 AM: 03561d8f INFO   Generating embeddings...
+Apr 11, 11:03:09 AM: 03561d8f INFO   Inserting 1 embedding records...
+Apr 11, 11:03:10 AM: 03561d8f INFO   Embedding records inserted successfully.
+Apr 11, 11:03:10 AM: 03561d8f INFO   DEBUG: Final retrieved_context count after potential re-ranking: 0
+Apr 11, 11:03:10 AM: 03561d8f Duration: 899.51 ms	Memory Usage: 123 MB";Date error
+T3;Store;The server maintenance window is scheduled for April 28th, 2025, from 2:00 AM to 4:00 AM UTC.;Stored. Noted the server maintenance window scheduled for April 28th, 2025, from 2:00 AM to 4:00 AM UTC.;"Apr 11, 11:03:41 AM: 49ff1f81 INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 93,
+  entities: {
+    dates: [ 'April 28th, 2025, from 2:00 AM to 4:00 AM UTC' ],
+    topics: [ 'server maintenance window' ],
+    type: 'note',
+    priority: 0
+  }
+}
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Parsing dates with reference: 2025-04-11T09:03:41.779Z
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Parsing date string: ""April 28th, 2025, from 2:00 AM to 4:00 AM UTC"" with reference date: 2025-04-11T09:03:41.779Z
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Cleaned string: ""april 28th, 2025, from 2:00 am to 4:00 am utc"", Found qualifiers:
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Chrono identified text: ""april 28th, 2025, from 2:00 am to 4:00 am utc""
+Apr 11, 11:03:41 AM: 49ff1f81 WARN   No specific date could be parsed or matched for ""april 28th, 2025, from 2:00 am to 4:00 am utc"".
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Time components found: H=2, M=0, S=0
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Period determined: Night
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Final parsed components: {""original"":""April 28th, 2025, from 2:00 AM to 4:00 AM UTC"",""note"":""Failed to parse date string into specific components."",""time_hour"":2,""time_minute"":0,""time_second"":0,""period"":""Night""}
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Processed Metadata (Dates Enhanced): {""topics"":[""server maintenance window""],""type"":""note"",""priority"":0,""dates"":[{""original"":""April 28th, 2025, from 2:00 AM to 4:00 AM UTC"",""note"":""Failed to parse date string into specific components."",""time_hour"":2,""time_minute"":0,""time_second"":0,""period"":""Night""}]}
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Processing 'store' mode...
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Storing File Metadata: {""topics"":[""server maintenance window""],""type"":""note"",""priority"":0,""dates"":[{""original"":""April 28th, 2025, from 2:00 AM to 4:00 AM UTC"",""note"":""Failed to parse date string into specific components."",""time_hour"":2,""time_minute"":0,""time_second"":0,""period"":""Night""}]}
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Preparing to insert into files table with processed metadata...
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   File record created with ID: 0a060474-dc97-4f26-a66b-338cd099098d
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Chunking text...
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Generated 1 chunks.
+Apr 11, 11:03:41 AM: 49ff1f81 INFO   Generating embeddings...
+Apr 11, 11:03:42 AM: 49ff1f81 INFO   Inserting 1 embedding records...
+Apr 11, 11:03:42 AM: 49ff1f81 INFO   Embedding records inserted successfully.
+Apr 11, 11:03:42 AM: 49ff1f81 INFO   DEBUG: Final retrieved_context count after potential re-ranking: 0
+Apr 11, 11:03:42 AM: 49ff1f81 Duration: 1022.08 ms	Memory Usage: 123 MB";Date error
+T4;Store;My vacation is planned for the last two weeks of August 2025.;Stored. Vacation noted for the last two weeks of August 2025.;"Apr 11, 11:04:04 AM: 262083cc INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 61,
+  entities: {
+    dates: [ 'last two weeks of August 2025' ],
+    topics: [ 'vacation' ],
+    type: 'note',
+    priority: 0
+  }
+}
+Apr 11, 11:04:04 AM: 262083cc INFO   Parsing dates with reference: 2025-04-11T09:04:04.467Z
+Apr 11, 11:04:04 AM: 262083cc INFO   Parsing date string: ""last two weeks of August 2025"" with reference date: 2025-04-11T09:04:04.467Z
+Apr 11, 11:04:04 AM: 262083cc INFO   Cleaned string: ""august 2025"", Found qualifiers: LAST TWO WEEKS OF
+Apr 11, 11:04:04 AM: 262083cc INFO   Chrono identified text: ""august 2025""
+Apr 11, 11:04:04 AM: 262083cc INFO   Pattern matched: month year august 2025
+Apr 11, 11:04:04 AM: 262083cc INFO   Populated components for relative week/month/year.
+Apr 11, 11:04:04 AM: 262083cc INFO   Final parsed components: {""original"":""last two weeks of August 2025"",""year"":2025,""month"":8,""note"":""Partial parse: Specific day not specified.""}
+Apr 11, 11:04:04 AM: 262083cc INFO   Processed Metadata (Dates Enhanced): {""topics"":[""vacation""],""type"":""note"",""priority"":0,""dates"":[{""original"":""last two weeks of August 2025"",""year"":2025,""month"":8,""note"":""Partial parse: Specific day not specified.""}]}
+Apr 11, 11:04:04 AM: 262083cc INFO   Processing 'store' mode...
+Apr 11, 11:04:04 AM: 262083cc INFO   Storing File Metadata: {""topics"":[""vacation""],""type"":""note"",""priority"":0,""dates"":[{""original"":""last two weeks of August 2025"",""year"":2025,""month"":8,""note"":""Partial parse: Specific day not specified.""}]}
+Apr 11, 11:04:04 AM: 262083cc INFO   Preparing to insert into files table with processed metadata...
+Apr 11, 11:04:04 AM: 262083cc INFO   File record created with ID: d6b9e146-1e16-4e00-bb81-ec8e8aeb4e52
+Apr 11, 11:04:04 AM: 262083cc INFO   Chunking text...
+Apr 11, 11:04:04 AM: 262083cc INFO   Generated 1 chunks.
+Apr 11, 11:04:04 AM: 262083cc INFO   Generating embeddings...
+Apr 11, 11:04:05 AM: 262083cc INFO   Inserting 1 embedding records...
+Apr 11, 11:04:05 AM: 262083cc INFO   Embedding records inserted successfully.
+Apr 11, 11:04:05 AM: 262083cc INFO   DEBUG: Final retrieved_context count after potential re-ranking: 0
+Apr 11, 11:04:05 AM: 262083cc Duration: 941.74 ms	Memory Usage: 127 MB";Check if correct.
+T5;Store;We discussed the budget revisions sometime last spring.;Stored. Logged your discussion about budget revisions from last spring.;"Apr 11, 11:04:56 AM: 024fe647 INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 55,
+  entities: {
+    topics: [ 'budget revisions' ],
+    dates: [ 'last spring' ],
+    type: 'note',
+    priority: 0
+  }
+}
+Apr 11, 11:04:56 AM: 024fe647 INFO   Parsing dates with reference: 2025-04-11T09:04:56.894Z
+Apr 11, 11:04:56 AM: 024fe647 INFO   Parsing date string: ""last spring"" with reference date: 2025-04-11T09:04:56.894Z
+Apr 11, 11:04:56 AM: 024fe647 INFO   Cleaned string: ""last spring"", Found qualifiers:
+Apr 11, 11:04:56 AM: 024fe647 WARN   Chrono failed to parse cleaned string: ""last spring"". Checking original for boundary terms.
+Apr 11, 11:04:56 AM: 024fe647 INFO   Processed Metadata (Dates Enhanced): {""topics"":[""budget revisions""],""type"":""note"",""priority"":0,""dates"":[{""original"":""last spring"",""note"":""Failed to parse date string.""}]}
+Apr 11, 11:04:56 AM: 024fe647 INFO   Processing 'store' mode...
+Apr 11, 11:04:56 AM: 024fe647 INFO   Storing File Metadata: {""topics"":[""budget revisions""],""type"":""note"",""priority"":0,""dates"":[{""original"":""last spring"",""note"":""Failed to parse date string.""}]}
+Apr 11, 11:04:56 AM: 024fe647 INFO   Preparing to insert into files table with processed metadata...
+Apr 11, 11:04:57 AM: 024fe647 INFO   File record created with ID: 9e483068-d9d2-4cad-b1f9-d5a6730ef55a
+Apr 11, 11:04:57 AM: 024fe647 INFO   Chunking text...
+Apr 11, 11:04:57 AM: 024fe647 INFO   Generated 1 chunks.
+Apr 11, 11:04:57 AM: 024fe647 INFO   Generating embeddings...
+Apr 11, 11:04:57 AM: 024fe647 INFO   Inserting 1 embedding records...
+Apr 11, 11:04:57 AM: 024fe647 INFO   Embedding records inserted successfully.
+Apr 11, 11:04:57 AM: 024fe647 INFO   DEBUG: Final retrieved_context count after potential re-ranking: 0
+Apr 11, 11:04:57 AM: 024fe647 Duration: 958.9 ms	Memory Usage: 128 MB";Chrono failed, but this is correct behaviour. We did not want it to.
+T6;Store;URGENT: Need to finalize the contract with Acme Corp by end of day. Set priority 9;Stored. Marked as high priority (9): Finalize the contract with Acme Corp by end of day.;"Apr 11, 11:06:11 AM: bc1892e0 INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 82,
+  entities: {
+    organizations: [ 'Acme Corp' ],
+    topics: [ 'contract' ],
+    dates: [ 'end of day' ],
+    type: 'task',
+    priority: 9
+  }
+}
+Apr 11, 11:06:11 AM: bc1892e0 INFO   Parsing dates with reference: 2025-04-11T09:06:11.488Z
+Apr 11, 11:06:11 AM: bc1892e0 INFO   Parsing date string: ""end of day"" with reference date: 2025-04-11T09:06:11.488Z
+Apr 11, 11:06:11 AM: bc1892e0 INFO   Cleaned string: """", Found qualifiers: END OF DAY
+Apr 11, 11:06:11 AM: bc1892e0 WARN   Chrono failed to parse cleaned string: """". Checking original for boundary terms.
+Apr 11, 11:06:11 AM: bc1892e0 INFO   Set current date based on boundary term in original string.
+Apr 11, 11:06:11 AM: bc1892e0 INFO   Processed Metadata (Dates Enhanced): {""topics"":[""contract""],""type"":""task"",""priority"":9,""dates"":[{""original"":""end of day"",""year"":2025,""month"":4,""day"":11,""period"":""Evening"",""note"":""Inferred current date from boundary term.""}]}
+Apr 11, 11:06:11 AM: bc1892e0 INFO   Processing 'store' mode...
+Apr 11, 11:06:11 AM: bc1892e0 INFO   Storing File Metadata: {""topics"":[""contract""],""type"":""task"",""priority"":9,""dates"":[{""original"":""end of day"",""year"":2025,""month"":4,""day"":11,""period"":""Evening"",""note"":""Inferred current date from boundary term.""}]}
+Apr 11, 11:06:11 AM: bc1892e0 INFO   Preparing to insert into files table with processed metadata...
+Apr 11, 11:06:11 AM: bc1892e0 INFO   File record created with ID: 249e4e45-2e8a-4d80-9c5b-ab7164823280
+Apr 11, 11:06:11 AM: bc1892e0 INFO   Chunking text...
+Apr 11, 11:06:11 AM: bc1892e0 INFO   Generated 1 chunks.
+Apr 11, 11:06:11 AM: bc1892e0 INFO   Generating embeddings...
+Apr 11, 11:06:12 AM: bc1892e0 INFO   Inserting 1 embedding records...
+Apr 11, 11:06:12 AM: bc1892e0 INFO   Embedding records inserted successfully.
+Apr 11, 11:06:12 AM: bc1892e0 INFO   DEBUG: Final retrieved_context count after potential re-ranking: 0
+Apr 11, 11:06:12 AM: bc1892e0 Duration: 842.2 ms	Memory Usage: 128 MB";
+T7;Store;Note pour moi-même : Le rapport financier pour Q2 doit être soumis avant vendredi prochain.;Stored. Noted that the Q2 financial report must be submitted before next Friday.;"Apr 11, 11:06:39 AM: 66f0ced5 INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 79,
+  entities: {
+    topics: [ 'financial report', 'Q2' ],
+    dates: [ 'before next Friday' ],
+    type: 'note',
+    priority: 0
+  }
+}
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Parsing dates with reference: 2025-04-11T09:06:39.088Z
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Parsing date string: ""before next Friday"" with reference date: 2025-04-11T09:06:39.088Z
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Cleaned string: ""next friday"", Found qualifiers: BEFORE
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Chrono identified text: ""next friday""
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Pattern matched: next friday
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Populating components from specific parsed date: 2025-04-18T09:06:39.088Z
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Final parsed components: {""original"":""before next Friday"",""year"":2025,""month"":4,""day"":18,""day_of_week"":5,""week_number"":16}
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Processed Metadata (Dates Enhanced): {""topics"":[""financial report"",""Q2""],""type"":""note"",""priority"":0,""dates"":[{""original"":""before next Friday"",""year"":2025,""month"":4,""day"":18,""day_of_week"":5,""week_number"":16}]}
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Processing 'store' mode...
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Storing File Metadata: {""topics"":[""financial report"",""Q2""],""type"":""note"",""priority"":0,""dates"":[{""original"":""before next Friday"",""year"":2025,""month"":4,""day"":18,""day_of_week"":5,""week_number"":16}]}
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Preparing to insert into files table with processed metadata...
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   File record created with ID: 047c35b9-6202-4cbb-a372-c9fe0c52d524
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Chunking text...
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Generated 1 chunks.
+Apr 11, 11:06:39 AM: 66f0ced5 INFO   Generating embeddings...
+Apr 11, 11:06:45 AM: 66f0ced5 INFO   Inserting 1 embedding records...
+Apr 11, 11:06:45 AM: 66f0ced5 INFO   Embedding records inserted successfully.
+Apr 11, 11:06:45 AM: 66f0ced5 INFO   DEBUG: Final retrieved_context count after potential re-ranking: 0
+Apr 11, 11:06:46 AM: 66f0ced5 Duration: 6914.8 ms	Memory Usage: 128 MB";Check if correct.
+T8;Store;hey can u help me write an email to the boss, mr henderson... kinda wanna summarize the project zeta meeting from this morning with lisa and mike... basically we decided the launch is def gonna be delayed, maybe push to sept? need to confirm that timeline still fits with marketing team (ask jen maybe?). also tech team found that bug in the login module (big relief!), should be fixed by tomorrow eod. lisa's handling the updated budget numbers, she'll send em over soon. just make it sound professional, ok? thx;"Sure! Here's a polished, professional version of your email to Mr. Henderson:
+
+Subject: Project Zeta – Meeting Summary & Timeline Update
+Hi Mr. Henderson,
+Just wanted to provide a quick summary following this morning’s Project Zeta meeting with Lisa and Mike.
+We’ve concluded that the project launch will need to be delayed, with a tentative push to September. We still need to confirm that this revised timeline aligns with the marketing team’s schedule—Jen might be the best person to check in with on that front.
+On the technical side, the team identified the bug affecting the login module, which has been a significant blocker. Fortunately, it’s expected to be fully resolved by end of day tomorrow.
+Additionally, Lisa is currently working on the revised budget figures and will be sending those over shortly.
+Please let me know if you’d like to discuss any of these points further.
+Best regards, [Your Name]
+
+Let me know if you want to tweak the tone or add anything! I’ll also go ahead and save this.
+Talked to memory-locker-gpt.netlify.app
+
+Stored. Your email to Mr. Henderson professionally summarizes the Project Zeta meeting, including the potential launch delay, technical fix, and pending budget update. Let me know if you'd like a version tailored for Jen or anyone else.
+";"Apr 11, 11:07:33 AM: f0fb5e7a INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 841,
+  entities: {
+    people: [ 'Mr. Henderson', 'Lisa', 'Mike', 'Jen' ],
+    dates: [ 'this morning', 'by end of day tomorrow', 'September' ],
+    topics: [
+      'Project Zeta',
+      'project launch',
+      'marketing timeline',
+      'login module bug',
+      'updated budget'
+    ],
+    type: 'dictated_email',
+    priority: 0
+  }
+}
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Parsing dates with reference: 2025-04-11T09:07:33.016Z
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Parsing date string: ""this morning"" with reference date: 2025-04-11T09:07:33.016Z
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Cleaned string: """", Found qualifiers: THIS MORNING
+Apr 11, 11:07:33 AM: f0fb5e7a WARN   Chrono failed to parse cleaned string: """". Checking original for boundary terms.
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Set current date based on boundary term in original string.
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Parsing date string: ""by end of day tomorrow"" with reference date: 2025-04-11T09:07:33.016Z
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Cleaned string: ""tomorrow"", Found qualifiers: END OF DAY, BY
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Chrono identified text: ""tomorrow""
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Pattern matched: tomorrow
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Populating components from specific parsed date: 2025-04-12T09:07:33.016Z
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Period determined: Evening
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Final parsed components: {""original"":""by end of day tomorrow"",""year"":2025,""month"":4,""day"":12,""day_of_week"":6,""week_number"":15,""period"":""Evening""}
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Parsing date string: ""September"" with reference date: 2025-04-11T09:07:33.016Z
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Cleaned string: ""september"", Found qualifiers:
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Chrono identified text: ""september""
+Apr 11, 11:07:33 AM: f0fb5e7a WARN   No specific date could be parsed or matched for ""september"".
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Final parsed components: {""original"":""September"",""note"":""Failed to parse date string into specific components.""}
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Processed Metadata (Dates Enhanced): {""people"":[""Mr. Henderson"",""Lisa"",""Mike"",""Jen""],""topics"":[""Project Zeta"",""project launch"",""marketing timeline"",""login module bug"",""updated budget""],""type"":""dictated_email"",""priority"":0,""dates"":[{""original"":""this morning"",""year"":2025,""month"":4,""day"":11,""period"":""Morning"",""note"":""Inferred current date from boundary term.""},{""original"":""by end of day tomorrow"",""year"":2025,""month"":4,""day"":12,""day_of_week"":6,""week_number"":15,""period"":""Evening""},{""original"":""September"",""note"":""Failed to parse date string into specific components.""}]}
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Processing 'store' mode...
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Storing File Metadata: {""people"":[""Mr. Henderson"",""Lisa"",""Mike"",""Jen""],""topics"":[""Project Zeta"",""project launch"",""marketing timeline"",""login module bug"",""updated budget""],""type"":""dictated_email"",""priority"":0,""dates"":[{""original"":""this morning"",""year"":2025,""month"":4,""day"":11,""period"":""Morning"",""note"":""Inferred current date from boundary term.""},{""original"":""by end of day tomorrow"",""year"":2025,""month"":4,""day"":12,""day_of_week"":6,""week_number"":15,""period"":""Evening""},{""original"":""September"",""note"":""Failed to parse date string into specific components.""}]}
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Preparing to insert into files table with processed metadata...
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   File record created with ID: 9bff5ee7-cb72-4518-a332-aa7f086537ba
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Chunking text...
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Generated 1 chunks.
+Apr 11, 11:07:33 AM: f0fb5e7a INFO   Generating embeddings...
+Apr 11, 11:07:34 AM: f0fb5e7a INFO   Inserting 1 embedding records...
+Apr 11, 11:07:34 AM: f0fb5e7a INFO   Embedding records inserted successfully.
+Apr 11, 11:07:34 AM: f0fb5e7a INFO   DEBUG: Final retrieved_context count after potential re-ranking: 0
+Apr 11, 11:07:34 AM: f0fb5e7a Duration: 1199.12 ms	Memory Usage: 128 MB";
+T9;Store;I need to buy croissants from the Boulangerie Dumas on my way home. Don't forget!;Got it. Reminder set to buy croissants from Boulangerie Dumas on your way home.;"Apr 11, 11:08:02 AM: fdd0b1b1 INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 81,
+  entities: {
+    locations: [ 'Boulangerie Dumas' ],
+    topics: [ 'croissants' ],
+    type: 'reminder',
+    priority: 0
+  }
+}
+Apr 11, 11:08:02 AM: fdd0b1b1 INFO   Parsing dates with reference: 2025-04-11T09:08:02.141Z
+Apr 11, 11:08:02 AM: fdd0b1b1 INFO   Processed Metadata (Dates Enhanced): {""locations"":[""Boulangerie Dumas""],""topics"":[""croissants""],""type"":""reminder"",""priority"":0,""dates"":[]}
+Apr 11, 11:08:02 AM: fdd0b1b1 INFO   Processing 'store' mode...
+Apr 11, 11:08:02 AM: fdd0b1b1 INFO   Storing File Metadata: {""locations"":[""Boulangerie Dumas""],""topics"":[""croissants""],""type"":""reminder"",""priority"":0,""dates"":[]}
+Apr 11, 11:08:02 AM: fdd0b1b1 INFO   Preparing to insert into files table with processed metadata...
+Apr 11, 11:08:02 AM: fdd0b1b1 INFO   File record created with ID: 9cf1b40f-4af9-403a-b2c7-d26b4286e6be
+Apr 11, 11:08:02 AM: fdd0b1b1 INFO   Chunking text...
+Apr 11, 11:08:02 AM: fdd0b1b1 INFO   Generated 1 chunks.
+Apr 11, 11:08:02 AM: fdd0b1b1 INFO   Generating embeddings...
+Apr 11, 11:08:03 AM: fdd0b1b1 INFO   Inserting 1 embedding records...
+Apr 11, 11:08:03 AM: fdd0b1b1 INFO   Embedding records inserted successfully.
+Apr 11, 11:08:03 AM: fdd0b1b1 INFO   DEBUG: Final retrieved_context count after potential re-ranking: 0
+Apr 11, 11:08:03 AM: fdd0b1b1 Duration: 1049.27 ms	Memory Usage: 128 MB";
+T10;Store;Call Mom tomorrow.;Reminder saved: Call Mom tomorrow.;"Apr 11, 11:08:43 AM: c0899b3e INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 18,
+  entities: {
+    people: [ 'Mom' ],
+    dates: [ 'tomorrow' ],
+    type: 'reminder',
+    priority: 0
+  }
+}
+Apr 11, 11:08:43 AM: c0899b3e INFO   Parsing dates with reference: 2025-04-11T09:08:43.156Z
+Apr 11, 11:08:43 AM: c0899b3e INFO   Parsing date string: ""tomorrow"" with reference date: 2025-04-11T09:08:43.156Z
+Apr 11, 11:08:43 AM: c0899b3e INFO   Cleaned string: ""tomorrow"", Found qualifiers:
+Apr 11, 11:08:43 AM: c0899b3e INFO   Chrono identified text: ""tomorrow""
+Apr 11, 11:08:43 AM: c0899b3e INFO   Pattern matched: tomorrow
+Apr 11, 11:08:43 AM: c0899b3e INFO   Populating components from specific parsed date: 2025-04-12T09:08:43.156Z
+Apr 11, 11:08:43 AM: c0899b3e INFO   Final parsed components: {""original"":""tomorrow"",""year"":2025,""month"":4,""day"":12,""day_of_week"":6,""week_number"":15}
+Apr 11, 11:08:43 AM: c0899b3e INFO   Processed Metadata (Dates Enhanced): {""people"":[""Mom""],""type"":""reminder"",""priority"":0,""dates"":[{""original"":""tomorrow"",""year"":2025,""month"":4,""day"":12,""day_of_week"":6,""week_number"":15}]}
+Apr 11, 11:08:43 AM: c0899b3e INFO   Processing 'store' mode...
+Apr 11, 11:08:43 AM: c0899b3e INFO   Storing File Metadata: {""people"":[""Mom""],""type"":""reminder"",""priority"":0,""dates"":[{""original"":""tomorrow"",""year"":2025,""month"":4,""day"":12,""day_of_week"":6,""week_number"":15}]}
+Apr 11, 11:08:43 AM: c0899b3e INFO   Preparing to insert into files table with processed metadata...
+Apr 11, 11:08:43 AM: c0899b3e INFO   File record created with ID: 93ac5473-b335-4b16-9e4b-1062f647703b
+Apr 11, 11:08:43 AM: c0899b3e INFO   Chunking text...
+Apr 11, 11:08:43 AM: c0899b3e INFO   Generated 1 chunks.
+Apr 11, 11:08:43 AM: c0899b3e INFO   Generating embeddings...
+Apr 11, 11:08:43 AM: c0899b3e INFO   Inserting 1 embedding records...
+Apr 11, 11:08:44 AM: c0899b3e INFO   Embedding records inserted successfully.
+Apr 11, 11:08:44 AM: c0899b3e INFO   DEBUG: Final retrieved_context count after potential re-ranking: 0
+Apr 11, 11:08:44 AM: c0899b3e Duration: 870.84 ms	Memory Usage: 128 MB";
+T11;Store;"""Subject: Project Phoenix - Weekly Update (April 10, 2025) Team, This week saw significant progress across multiple workstreams for Project Phoenix. The frontend team, led by Anya Sharma, completed the integration of the new charting library (Chart.js v4) into the main dashboard component. Initial testing looks positive, resolving the previous performance bottlenecks we observed during peak load simulations last month. User acceptance testing (UAT) is scheduled to begin next Monday, April 14th, at the Waterfront Tech Park facility. Please ensure all prerequisites listed in the UAT plan document (shared via Confluence) are met by Friday EOD. The backend team, under David Lee's supervision, deployed the optimized database query (search_optimized_v3) to the staging environment late yesterday evening (around 11 PM PST). Preliminary results show a 30% reduction in average query latency for complex data retrieval operations. We need to monitor this closely over the next 48 hours before planning the production rollout, tentatively set for Wednesday, April 16th. Key dependencies include the successful completion of the related security audit by SecureSoft Inc., whose final report is expected by Tuesday afternoon. Lastly, the design team (Maria Garcia and Ben Carter) presented the final mockups for the mobile application interface. Feedback was overwhelmingly positive, focusing on the intuitive navigation and clean aesthetic. Minor adjustments based on stakeholder comments received during the review session held at the Mountain View Campus on April 8th will be incorporated, with final assets delivered by COB April 15th. Marketing has requested these assets for inclusion in the upcoming press release planned for the first week of May 2025. Please sync with Sandra Jones from Marketing if you foresee any delays. Let's maintain this momentum! Best, Project Lead.""";Stored. Logged the April 10, 2025 weekly update for Project Phoenix, covering major progress in frontend integration, backend optimization, UAT scheduling, design feedback, and key deadlines across multiple teams.;"Apr 11, 11:09:18 AM: 16964ee9 INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 1887,
+  entities: {
+    people: [
+      'Anya Sharma',
+      'David Lee',
+      'Maria Garcia',
+      'Ben Carter',
+      'Sandra Jones'
+    ],
+    dates: [
+      'April 10, 2025',
+      'April 14th',
+      'Friday EOD',
+      'yesterday evening',
+      'Wednesday, April 16th',
+      'Tuesday afternoon',
+      'April 8th',
+      'April 15th',
+      'first week of May 2025'
+    ],
+    locations: [ 'Waterfront Tech Park', 'Mountain View Campus' ],
+    organizations: [ 'SecureSoft Inc.' ],
+    topics: [
+      'Project Phoenix',
+      'Chart.js v4',
+      'dashboard component',
+      'user acceptance testing',
+      'search_optimized_v3',
+      'database query',
+      'security audit',
+      'mobile application interface',
+      'press release'
+    ],
+    type: 'project_update',
+    priority: 0
+  }
+}
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Parsing dates with reference: 2025-04-11T09:09:18.959Z
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Parsing date string: ""April 10, 2025"" with reference date: 2025-04-11T09:09:18.959Z
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Cleaned string: ""april 10, 2025"", Found qualifiers:
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Chrono identified text: ""april 10, 2025""
+Apr 11, 11:09:18 AM: 16964ee9 WARN   No specific date could be parsed or matched for ""april 10, 2025"".
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Final parsed components: {""original"":""April 10, 2025"",""note"":""Failed to parse date string into specific components.""}
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Parsing date string: ""April 14th"" with reference date: 2025-04-11T09:09:18.959Z
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Cleaned string: ""april 14th"", Found qualifiers:
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Chrono identified text: ""april 14th""
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Pattern matched: Month/Day only (using year 2025)
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Populating components from specific parsed date: 2025-04-14T00:00:00.000Z
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Final parsed components: {""original"":""April 14th"",""year"":2025,""month"":4,""day"":14,""day_of_week"":1,""week_number"":16}
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Parsing date string: ""Friday EOD"" with reference date: 2025-04-11T09:09:18.959Z
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Cleaned string: ""friday"", Found qualifiers: EOD
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Chrono identified text: ""friday""
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Pattern matched standalone weekday (assuming next): friday
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Populating components from specific parsed date: 2025-04-18T09:09:18.959Z
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Period determined: Evening
+Apr 11, 11:09:18 AM: 16964ee9 INFO   Final parsed components: {""original"":""Friday EOD"",""year"":2025,""month"":4,""day"":18,""day_of_week"":5,""week_number"":16,""period"":""Evening""}
+";
+T12;Store;Let's schedule the follow-up meeting sometime early next year.;Stored. Reminder set to schedule the follow-up meeting sometime early next year.;"Apr 11, 11:10:18 AM: 5b81577b INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 62,
+  entities: {
+    topics: [ 'follow-up meeting' ],
+    dates: [ 'early next year' ],
+    type: 'reminder',
+    priority: 0
+  }
+}
+Apr 11, 11:10:18 AM: 5b81577b INFO   Parsing dates with reference: 2025-04-11T09:10:18.065Z
+Apr 11, 11:10:18 AM: 5b81577b INFO   Parsing date string: ""early next year"" with reference date: 2025-04-11T09:10:18.065Z
+Apr 11, 11:10:18 AM: 5b81577b INFO   Cleaned string: ""next year"", Found qualifiers: EARLY
+Apr 11, 11:10:18 AM: 5b81577b INFO   Chrono identified text: ""next year""
+Apr 11, 11:10:18 AM: 5b81577b WARN   No specific date could be parsed or matched for ""next year"".
+Apr 11, 11:10:18 AM: 5b81577b INFO   Final parsed components: {""original"":""early next year"",""note"":""Failed to parse date string into specific components.""}
+Apr 11, 11:10:18 AM: 5b81577b INFO   Processed Metadata (Dates Enhanced): {""topics"":[""follow-up meeting""],""type"":""reminder"",""priority"":0,""dates"":[{""original"":""early next year"",""note"":""Failed to parse date string into specific components.""}]}
+Apr 11, 11:10:18 AM: 5b81577b INFO   Processing 'store' mode...
+Apr 11, 11:10:18 AM: 5b81577b INFO   Storing File Metadata: {""topics"":[""follow-up meeting""],""type"":""reminder"",""priority"":0,""dates"":[{""original"":""early next year"",""note"":""Failed to parse date string into specific components.""}]}
+Apr 11, 11:10:18 AM: 5b81577b INFO   Preparing to insert into files table with processed metadata...
+Apr 11, 11:10:18 AM: 5b81577b INFO   File record created with ID: f65d8217-4938-4292-ad3f-e2bd7887f5a3
+Apr 11, 11:10:18 AM: 5b81577b INFO   Chunking text...
+Apr 11, 11:10:18 AM: 5b81577b INFO   Generated 1 chunks.
+Apr 11, 11:10:18 AM: 5b81577b INFO   Generating embeddings...
+Apr 11, 11:10:18 AM: 5b81577b INFO   Inserting 1 embedding records...
+Apr 11, 11:10:18 AM: 5b81577b INFO   Embedding records inserted successfully.
+Apr 11, 11:10:18 AM: 5b81577b INFO   DEBUG: Final retrieved_context count after potential re-ranking: 0
+Apr 11, 11:10:18 AM: 5b81577b Duration: 845.34 ms	Memory Usage: 129 MB";
+T13;Store;Although the initial proposal submitted by Tech Solutions Inc. last Tuesday was rejected, the revised plan, which addresses the concerns raised by Mr. David Robertson during the review meeting at the London office, looks promising for approval next month.;Stored. Noted that Tech Solutions Inc.'s revised proposal—addressing concerns from Mr. David Robertson during the review at the London office—is now looking promising for approval next month;"Apr 11, 11:10:45 AM: d8473c8b INFO   Parsed Payload: {
+  mode: 'store',
+  text_length: 255,
+  entities: {
+    people: [ 'Mr. David Robertson' ],
+    dates: [ 'last Tuesday', 'next month' ],
+    locations: [ 'London office' ],
+    organizations: [ 'Tech Solutions Inc.' ],
+    topics: [
+      'initial proposal',
+      'revised plan',
+      'review meeting',
+      'approval'
+    ],
+    type: 'note',
+    priority: 0
+  }
+}
+Apr 11, 11:10:45 AM: d8473c8b INFO   Parsing dates with reference: 2025-04-11T09:10:45.832Z
+Apr 11, 11:10:45 AM: d8473c8b INFO   Parsing date string: ""last Tuesday"" with reference date: 2025-04-11T09:10:45.832Z
+Apr 11, 11:10:45 AM: d8473c8b INFO   Cleaned string: ""last tuesday"", Found qualifiers:
+Apr 11, 11:10:45 AM: d8473c8b INFO   Chrono identified text: ""last tuesday""
+Apr 11, 11:10:45 AM: d8473c8b INFO   Pattern matched: last/previous tuesday
+Apr 11, 11:10:45 AM: d8473c8b INFO   Populating components from specific parsed date: 2025-04-08T09:10:45.832Z
+Apr 11, 11:10:45 AM: d8473c8b INFO   Final parsed components: {""original"":""last Tuesday"",""year"":2025,""month"":4,""day"":8,""day_of_week"":2,""week_number"":15}
+Apr 11, 11:10:45 AM: d8473c8b INFO   Parsing date string: ""next month"" with reference date: 2025-04-11T09:10:45.832Z
+Apr 11, 11:10:45 AM: d8473c8b INFO   Cleaned string: ""next month"", Found qualifiers:
+Apr 11, 11:10:45 AM: d8473c8b INFO   Chrono identified text: ""next month""
+Apr 11, 11:10:45 AM: d8473c8b WARN   No specific date could be parsed or matched for ""next month"".
+Apr 11, 11:10:45 AM: d8473c8b INFO   Final parsed components: {""original"":""next month"",""note"":""Failed to parse date string into specific components.""}
+Apr 11, 11:10:45 AM: d8473c8b INFO   Processed Metadata (Dates Enhanced): {""people"":[""Mr. David Robertson""],""locations"":[""London office""],""topics"":[""initial proposal"",""revised plan"",""review meeting"",""approval""],""type"":""note"",""priority"":0,""dates"":[{""original"":""last Tuesday"",""year"":2025,""month"":4,""day"":8,""day_of_week"":2,""week_number"":15},{""original"":""next month"",""note"":""Failed to parse date string into specific components.""}]}
+Apr 11, 11:10:45 AM: d8473c8b INFO   Processing 'store' mode...
+Apr 11, 11:10:45 AM: d8473c8b INFO   Storing File Metadata: {""people"":[""Mr. David Robertson""],""locations"":[""London office""],""topics"":[""initial proposal"",""revised plan"",""review meeting"",""approval""],""type"":""note"",""priority"":0,""dates"":[{""original"":""last Tuesday"",""year"":2025,""month"":4,""day"":8,""day_of_week"":2,""week_number"":15},{""original"":""next month"",""note"":""Failed to parse date string into specific components.""}]}
+Apr 11, 11:10:45 AM: d8473c8b INFO   Preparing to insert into files table with processed metadata...
+Apr 11, 11:10:46 AM: d8473c8b INFO   File record created with ID: 1bbfc571-115c-4150-a17f-742b65da60f7
+Apr 11, 11:10:46 AM: d8473c8b INFO   Chunking text...
+Apr 11, 11:10:46 AM: d8473c8b INFO   Generated 1 chunks.
+Apr 11, 11:10:46 AM: d8473c8b INFO   Generating embeddings...
+Apr 11, 11:10:46 AM: d8473c8b INFO   Inserting 1 embedding records...
+Apr 11, 11:10:46 AM: d8473c8b INFO   Embedding records inserted successfully.
+Apr 11, 11:10:46 AM: d8473c8b INFO   DEBUG: Final retrieved_context count after potential re-ranking: 0
+Apr 11, 11:10:46 AM: d8473c8b Duration: 610.45 ms	Memory Usage: 129 MB";

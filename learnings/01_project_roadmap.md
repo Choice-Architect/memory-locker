@@ -106,17 +106,19 @@
     *   **Findings:** Extraction of `people`, `locations`, `topics`, `type`, `sentiment`, `language`, `priority`, `organizations` meets requirements.
     *   **Status:** Stable baseline.
 
-4.  **Refactor Date Parsing (`store` mode) (v1.5 - Completed):**
-    *   **Goal:** Reliably extract accurate date/time **components** (year, month, day, week_number, period, etc.) for storage in metadata, resolving issues from previous attempts.
-    *   **Approach (Pattern-Driven):** Refactored `parseDateStringToEnhanced` in `memory-action.ts` to:
-        1.  Strip defined qualifiers.
-        2.  Use `chrono-node` primarily to identify the date text phrase.
-        3.  Use pattern matching (regex/string checks) on the identified phrase.
-        4.  Based on the pattern, use `date-fns` directly to calculate components.
-        5.  Populate only the reliably calculated components into `EnhancedNormalizedDate`.
-        6.  Remove the generation of the `normalized` ISO string.
-    *   (Full details in `learnings/02_enhancement_plan.md`, v1.5 section).
-    *   **Rationale:** Created a more robust and maintainable date component extraction system focused on the primary goal, avoiding complex interpretation of `chrono-node` internals and removing unused `normalized` string logic.
+4.  **Refactor Date Parsing (`store` mode) (v1.6 - Completed):**
+    *   **Goal:** Reliably extract accurate date/time **components** (year, month, day, week_number, period, etc.) for storage in metadata, resolving issues from previous attempts. Implement filtering to discard fully failed parses.
+    *   **Approach (Pattern-Driven v1.6):** Further enhanced `parseDateStringToEnhanced` in `memory-action.ts` based on analysis (`learnings/06_date_parsing_analysis_v1.5.md`):
+        1.  Maintained qualifier stripping and chrono-node for phrase identification.
+        2.  Significantly expanded and refined pattern matching logic for:
+            *   Specific full dates (using `date-fns.parse`).
+            *   Combined relative dates and periods (e.g., "yesterday afternoon").
+            *   Relative/standalone months and years (using `add/subMonths`, `add/subYears`).
+            *   Boundary phrases (e.g., "start of next month", using `start/endOfMonth`, etc.).
+        3.  Prioritized pattern matching order (specific before general).
+        4.  Added logic to filter out `EnhancedNormalizedDate` objects where parsing completely failed (indicated by a note starting with "Failed..."), preventing storage of only the original string.
+    *   (Full details in `learnings/02_enhancement_plan.md`, v1.6 section, and analysis in `learnings/06_date_parsing_analysis_v1.5.md`).
+    *   **Rationale:** Addressed parsing failures identified in v1.5 testing, creating a more comprehensive and robust date component extraction system. Filtering ensures cleaner metadata.
     *   **Status:** **Completed.**
 
 5.  **Future Considerations (Backlog):**
