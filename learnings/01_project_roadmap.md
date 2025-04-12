@@ -62,9 +62,9 @@
 
 1.  **Custom GPT Creation:** Created GPT shell (name, description, etc.).
 2.  **Instruction Authoring (`learnings/02_gpt_instructions.md`):** Defined persona, purpose, behavior. Key instructions included entity extraction.
-    *   **v1.7 Update Needed:** Modify instructions to ask the GPT to provide *both* original date strings and normalized `YYYY-MM-DD` versions where possible (Ref: `learnings/02_enhancement_plan.md` v1.7).
+    *   **v1.7 Update Needed:** Modify instructions to ask the GPT to provide *both* original date strings and normalized `"Month DD, YYYY"` versions where possible (e.g., `"April 15, 2025"`), using the *start date* for ranges/seasons. (Ref: `learnings/02_enhancement_plan.md` v1.7).
 3.  **Action Schema Definition (`openapi.json`):** Created OpenAPI spec.
-    *   **v1.7 Update Needed:** Modify the `entities.dates` schema to accept `string | {original: string, normalized?: string}`. Update `EnhancedNormalizedDate` in response to only include components (no `original`, no `note`). (Ref: `learnings/02_enhancement_plan.md` v1.7).
+    *   **v1.7 Update Needed:** Modify the `entities.dates` schema to accept `string | {original: string, normalized?: string}` (where `normalized` is a string like `"Month DD, YYYY"`). Update `EnhancedNormalizedDate` in the response to only include components (no `original`, no `note`). (Ref: `learnings/02_enhancement_plan.md` v1.7).
 4.  **Action Configuration:** Configured API key authentication.
 
 ---
@@ -82,26 +82,26 @@
 
 **Objective:** Improve date handling reliability and maintain query relevance.
 
-1.  **(Obsolete) Previous Date Refactoring Attempts:** v1.4, v1.5, v1.6 involved iterative refinement of pattern-matching within the Netlify function, which proved complex and incomplete.
+1.  **(Obsolete) Previous Date Refactoring Attempts:** Versions older than v1.7 involved iterative refinement of pattern-matching within the Netlify function, which proved complex and incomplete. v1.7 adopts a new hybrid approach.
 
 2.  **Implement Relevance Boosting (Completed v1.3):**
-    *   **Status:** Completed and remains the core query strategy. Relies on accurately stored date components.
+    *   **Status:** Implemented and remains the core query strategy. Relies on accurately stored date components. We should revise the weighting when we work on query mode again.
 
 3.  **Non-Date Entity Extraction (Completed & Stable):**
-    *   **Status:** Stable baseline.
+    *   **Status:** Stable baseline. We should not implement changes to the store mode that would alter the way non-date entities are processed currently.
 
 4.  **Refactor Date Parsing (Hybrid Approach - v1.7):**
     *   **Goal:** Achieve reliable date/time component extraction by leveraging upstream GPT normalization and targeted Netlify function logic.
     *   **Approach (v1.7 - Hybrid):** (Ref: `learnings/02_enhancement_plan.md` v1.7)
-        1.  **GPT Task:** Update GPT instructions (`02_gpt_instructions.md`) to request normalized `YYYY-MM-DD` dates alongside original strings when possible.
+        1.  **GPT Task:** Update GPT instructions (`02_gpt_instructions.md`) to request normalized `"Month DD, YYYY"` dates alongside original strings when possible.
         2.  **Schema Update:** Update `openapi.json` to handle the new input/output date formats.
         3.  **Netlify Function (`memory-action.ts`):**
-            *   Refactor date processing to prioritize parsing the GPT-provided `normalized` `YYYY-MM-DD` using `date-fns` for core date components.
-            *   Implement separate, focused logic (`extractTimeInfo`) using regex/`chrono-node` to extract only time information (period, HH:MM) from the `original` string.
-            *   Implement fallback parsing logic (`handleFallbackParsing`) for dates the GPT couldn't normalize (using simplified v1.6 logic or potentially a future API call).
-            *   Correct the "Past Month/Day" inference logic.
+            *   Refactor date processing to prioritize parsing the GPT-provided `normalized` date (`"Month DD, YYYY"`) using `date-fns` (`parseNormalizedDate`).
+            *   Implement separate, focused logic (`extractTimeInfo`) using regex/`chrono-node` (time only) to extract time information (period, HH:MM) from the `original` string.
+            *   Implement a new, clean function (`parseOriginalStringDate`) using only `date-fns` to attempt parsing dates the GPT couldn't normalize. This replaces complex legacy logic.
+            *   Correct any "Past Month/Day" inference logic if applicable.
             *   Ensure only structured components (no `original` string) are stored in metadata.
-    *   **Rationale:** Simplifies the main parsing path, focuses Netlify logic on specific tasks (time extraction, fallbacks), maintains components needed for v1.3 query relevance.
+    *   **Rationale:** Simplifies the main parsing path, focuses Netlify logic on specific tasks (normalized date parsing, time extraction, simple original string parsing), maintains components needed for v1.3 query relevance, accepts limitations for ambiguous dates not normalized by GPT.
     *   **Status:** **Planned (Current Phase).**
 
 5.  **Future Considerations (Backlog):**

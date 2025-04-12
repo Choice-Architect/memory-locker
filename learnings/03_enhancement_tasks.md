@@ -1,12 +1,11 @@
 # Memory Locker: v1.7 Implementation Task List
 
 **Version:** 1.7
-**Date:** 2024-05-17
-**Associated Plan:** `learnings/02_enhancement_plan.md` (v1.7)
+**Associated Plan:** `learnings/02_enhancement_plan.md` (v1.7 - Revised)
 
-**Goal:** Implement the v1.7 hybrid date parsing strategy, leveraging upstream GPT normalization for common cases and using targeted Netlify function logic for time extraction and fallbacks.
+**Goal:** Implement the v1.7 hybrid date parsing strategy, leveraging upstream GPT normalization to `"Month DD, YYYY"` format and using targeted Netlify function logic (`parseNormalizedDate`, `extractTimeInfo`, `parseOriginalStringDate`).
 
-**Note:** Mark tasks as complete by changing `[ ]` to `[x]` as you progress through the implementation.
+**Note:** Mark tasks as complete by changing `[ ]` to `[x]` as you progress through the implementation. Ensure all code comments and documentation align with this v1.7 plan, removing references to older versions/approaches.
 
 ---
 
@@ -16,8 +15,8 @@
 
 1.  **[ ] Update Custom GPT Instructions (`learnings/02_gpt_instructions.md`):**
     *   Modify the instructions for date entity extraction.
-    *   Specifically instruct the GPT: "When you extract a date expression, if you can reliably normalize it to a specific date (like 'today' -> '2024-05-17', 'next Tuesday' -> '2024-05-21', 'last spring' -> '2024-03-01', 'first week of May 2025' -> '2025-05-01' etc., based on the current date), provide the result as a JSON object containing both the original text and the normalized date in `YYYY-MM-DD` format: `{"original": "...", "normalized": "YYYY-MM-DD"}`. Use the *start date* for ranges like weeks or seasons. If you cannot reliably normalize it (e.g., complex strings with specific times like 'April 28th, 2025, from 2:00 AM to 4:00 AM UTC'), provide only the original extracted string."
-    *   *(Self-Correction Note: Ensure GPT provides only the date part, as time extraction is handled by Netlify)*
+    *   Specifically instruct the GPT: "When you extract a date expression, if you can reliably normalize it to a specific date (like 'today' -> 'May 17, 2024', 'next Tuesday' -> 'May 21, 2024', 'last spring' -> 'March 01, 2024', 'first week of May 2025' -> 'May 01, 2025' etc., based on the current date), provide the result as a JSON object containing both the original text and the normalized date in `"Month DD, YYYY"` format: `{\"original\": \"...\", \"normalized\": \"Month DD, YYYY\"}`. Use the *start date* for ranges like weeks or seasons. If you cannot reliably normalize it (e.g., complex strings with specific times like 'April 28th, 2025, from 2:00 AM to 4:00 AM UTC'), provide only the original extracted string."
+    *   Verify examples match the target format.
 
 2.  **[ ] Update OpenAPI Schema (`openapi.json`):**
     *   Navigate to the `components.schemas.ExtractedEntities.properties.dates.items` definition.
@@ -30,9 +29,9 @@
               "type": "object",
               "properties": {
                 "original": { "type": "string" },
-                "normalized": { 
-                  "type": "string", 
-                  "format": "date" // YYYY-MM-DD
+                "normalized": {
+                  "type": "string" // Represents "Month DD, YYYY" format
+                  // Do NOT use "format": "date"
                 }
               },
               "required": ["original"]
@@ -41,7 +40,7 @@
         }
         ```
     *   Navigate to `components.schemas.EnhancedNormalizedDate` (used in the *response* `ContextObject`).
-    *   Ensure the `properties` include: `year` (integer), `month` (integer), `day` (integer), `day_of_week` (integer, optional), `week_number` (integer, optional), `period` (string, optional, e.g., "Morning", "Afternoon"), `time_hour` (integer, optional), `time_minute` (integer, optional), `time_second` (integer, optional).
+    *   Ensure the `properties` include: `year` (integer), `month` (integer, 1-12), `day` (integer), `day_of_week` (integer, 0-6), `week_number` (integer, optional), `period` (string, optional, e.g., "Morning", "Afternoon"), `time_hour` (integer, optional), `time_minute` (integer, optional), `time_second` (integer, optional).
     *   **Remove** the `original` property from this response schema definition.
     *   **Remove** the `note` property from this response schema definition.
     *   Validate the updated `openapi.json` schema.
@@ -56,14 +55,13 @@
           year?: number;
           month?: number; // 1-12
           day?: number;
-          day_of_week?: number; // 0-6 or 1-7, decide and be consistent
-          week_number?: number; 
+          day_of_week?: number; // 0-6 (Sun-Sat)
+          week_number?: number;
           period?: 'Morning' | 'Afternoon' | 'Evening' | 'Night'; // Or more specific if needed
           time_hour?: number; // 0-23
           time_minute?: number;
           time_second?: number;
-          // Add is_normalized?: boolean; // Optional flag for easier debugging?
-          // Add is_fallback?: boolean; // Optional flag for easier debugging?
+          // is_normalized?: boolean; // Optional flag?
         }
         ```
     *   Update `ContextObject` interface to use the new `EnhancedNormalizedDate`.
@@ -72,97 +70,86 @@
 4.  **[ ] Refactor Main Date Processing Loop (`store`/`combined` handler):**
     *   Locate the loop iterating through `payload.entities.dates`.
     *   Modify the loop variable type to `InputDateEntity`.
-    *   Inside the loop, initialize `parsedComponents: Partial<EnhancedNormalizedDate> = {};` and `let originalString: string;`.
+    *   Inside the loop, initialize `parsedComponents: Partial<EnhancedNormalizedDate> = {};`, `let originalString: string;`, `let datePart: Partial<EnhancedNormalizedDate> = {};`.
     *   Implement `if/else` block:
         ```typescript
         if (typeof dateEntity === 'string') {
           originalString = dateEntity;
-          // Call fallback parser ONLY for the date part initially
-          const fallbackDateParts = handleFallbackParsing(originalString, referenceDate); 
-          // Always try to extract time separately
-          const timeParts = extractTimeInfo(originalString);
-          parsedComponents = { ...fallbackDateParts, ...timeParts };
+          datePart = parseOriginalStringDate(originalString, referenceDate); // Use new fallback parser
         } else { // It's an object { original: string; normalized?: string }
           originalString = dateEntity.original;
           if (dateEntity.normalized) {
-            // Parse the reliable normalized date
-            const normalizedDateParts = parseNormalizedDate(dateEntity.normalized, referenceDate); 
-            // Always try to extract time separately from original string
-            const timeParts = extractTimeInfo(originalString);
-            parsedComponents = { ...normalizedDateParts, ...timeParts };
+            // Parse the reliable normalized date ("Month DD, YYYY")
+            datePart = parseNormalizedDate(dateEntity.normalized, referenceDate);
           } else {
-            // GPT provided object but couldn't normalize - use fallback for date
-             const fallbackDateParts = handleFallbackParsing(originalString, referenceDate);
-             const timeParts = extractTimeInfo(originalString);
-             parsedComponents = { ...fallbackDateParts, ...timeParts };
+            // GPT provided object but couldn't normalize - use new fallback parser
+             datePart = parseOriginalStringDate(originalString, referenceDate);
           }
         }
+        // Always try to extract time separately from original string
+        const timeParts = extractTimeInfo(originalString);
+        parsedComponents = { ...datePart, ...timeParts }; // Combine date and time parts
         ```
     *   Implement **Validation & Storage Logic**:
-        *   After the `if/else` block, check if `parsedComponents` contains essential date information (e.g., `parsedComponents.year && parsedComponents.month`).
+        *   After combining parts, check if `parsedComponents` contains essential date information (e.g., `parsedComponents.year && parsedComponents.month`).
         *   If valid, add `parsedComponents` to the `processedMetadata.dates` array.
-        *   Log a warning if parsing completely failed and the object is empty/invalid.
+        *   Log a warning if parsing failed to yield core date info.
         *   Ensure the `original` field is *not* included in the object added to `processedMetadata.dates`.
 
 5.  **[ ] Implement `parseNormalizedDate` Function:**
     *   Signature: `function parseNormalizedDate(normalizedDate: string, referenceDate: Date): Partial<EnhancedNormalizedDate>`
-    *   Use `dateFns.parse(normalizedDate, 'yyyy-MM-dd', referenceDate)` // Pass referenceDate here.
+    *   Use `dateFns.parse(normalizedDate, 'MMMM d, yyyy', referenceDate)`. **Important:** Verify 'MMMM d, yyyy' exactly matches GPT's output (e.g., is it "April 1, 2024" or "April 01, 2024"? Use 'd' vs 'dd'). Add error handling for `parse`.
     *   Extract `year`, `month` (add 1 for 1-12), `day`.
-    *   Use `dateFns.getDay` for `day_of_week` (check locale consistency, e.g., 0=Sun).
+    *   Use `dateFns.getDay` for `day_of_week` (0=Sun).
     *   Use `dateFns.getWeek` for `week_number` (check options for week start day).
-    *   **Implement Past Date Check:** (Defensive check, as YYYY-MM-DD is explicit) If logic were applied to Month/Day, use `dateFns.isBefore(parsedDate, dateFns.startOfDay(referenceDate))` to check if the parsed date is strictly before the reference date. If so, use `referenceDate`'s year.
-    *   Return the partial `EnhancedNormalizedDate` object with only date components.
+    *   Implement defensive "Past Date Check" if applicable (less likely with full date).
+    *   Return the partial `EnhancedNormalizedDate` object with *only date* components.
 
 6.  **[ ] Implement `extractTimeInfo` Function:**
     *   Signature: `function extractTimeInfo(originalString: string): Partial<EnhancedNormalizedDate>`
-    *   Use Regex first for common patterns:
-        *   `/\b(\d{1,2}:\d{2}(?::\d{2})?)\s?(am|pm)\b/i`: Extract HH:MM(:SS) and AM/PM. Convert hour to 24hr format, set `period`.
-        *   `/\b(\d{1,2}:\d{2}(?::\d{2})?)\b/`: Extract HH:MM(:SS) (assume 24hr if no AM/PM).
-        *   `/\b(morning)\b/i`: Set `period: 'Morning'`.
-        *   `/\b(afternoon)\b/i`: Set `period: 'Afternoon'`.
-        *   `/\b(evening|tonight)\b/i`: Set `period: 'Evening'`.
-        *   `/\b(night|midnight)\b/i`: Set `period: 'Night'`. (Handle midnight time?).
-        *   `/\b(eod|end of day|cob)\b/i`: Set `period: 'Evening'` (or a specific time?).
-    *   Consider using `chrono-node` on `originalString` as a secondary step if regex fails, but *only* extract time components (`parsedResult.start.get('hour')`, `get('minute')` etc.) if found. Be cautious of `chrono` inferring dates.
+    *   Use Regex first for common time patterns (HH:MM AM/PM, HH:MM 24hr) and periods ("morning", "afternoon", "evening", "night", "EOD"). Convert to 24hr, set `period`.
+    *   Optionally, use `chrono-node` on `originalString` *only if regex fails* as a secondary check. Extract *only time* components (`hour`, `minute`, `period`). Discard any date components `chrono` might infer.
     *   Return the partial `EnhancedNormalizedDate` object containing *only* time components (`period`, `time_hour`, `time_minute`, `time_second`).
 
-7.  **[ ] Implement `handleFallbackParsing` Function:**
-    *   Signature: `function handleFallbackParsing(originalString: string, referenceDate: Date): Partial<EnhancedNormalizedDate>`
-    *   **Goal:** Handle cases GPT *didn't* normalize (e.g., `"next Friday"`, `"Tuesday afternoon"`, `"April 28th, 2025, from 2:00 AM to 4:00 AM UTC"`). This is a **minor fallback**.
-    *   **Approach:** Start with the simplified v1.6 pattern-matching logic.
-        *   Attempt to parse specific full dates (strip time/timezone first if possible).
-        *   Attempt to parse relative weekdays (`next Friday`, `Monday`). Use `dateFns` `nextMonday`, `previousTuesday` etc.
-        *   Attempt other patterns *not* expected to be normalized by GPT (e.g., "3 weeks ago").
-    *   **Do NOT** duplicate logic already handled by `parseNormalizedDate` or `extractTimeInfo`. This function focuses on getting the core *date* when normalization failed.
-    *   **Crucially:** Call `extractTimeInfo(originalString)` internally and merge its results.
-    *   Return the partial `EnhancedNormalizedDate` object.
+7.  **[ ] Implement `parseOriginalStringDate` Function (New):**
+    *   Signature: `function parseOriginalStringDate(originalString: string, referenceDate: Date): Partial<EnhancedNormalizedDate>`
+    *   **Starts Fresh for v1.7.** No legacy code.
+    *   **Goal:** Attempt to parse core date components (Year, Month, Day) from strings *not* normalized by GPT.
+    *   **Tools:** Use ONLY `date-fns.parse`. Try common, unambiguous formats like 'MM/dd/yyyy', 'yyyy-MM-dd'. Do **NOT** use `chrono-node` here.
+    *   If `dateFns.parse` succeeds with a format:
+        *   Extract `year`, `month` (1-12), `day`, `day_of_week` (0-6), `week_number`.
+        *   Return the partial `EnhancedNormalizedDate` object with *only date* components.
+    *   If all attempted `dateFns.parse` calls fail:
+        *   Return an empty object `{}`. (Accepts limitation for ambiguous/unsupported formats).
 
 **Phase 3: Querying & Cleanup**
 
 8.  **[ ] Update Query Date Parsing (`query`/`combined` modes):**
-    *   Locate where `queryMetadata.dates` (dates extracted from the user's *query*) are processed before being used in `rerankResults`.
-    *   Apply a suitable parsing logic to convert these query date strings into the `EnhancedNormalizedDate` component structure. This likely involves calling `handleFallbackParsing` as query dates might be complex natural language.
+    *   Locate where `queryMetadata.dates` (date strings extracted from the user's *query*) are processed before `rerankResults`.
+    *   Apply the new v1.7 parsing strategy:
+        *   Call `parseOriginalStringDate(queryString, referenceDate)` to get date parts.
+        *   Call `extractTimeInfo(queryString)` to get time parts.
+        *   Combine results into an `EnhancedNormalizedDate` object structure for each query date string.
     *   Ensure the output structure matches the one used for stored dates.
 
 9.  **[ ] Verify `rerankResults` Logic:**
-    *   Confirm that the component field names used in the hierarchical date matching and past date boost logic within `rerankResults` exactly match the fields populated by `parseNormalizedDate`, `extractTimeInfo`, and `handleFallbackParsing`.
+    *   Confirm that the component field names used in hierarchical date matching (`year`, `month`, `day`) and any period/time matching within `rerankResults` exactly match the fields populated by the new v1.7 parsing functions.
 
-10. **[ ] Discuss Re-ranking Weights (Post-Implementation):**
-    *   Note: With more reliable date components, the date-based boosting (+0.05/+0.03/+0.01 for Day/Month/Year match, +0.10 for past date FTS) becomes more impactful.
-    *   Task: After implementation and testing, re-evaluate if these boost values are appropriate or if they need adjustment relative to the `initial_score` (similarity/rank) and other metadata boosts. No changes planned initially.
+10. **[ ] Review Re-ranking Weights (Post-Implementation):**
+    *   Task: After implementation and testing, re-evaluate if the existing boost values for date matching are appropriate given the potentially more reliable components. No changes planned initially.
 
 11. **[ ] Code Cleanup:**
-    *   Remove any obsolete helper functions, constants, or comments related to previous date parsing attempts (v1.4, v1.5, v1.6 specific logic replaced by v1.7 structure).
-    *   Remove the old `parseDateStringToEnhanced` function if it's fully replaced by the new structure.
+    *   Forensically remove *all* obsolete helper functions (e.g., old `parseDateStringToEnhanced`), constants, code comments, and documentation references related to previous date parsing attempts (v1.4-v1.6 specific logic, old fallback logic, YYYY-MM-DD format assumptions). Ensure a clean v1.7 implementation.
 
 **Phase 4: Testing**
 
-12. **[ ] Update Test Cases:**
-    *   Create new test cases (`testing/v1.7-test-cases.csv`?) covering:
-        *   Inputs expected to be normalized by GPT (verify `normalized` field is used).
-        *   Inputs with time elements (verify `extractTimeInfo` works correctly alongside normalized dates).
-        *   Inputs expected to *fail* GPT normalization and hit the fallback logic (verify `handleFallbackParsing` handles them acceptably).
+12. **[ ] Update/Create Test Cases:**
+    *   Create/update test cases (`testing/v1.7-date-tests.csv`?) covering:
+        *   Inputs normalized by GPT (e.g., `"April 11, 2025"`, `"June 01, 2024"`) -> Verify `parseNormalizedDate`.
+        *   Inputs with time elements (e.g., `"tomorrow morning"`, `"June 5, 2025 3pm"`) -> Verify `extractTimeInfo` works with date part.
+        *   Inputs *not* normalized by GPT but parseable by `date-fns` (e.g., `"05/25/2024"`, `"2024-12-31"`) -> Verify `parseOriginalStringDate`.
+        *   Inputs *not* normalized and *not* easily parseable (e.g., `"next weekend"`, `"around noon Tuesday"`) -> Verify they gracefully fail date parsing but might still yield time info from `extractTimeInfo`.
         *   Queries involving dates to test `rerankResults` with the new component structure.
-13. **[ ] Execute Tests & Analyze Results:** Run tests, check Netlify logs, verify stored metadata in Supabase.
+13. **[ ] Execute Tests & Analyze Results:** Run tests, check Netlify function logs, verify stored metadata components in Supabase are correct (year, month, day, period, time_hour etc. stored correctly, no `original` field).
 
---- 
+---
