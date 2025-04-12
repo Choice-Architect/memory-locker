@@ -1,0 +1,22 @@
+# netlify.toml
+
+# Basic build settings (optional, Netlify often auto-detects)
+[build]
+  # No build command needed for functions-only deploy usually
+  # command = "your-build-command"
+  # publish = "your-publish-directory"
+  functions = "netlify/functions"
+
+# Function settings
+[functions]
+  # Specify the directory containing Netlify functions
+  directory = "netlify/functions"
+  # Optional: Node.js runtime version
+  # node_bundler = "esbuild"
+  # included_files = ["path/to/your/data/**"]
+
+# Redirect rule for /memory-action as a redundancy
+[[redirects]]
+  from = "/memory-action"
+  to = "/.netlify/functions/memory-action"
+  status = 200 # Rewrite rule (acts like a proxy) 
