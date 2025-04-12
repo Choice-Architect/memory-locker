@@ -61,16 +61,14 @@ export type InputDateEntity = string | { original: string; normalized?: string; 
 
 // Interface for Enhanced Date Components (Stored in Metadata/Context)
 // REMOVED 'original' and 'note'. All properties are optional.
+// v1.7.1: REMOVED time_hour, time_minute, time_second. Only period remains.
 export interface EnhancedNormalizedDate {
     year?: number;           // e.g., 2024
     month?: number;          // e.g., 4 (1-12)
     day?: number;            // e.g., 2 (1-31)
     day_of_week?: number;    // e.g., 2 (0=Sun, 1=Mon, 2=Tue...)
     week_number?: number;    // e.g., 14 (ISO 8601 week number, 1-53)
-    time_hour?: number;      // e.g., 15 (0-23)
-    time_minute?: number;    // e.g., 0
-    time_second?: number;    // e.g., 0
-  period?: 'Morning' | 'Afternoon' | 'Evening' | 'Night'; // Derived periods
+    period?: 'Morning' | 'Afternoon' | 'Evening' | 'Night'; // Derived periods
 }
 
 interface ExtractedEntities { // Kept for Request Payload structure
@@ -262,121 +260,45 @@ function parseNormalizedDate(normalizedDateString: string, referenceDate: Date):
     }
 
 /**
- * v1.7: Extracts time-related information (period, HH:MM:SS) from the *original* user date string.
- * Uses regex primarily, potentially chrono-node as a limited fallback for time only.
- * @param originalString The raw date/time string provided by the user/GPT.
- * @returns A partial EnhancedNormalizedDate object with only time components.
+ * v1.7.1: Extracts ONLY the period of day (Morning, Afternoon, Evening, Night)
+ * from the original date/time string based on keywords.
+ * Does not attempt to parse specific hours or minutes.
+ *
+ * @param originalString The original date string provided by the user/GPT.
+ * @returns An object containing only the `period` if found, otherwise an empty object.
  */
 function extractTimeInfo(originalString: string): Partial<EnhancedNormalizedDate> {
-    console.log(`Extracting time info from original string: "${originalString}"`);
-    const result: Partial<EnhancedNormalizedDate> = {};
-    const lowerString = originalString.toLowerCase();
+    const lowerCaseString = originalString.toLowerCase();
+    const components: Partial<EnhancedNormalizedDate> = {};
 
-    // 1. Regex for Periods & Specific Times
-    let hour: number | undefined = undefined;
-    let minute: number = 0;
-    let second: number = 0;
-    let periodFromRegex: EnhancedNormalizedDate['period'] | undefined = undefined;
+    // Define keywords for periods
+    const periods = {
+        Morning: [/\bmorning\b/, /\b(?:am|a\.m\.)\b/],
+        Afternoon: [/\bafternoon\b/, /\bnoon\b/, /\b(?:pm|p\.m\.)\b/], // Treat PM as Afternoon/Evening
+        Evening: [/\bevening\b/, /\b(?:pm|p\.m\.)\b/, /\b(?:eod|cob)\b/], // EOD/COB likely Evening
+        Night: [/\bnight\b/, /\bmidnight\b/]
+    };
 
-    // Check for explicit periods first
-    if (lowerString.includes("morning")) periodFromRegex = 'Morning';
-    else if (lowerString.includes("afternoon") || lowerString.includes("cob")) periodFromRegex = 'Afternoon';
-    else if (lowerString.includes("evening") || lowerString.includes("eod")) periodFromRegex = 'Evening';
-    else if (lowerString.includes("night") || lowerString.includes("midnight")) periodFromRegex = 'Night';
-    else if (lowerString.includes("noon")) periodFromRegex = 'Afternoon';
-
-    // Check for HH:MM:SS AM/PM or 24hr format
-    const timeMatch = lowerString.match(/(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(am|pm)?/);
-    if (timeMatch) {
-        let matchedHour = parseInt(timeMatch[1], 10);
-        const matchedMinute = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
-        const matchedSecond = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
-        const ampm = timeMatch[4];
-
-        // Basic validation
-        if (matchedHour >= 0 && matchedHour <= 23 && matchedMinute >= 0 && matchedMinute <= 59 && matchedSecond >= 0 && matchedSecond <= 59) {
-             if (ampm === 'pm' && matchedHour >= 1 && matchedHour <= 11) {
-                hour = matchedHour + 12;
-                periodFromRegex = periodFromRegex || 'Afternoon'; // PM implies Afternoon/Evening/Night
-             } else if (ampm === 'am' && matchedHour === 12) { // 12 AM is 00 hours
-                 hour = 0;
-                 periodFromRegex = periodFromRegex || 'Night'; // AM implies Night/Morning
-             } else if (!ampm && matchedHour >= 0 && matchedHour <= 23) { // 24-hour format
-                 hour = matchedHour;
-             } else if (ampm === 'am' && matchedHour >= 1 && matchedHour <= 11) {
-                 hour = matchedHour;
-                 periodFromRegex = periodFromRegex || 'Morning';
-             }
-
-            if (hour !== undefined) {
-                 minute = matchedMinute;
-                 second = matchedSecond;
-                 console.log(`  -> Time parsed via regex: H=${hour}, M=${minute}, S=${second}, AM/PM=${ampm}`);
-            }
-        } else {
-            console.warn(`  -> Regex matched invalid time component: ${timeMatch[0]}`);
-        }
-    } else if (lowerString.includes("noon")) {
-        hour = 12;
-        minute = 0;
-        periodFromRegex = periodFromRegex || 'Afternoon';
-        console.log("  -> Time detected: noon");
-    } else if (lowerString.includes("midnight")) {
-        hour = 0;
-        minute = 0;
-        periodFromRegex = periodFromRegex || 'Night';
-        console.log("  -> Time detected: midnight");
+    // Check for period keywords (prioritize later periods if both AM/PM and keyword exist)
+    if (periods.Night.some(regex => regex.test(lowerCaseString))) {
+        components.period = 'Night';
+    } else if (periods.Evening.some(regex => regex.test(lowerCaseString))) {
+        components.period = 'Evening';
+    } else if (periods.Afternoon.some(regex => regex.test(lowerCaseString))) {
+        // If PM is found, but not Evening/Night keywords, default to Afternoon
+        components.period = 'Afternoon';
+    } else if (periods.Morning.some(regex => regex.test(lowerCaseString))) {
+        components.period = 'Morning';
     }
 
-    // 2. Chrono-node fallback (Use cautiously, only extract time)
-    if (hour === undefined) {
-        try {
-            const chronoResults = chrono.parse(originalString);
-            if (chronoResults.length > 0 && chronoResults[0].start?.isCertain('hour')) {
-                const chronoHour = chronoResults[0].start.get('hour');
-                const chronoMinute = chronoResults[0].start.get('minute') ?? 0;
-                const chronoSecond = chronoResults[0].start.get('second') ?? 0;
-                 if (chronoHour !== null && chronoHour !== undefined && chronoHour >= 0 && chronoHour <= 23 &&
-                    chronoMinute >= 0 && chronoMinute <= 59 &&
-                    chronoSecond >= 0 && chronoSecond <= 59) {
-                     hour = chronoHour;
-                     minute = chronoMinute;
-                     second = chronoSecond;
-                     console.log(`  -> Time extracted via chrono fallback: H=${hour}, M=${minute}, S=${second}`);
-                 } else {
-                     console.log("  -> Chrono fallback found time but components were invalid/uncertain.");
-                 }
-            } else {
-                 console.log("  -> Chrono fallback did not find certain time components.");
-            }
-        } catch (e) {
-            console.error("  -> Error during chrono fallback for time extraction:", e);
-        }
+    // Simple PM check to potentially override Morning to Afternoon if only PM is specified without other keywords
+    if (/\b(?:pm|p\.m\.)\b/.test(lowerCaseString) && components.period === 'Morning') {
+         components.period = 'Afternoon'; // Or Evening? Afternoon is safer default.
     }
 
-    // 3. Assign Components and Infer Period if needed
-    if (hour !== undefined) {
-        result.time_hour = hour;
-        result.time_minute = minute;
-        result.time_second = second;
-    }
-
-    if (periodFromRegex) {
-        result.period = periodFromRegex;
-    } else if (hour !== undefined) {
-        // Infer period from hour if not explicitly found
-        if (hour >= 5 && hour < 12) result.period = 'Morning';
-        else if (hour >= 12 && hour < 18) result.period = 'Afternoon';
-        else if (hour >= 18 && hour < 22) result.period = 'Evening';
-        else result.period = 'Night'; // 22:00-04:59
-    }
-
-    if (Object.keys(result).length > 0) {
-        console.log(`  -> Final time components extracted: ${JSON.stringify(result)}`);
-                 } else {
-        console.log("  -> No specific time components extracted.");
-    }
-    return result;
+     // Remove chrono-node usage as it's not needed for period-only extraction
+    // console.log(`     -> Final time components extracted: ${JSON.stringify(components)}`);
+    return components;
 }
 
 /**
@@ -757,11 +679,12 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                 const combinedComponents: Partial<EnhancedNormalizedDate> = { ...datePart, ...timePart };
 
                 // 5. Validation & Storage (v1.7 Logic)
-                // Store if we have at least year/month/day OR if we have *only* time components
+                // Store if we have at least year/month/day OR if we have *only* time components (i.e., just period now)
                 // (avoids storing empty objects if all parsing failed)
-                if (Object.keys(combinedComponents).length > 0 && 
+                if (Object.keys(combinedComponents).length > 0 &&
                     (combinedComponents.year || combinedComponents.month || combinedComponents.day ||
-                     (!combinedComponents.year && !combinedComponents.month && !combinedComponents.day && (combinedComponents.time_hour !== undefined || combinedComponents.period))))
+                     // v1.7.1: Check only for period if date components are missing
+                     (!combinedComponents.year && !combinedComponents.month && !combinedComponents.day && (combinedComponents.period))))
                 {
                     console.log(`  -> Storing combined components: ${JSON.stringify(combinedComponents)}`);
                     successfullyParsedDates.push(combinedComponents); // Add the valid, combined object
