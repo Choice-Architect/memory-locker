@@ -24,7 +24,7 @@ CREATE TABLE files (
     file_id TEXT,                               -- External reference ID
     file_unique_id TEXT,                        -- Another external reference ID
     file_path TEXT,                             -- Location path for the file
-    file_metadata JSONB,                        -- Flexible storage for additional metadata (e.g., people, dates (EnhancedNormalizedDate), locations, topics, type, sentiment, priority). Language removed.
+    file_metadata JSONB,                        -- Flexible storage for additional metadata (e.g., people, dates (as EnhancedNormalizedDate component objects), locations, topics, type, sentiment, priority). Language removed.
     mime_type TEXT,                             -- Technical file format (e.g., audio/mp3)
     file_extension TEXT,                        -- File extension (e.g., .jpg, .pdf)
     file_size_bytes INTEGER,                    -- File size in bytes
@@ -104,7 +104,7 @@ CREATE TABLE transcript_embeddings (
     chunk_index INTEGER,                        -- Position of chunk within original content
     embedding vector(1536),                     -- Vector embedding (1536 for OpenAI small model)
     embedding_model TEXT DEFAULT 'text-embedding-3-small', -- The specific OpenAI model used
-    metadata JSONB,                             -- Flexible additional metadata (mirrors file_metadata, includes created_at, chunk_index). Language removed.
+    metadata JSONB,                             -- Flexible additional metadata (mirrors file_metadata's component-only structure, includes created_at, chunk_index). Language removed.
     created_at TIMESTAMPTZ DEFAULT now(),       -- When embedding was created
     updated_at TIMESTAMPTZ                      -- When embedding was last updated
 );

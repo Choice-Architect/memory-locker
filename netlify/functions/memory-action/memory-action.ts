@@ -56,11 +56,12 @@ import * as chrono from 'chrono-node';
 
 // --- Interfaces for API Contract ---
 
-// REVISED Interface for Enhanced Date Handling with Components (v1.5)
-interface EnhancedNormalizedDate {
-    original: string;        // The original string like "last Tuesday afternoon"
-    note?: string;           // Explanation if partial or failed (e.g., "Partial parse: Day and period identified relative to reference date", "Failed to parse date string")
-    // --- Component Fields (all optional) ---
+// v1.7: Interface for the flexible date input from GPT
+export type InputDateEntity = string | { original: string; normalized?: string; };
+
+// Interface for Enhanced Date Components (Stored in Metadata/Context)
+// REMOVED 'original' and 'note'. All properties are optional.
+export interface EnhancedNormalizedDate {
     year?: number;           // e.g., 2024
     month?: number;          // e.g., 4 (1-12)
     day?: number;            // e.g., 2 (1-31)
@@ -69,13 +70,13 @@ interface EnhancedNormalizedDate {
     time_hour?: number;      // e.g., 15 (0-23)
     time_minute?: number;    // e.g., 0
     time_second?: number;    // e.g., 0
-    period?: 'Morning' | 'Afternoon' | 'Evening' | 'Night'; // Simplified Periods derived from boundary terms or time
+  period?: 'Morning' | 'Afternoon' | 'Evening' | 'Night'; // Derived periods
 }
 
-interface ExtractedEntities {
+interface ExtractedEntities { // Kept for Request Payload structure
     people?: string[];
-    // Input uses flexible date types, processed internally into EnhancedNormalizedDate
-    dates?: (string | { original: string; normalized?: string | null; note?: string })[]; // Allow basic normalized or string
+    // v1.7: Input uses flexible date types
+    dates?: InputDateEntity[];
     locations?: string[];
     topics?: string[];
     type?: string;
@@ -86,11 +87,11 @@ interface ExtractedEntities {
     [key: string]: any; // Allow flexible entity types
 }
 
-// Interface for entities AFTER internal processing (using EnhancedNormalizedDate)
+// Interface for entities AFTER internal processing (using v1.7 EnhancedNormalizedDate)
 // This is what gets stored in metadata and returned in context objects.
 interface ProcessedEntities {
     people?: string[];
-    dates?: EnhancedNormalizedDate[]; // Use the new enhanced structure
+    dates?: EnhancedNormalizedDate[]; // Use the v1.7 enhanced structure
     locations?: string[];
     topics?: string[];
     type?: string;
@@ -104,25 +105,24 @@ interface ProcessedEntities {
 interface RequestPayload {
     query_text: string;
     extracted_entities: ExtractedEntities; // Input uses the original ExtractedEntities
-    // user_id?: string; (Removed)
     mode: 'store' | 'query' | 'combined';
 }
 
 interface ContextObject {
     chunk: string;
-    timestamp: string; // ISO 8601 format (Could be chunk creation or file creation)
-    entities_in_chunk: ProcessedEntities; // Output uses ProcessedEntities with EnhancedNormalizedDate
-    file_id?: string; // Reference to the source file (Corrected: UUID as string)
-    chunk_id?: string; // Reference to the specific chunk (Corrected: UUID as string)
-    chunk_index?: number; // Added: Index of the chunk within its file
-    similarity?: number; // Added: Optional similarity score from vector search
-    rank?: number; // Added: Optional rank score from FTS
+    timestamp: string; // ISO 8601 format
+    entities_in_chunk: ProcessedEntities; // Output uses ProcessedEntities with v1.7 EnhancedNormalizedDate
+    file_id?: string; // UUID as string
+    chunk_id?: string; // UUID as string
+    chunk_index?: number;
+    similarity?: number;
+    rank?: number;
 }
 
 interface SuccessResponse {
     retrieved_context: ContextObject[];
     storage_status: string;
-    query_source: 'vector_store' | 'postgres_fallback' | 'postgres_fallback_metadata' | 'postgres_fallback_text' | 'none' | 'combined' | 'error'; // Added combined/error and specific fallbacks
+    query_source: 'vector_store' | 'postgres_fallback' | 'postgres_fallback_metadata' | 'postgres_fallback_text' | 'none' | 'combined' | 'error';
     message_for_gpt?: string;
     error: null;
 }
@@ -133,44 +133,42 @@ interface ErrorResponse {
 
 // Define interface for the structure returned by search_memory_chunks RPC
 interface SearchResultItem {
-    // id?: string; // Chunk ID from transcript_embeddings if returned by RPC (Corrected: UUID as string)
-    file_id: string; // Corrected: UUID as string
+    file_id: string; // UUID as string
     content_chunk: string;
     // Metadata from DB should now contain ProcessedEntities structure
     metadata?: ProcessedEntities & { created_at?: string; [key: string]: any };
     similarity?: number;
-    chunk_index?: number; // Added this field here too
+    chunk_index?: number;
 }
 
 // Define interface for the structure returned by the fallback files query
 interface FallbackResultItem {
-    id: string; // Corrected: UUID as string
+    id: string; // UUID as string
     transcript_text: string;
     created_at: string | null;
     // file_metadata from DB should now contain ProcessedEntities structure
     file_metadata: ProcessedEntities | null;
-    rank?: number; // Added: Optional rank score from FTS
+    rank?: number;
 }
 
 // Interface for internal re-ranking
 interface ScoredContextObject extends ContextObject {
-    initial_score: number; // Combined vector similarity or FTS rank
-    metadata_boost_score: number; // Calculated boost
-    final_score: number;  // Score after boost
+    initial_score: number;
+    metadata_boost_score: number;
+    final_score: number;
 }
 
 // --- Constants ---
 const EMBEDDING_MODEL = 'text-embedding-3-small';
-const EMBEDDING_DIMENSIONS = 1536; // Dimension for text-embedding-3-small
-const CHUNK_SIZE = 1000; // Target size in characters
-const CHUNK_OVERLAP = 200; // Overlap in characters
-const VECTOR_MATCH_THRESHOLD = 0.5; // Similarity threshold for vector search (Lowered from 0.75)
-const VECTOR_MATCH_COUNT = 15;     // Max number of chunks to retrieve via vector search (Updated for re-ranking)
-const FALLBACK_MATCH_COUNT = 20; // Max number of files to retrieve via FTS fallback (Updated for re-ranking)
-const FINAL_MATCH_COUNT = 5;     // Final number of results to return after re-ranking
-const STORAGE_REFERENCE_DATE = new Date('2025-04-06T12:00:00Z'); // Fixed reference for storing test data
+const EMBEDDING_DIMENSIONS = 1536;
+const CHUNK_SIZE = 1000;
+const CHUNK_OVERLAP = 200;
+const VECTOR_MATCH_THRESHOLD = 0.5;
+const VECTOR_MATCH_COUNT = 15;
+const FALLBACK_MATCH_COUNT = 20;
+const FINAL_MATCH_COUNT = 5;
 
-// Simple list of common English stop words
+// Simple list of common English stop words - Keep as is
 const STOP_WORDS = new Set([
     'a', 'about', 'above', 'after', 'again', 'against', 'all', 'am', 'an', 'and', 'any', 'are', 'aren\'t', 'as', 'at',
     'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both', 'but', 'by', 'can\'t', 'cannot',
@@ -205,7 +203,7 @@ const initializeClients = () => {
         }
         supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
              auth: {
-                persistSession: false // Recommended for serverless functions
+                persistSession: false
             }
         });
     }
@@ -220,8 +218,7 @@ const initializeClients = () => {
 // --- Utility Functions ---
 
 /**
- * Checks if there's any overlap between two arrays.
- * Case-insensitive comparison for strings.
+ * Checks if there's any overlap between two arrays. Case-insensitive for strings.
  */
 function checkOverlap(arr1?: any[], arr2?: any[]): boolean {
     if (!arr1 || !arr2) return false;
@@ -229,376 +226,222 @@ function checkOverlap(arr1?: any[], arr2?: any[]): boolean {
     return arr2.some(item => set1.has(typeof item === 'string' ? item.toLowerCase() : item));
 }
 
+// --- START: v1.7 Date Parsing Helper Functions ---
+
 /**
- * REFACTORED (v1.6): Parses a natural language date/time string into components
- * using chrono-node for identification and enhanced pattern matching + date-fns.
- * Addresses failures from v1.5.
- * @param dateString The raw date string from user input or entities.
- * @param referenceDate The reference date (usually now) for resolving relative dates.
- * @returns An EnhancedNormalizedDate object with extracted components.
+ * v1.7: Parses a date string in "Month DD, YYYY" format using date-fns.
+ * @param normalizedDateString The date string (e.g., "April 11, 2025").
+ * @param referenceDate The reference date (currently unused for this format).
+ * @returns A partial EnhancedNormalizedDate object with date components, or empty if parsing fails.
  */
-function parseDateStringToEnhanced(dateString: string, referenceDate: Date): EnhancedNormalizedDate {
-    console.log(`Parsing date string: "${dateString}" with reference date: ${referenceDate.toISOString()}`);
-    const result: EnhancedNormalizedDate = { original: dateString };
+function parseNormalizedDate(normalizedDateString: string, referenceDate: Date): Partial<EnhancedNormalizedDate> {
+    console.log(`Parsing normalized date string: "${normalizedDateString}"`);
+    const result: Partial<EnhancedNormalizedDate> = {};
+    try {
+        // Use 'MMMM d, yyyy' to handle single-digit days correctly (e.g., "May 1, 2025")
+        const parsedDate = dateFnsParse(normalizedDateString, 'MMMM d, yyyy', referenceDate);
 
-    // 1. Define and Strip Qualifiers (Keep as is)
-    const qualifiers = [
-        "first week of", "last two weeks of", "end of day", "end of the day", "by end of day",
-        "this morning", "this afternoon", "this evening", "tonight",
-        "early", "late", "around", "before", "after", "by", "on", "at", "in", "for", "EOD", "COB"
-    ];
-    let cleanedDateString = dateString.toLowerCase();
-    const foundQualifiers: string[] = [];
-    qualifiers.forEach(q => {
-        const regex = new RegExp(`\\b${q}\\b`, 'gi');
-        if (regex.test(cleanedDateString)) {
-            foundQualifiers.push(q.toUpperCase());
-            cleanedDateString = cleanedDateString.replace(regex, '').trim();
-        }
-    });
-    cleanedDateString = cleanedDateString.replace(/\s+/g, ' ').trim();
-    console.log(`Cleaned string: "${cleanedDateString}", Found qualifiers: ${foundQualifiers.join(', ')}`);
-
-    // Determine period early if specific boundary qualifiers were found
-    let periodFromQualifier: EnhancedNormalizedDate['period'] | undefined = undefined;
-    if (foundQualifiers.includes("EOD") || foundQualifiers.includes("END OF DAY") || foundQualifiers.includes("BY END OF DAY") || foundQualifiers.includes("TONIGHT")) {
-        periodFromQualifier = 'Evening';
-    } else if (foundQualifiers.includes("COB") || foundQualifiers.includes("THIS AFTERNOON")) {
-        periodFromQualifier = 'Afternoon';
-    } else if (foundQualifiers.includes("THIS MORNING")) {
-        periodFromQualifier = 'Morning';
-    }
-
-    // 2. Date Phrase Identification (Leverage Chrono - Keep as is)
-    const chronoResults = chrono.parse(cleanedDateString, referenceDate, { forwardDate: true });
-
-    if (chronoResults.length === 0) {
-        console.warn(`Chrono failed to parse cleaned string: "${cleanedDateString}".`);
-        // Try basic boundary check on original string if chrono fails completely
-        if (periodFromQualifier) {
-            result.year = getYear(referenceDate);
-            result.month = getMonth(referenceDate) + 1;
-            result.day = getDate(referenceDate);
-            result.period = periodFromQualifier;
-            result.note = "Inferred current date from boundary term.";
-            console.log("Set current date based on boundary term in original string (Chrono failed).");
+        if (isValid(parsedDate)) {
+            console.log(`  -> Successfully parsed to date: ${parsedDate.toISOString()}`);
+            result.year = getYear(parsedDate);
+            result.month = getMonth(parsedDate) + 1; // Adjust to 1-12
+            result.day = getDate(parsedDate);
+            result.day_of_week = getDay(parsedDate); // 0=Sun, 6=Sat
+            try {
+                result.week_number = getWeek(parsedDate, { weekStartsOn: 1 }); // ISO week number (Monday=1)
+            } catch (e) {
+                console.warn(`Could not determine week number for ${normalizedDateString}:`, e);
+            }
         } else {
-            result.note = "Failed to parse date string.";
+            console.warn(`  -> Failed to parse normalized date string: "${normalizedDateString}" using format 'MMMM d, yyyy'.`);
+        }
+    } catch (e) {
+        console.error(`Error parsing normalized date string "${normalizedDateString}":`, e);
         }
         return result;
     }
 
-    const parsedResult = chronoResults[0];
-    const identifiedText = parsedResult.text.toLowerCase();
-    console.log(`Chrono identified text: "${identifiedText}"`);
+/**
+ * v1.7: Extracts time-related information (period, HH:MM:SS) from the *original* user date string.
+ * Uses regex primarily, potentially chrono-node as a limited fallback for time only.
+ * @param originalString The raw date/time string provided by the user/GPT.
+ * @returns A partial EnhancedNormalizedDate object with only time components.
+ */
+function extractTimeInfo(originalString: string): Partial<EnhancedNormalizedDate> {
+    console.log(`Extracting time info from original string: "${originalString}"`);
+    const result: Partial<EnhancedNormalizedDate> = {};
+    const lowerString = originalString.toLowerCase();
 
-    // 3. Pattern Matching & Component Calculation (v1.6 Enhancements)
-    let parsedDate: Date | null = null;
-    let isRelativeBoundary = false; // Flag for patterns that define a range start/end but not a specific day
-    let isAmbiguousMonthOrYear = false; // Flag for month/year patterns without a specific day
-    // Declare potentially scoped variables here
-    let unit: string | undefined = undefined;
-    let boundary: string | undefined = undefined;
-    let direction: string | undefined = undefined;
+    // 1. Regex for Periods & Specific Times
+    let hour: number | undefined = undefined;
+    let minute: number = 0;
+    let second: number = 0;
+    let periodFromRegex: EnhancedNormalizedDate['period'] | undefined = undefined;
 
-    // --- Pattern Matching (Order matters: More specific first) ---
+    // Check for explicit periods first
+    if (lowerString.includes("morning")) periodFromRegex = 'Morning';
+    else if (lowerString.includes("afternoon") || lowerString.includes("cob")) periodFromRegex = 'Afternoon';
+    else if (lowerString.includes("evening") || lowerString.includes("eod")) periodFromRegex = 'Evening';
+    else if (lowerString.includes("night") || lowerString.includes("midnight")) periodFromRegex = 'Night';
+    else if (lowerString.includes("noon")) periodFromRegex = 'Afternoon';
 
-    // 3.1 Specific Full Dates (Using date-fns parse)
-    const specificDateFormats = [
-        'yyyy-MM-dd', 'MM/dd/yyyy', 'M/d/yyyy', 'yyyy/MM/dd',
-        'dd MMM yyyy', 'd MMM yyyy', // 10 Jan 2025
-        'MMM dd, yyyy', 'MMM d, yyyy', // Jan 10, 2025
-        'MMMM dd, yyyy', 'MMMM d, yyyy', // January 10, 2025
-        'dd MMMM yyyy', 'd MMMM yyyy', // 10 January 2025
-        // With ordinals (requires careful handling or pre-processing typically)
-        // 'MMM do, yyyy', // Jan 10th, 2025 - date-fns parse might struggle, requires 'do' token
-        // 'MMMM do, yyyy' // January 10th, 2025
-    ];
-    // Attempt to strip ordinals crudely for parsing
-    const textWithoutOrdinals = identifiedText.replace(/(?<=\d)(st|nd|rd|th)/g, '');
+    // Check for HH:MM:SS AM/PM or 24hr format
+    const timeMatch = lowerString.match(/(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(am|pm)?/);
+    if (timeMatch) {
+        let matchedHour = parseInt(timeMatch[1], 10);
+        const matchedMinute = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+        const matchedSecond = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
+        const ampm = timeMatch[4];
 
-    for (const format of specificDateFormats) {
-        try {
-            // Try parsing the text (without ordinals first)
-            let potentialDate = dateFnsParse(textWithoutOrdinals, format, referenceDate);
-            if (isValid(potentialDate)) {
-                parsedDate = potentialDate;
-                console.log(`Pattern matched specific date format: ${format}`);
-                break; // Found a valid specific date
-            }
-        } catch (e) { /* Ignore parse errors, try next format */ }
-    }
-
-    // 3.2 Relative Day/Weekday + Period Combinations
-    if (!parsedDate) {
-        const simpleRelativeMatch = identifiedText.match(/^(today|tomorrow|yesterday)/);
-        const weekdayRelativeMatch = identifiedText.match(/^(next|last|previous)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
-        const standaloneWeekdayMatch = identifiedText.match(/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/);
-
-        let baseDate: Date | null = null;
-        let periodText = '';
-
-        if (simpleRelativeMatch) {
-            const term = simpleRelativeMatch[0];
-            if (term === 'today') baseDate = referenceDate;
-            else if (term === 'tomorrow') baseDate = addDays(referenceDate, 1);
-            else if (term === 'yesterday') baseDate = subDays(referenceDate, 1);
-            periodText = identifiedText.substring(term.length).trim();
-            if(baseDate) console.log(`Pattern matched base: ${term}`);
-        } else if (weekdayRelativeMatch) {
-            const direction = weekdayRelativeMatch[1]; // next, last, previous
-            const day = weekdayRelativeMatch[2];
-            if (direction === 'next') {
-                if (day === 'monday') baseDate = nextMonday(referenceDate);
-                else if (day === 'tuesday') baseDate = nextTuesday(referenceDate);
-                // ... etc for other days
-                else if (day === 'sunday') baseDate = nextSunday(referenceDate);
-            } else { // last or previous
-                if (day === 'monday') baseDate = previousMonday(referenceDate);
-                else if (day === 'tuesday') baseDate = previousTuesday(referenceDate);
-                 // ... etc for other days
-                else if (day === 'sunday') baseDate = previousSunday(referenceDate);
-            }
-            periodText = identifiedText.substring(weekdayRelativeMatch[0].length).trim();
-             if(baseDate) console.log(`Pattern matched base: ${direction} ${day}`);
-        } else if (standaloneWeekdayMatch) {
-            const day = standaloneWeekdayMatch[0];
-             // Assume next instance
-            if (day === 'monday') baseDate = nextMonday(referenceDate);
-            else if (day === 'tuesday') baseDate = nextTuesday(referenceDate);
-            // ... etc for other days
-             else if (day === 'sunday') baseDate = nextSunday(referenceDate);
-             periodText = identifiedText.substring(day.length).trim();
-             if(baseDate) console.log(`Pattern matched base: standalone ${day} (assuming next)`);
-        }
-
-        if (baseDate) {
-            parsedDate = baseDate;
-            // Now check for period text immediately following the date part
-            if (periodText.includes('morning')) result.period = 'Morning';
-            else if (periodText.includes('afternoon') || periodText.includes('cob')) result.period = 'Afternoon';
-            else if (periodText.includes('evening') || periodText.includes('eod') || periodText.includes('night')) result.period = 'Evening'; // Combine evening/night here
-            else if (periodText.includes('noon')) { result.period = 'Afternoon'; result.time_hour = 12; result.time_minute = 0; }
-            else if (periodText.includes('midnight')) { result.period = 'Night'; result.time_hour = 0; result.time_minute = 0; }
-
-            if(result.period) console.log(`...with period: ${result.period}`);
-        }
-    }
-
-    // 3.3 Relative Boundaries (start/end of week/month/year)
-    if (!parsedDate) {
-        const boundaryMatch = identifiedText.match(/^(start|end) of (next|last|this|the) (week|month|year)/);
-        if (boundaryMatch) {
-            boundary = boundaryMatch[1]; // Assign to higher scope var
-            direction = boundaryMatch[2]; // Assign to higher scope var
-            unit = boundaryMatch[3];      // Assign to higher scope var
-
-            let targetDate = referenceDate;
-            if (direction === 'next') {
-                if (unit === 'week') targetDate = addWeeks(referenceDate, 1);
-                else if (unit === 'month') targetDate = addMonths(referenceDate, 1);
-                else if (unit === 'year') targetDate = addYears(referenceDate, 1);
-            } else if (direction === 'last') {
-                if (unit === 'week') targetDate = subWeeks(referenceDate, 1);
-                else if (unit === 'month') targetDate = subMonths(referenceDate, 1);
-                else if (unit === 'year') targetDate = subYears(referenceDate, 1);
-            }
-            // 'this' or 'the' implies current unit relative to referenceDate
-
-            if (boundary === 'start') {
-                if (unit === 'week') parsedDate = startOfWeek(targetDate, { weekStartsOn: 1 });
-                else if (unit === 'month') parsedDate = startOfMonth(targetDate);
-                else if (unit === 'year') parsedDate = startOfYear(targetDate);
-            } else { // end
-                if (unit === 'week') parsedDate = endOfWeek(targetDate, { weekStartsOn: 1 });
-                else if (unit === 'month') parsedDate = endOfMonth(targetDate);
-                else if (unit === 'year') parsedDate = endOfYear(targetDate);
-            }
-            isRelativeBoundary = true; // Indicate this is a boundary, not necessarily a specific day for tasks
-            if(parsedDate) console.log(`Pattern matched relative boundary: ${boundary} of ${direction} ${unit}`);
-        }
-    }
-
-    // 3.4 Relative Units (next/last/this month/year) - Populates components directly sometimes
-     if (!parsedDate) {
-        const relativeUnitMatch = identifiedText.match(/^(next|last|this) (month|year)/);
-        if (relativeUnitMatch) {
-            direction = relativeUnitMatch[1]; // Assign to higher scope var
-            unit = relativeUnitMatch[2];      // Assign to higher scope var
-            let targetDate = referenceDate;
-
-            if (direction === 'next') {
-                 if (unit === 'month') targetDate = addMonths(referenceDate, 1);
-                 else if (unit === 'year') targetDate = addYears(referenceDate, 1);
-            } else if (direction === 'last') {
-                 if (unit === 'month') targetDate = subMonths(referenceDate, 1);
-                 else if (unit === 'year') targetDate = subYears(referenceDate, 1);
-            }
-            // 'this' uses referenceDate
-
-            result.year = getYear(targetDate);
-            if (unit === 'month') {
-                result.month = getMonth(targetDate) + 1;
-            }
-            // Day is undefined for these relative units
-            isAmbiguousMonthOrYear = true;
-            console.log(`Pattern matched relative unit: ${direction} ${unit}`);
-        }
-    }
-
-
-    // 3.5 Standalone Month / Month-Year / Month-Day
-     if (!parsedDate && !isAmbiguousMonthOrYear) {
-        // Month Year (e.g., "August 2025") - Handled by existing code is okay
-        const monthYearMatch = identifiedText.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+(\d{4})$/i);
-        if (monthYearMatch) {
-             const monthIndex = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].findIndex(m => monthYearMatch[1].startsWith(m));
-             result.year = parseInt(monthYearMatch[2], 10);
-             result.month = monthIndex + 1;
-             isAmbiguousMonthOrYear = true;
-             console.log(`Pattern matched: month year ${identifiedText}`);
-        }
-         // Standalone Month (e.g., "September")
-        else {
-            const monthIndex = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'].findIndex(m => m === identifiedText);
-             if (monthIndex !== -1) {
-                 const targetMonth = monthIndex; // 0-based
-                 const currentMonth = getMonth(referenceDate);
-                 const currentYear = getYear(referenceDate);
-                 // Assume upcoming month unless it's significantly past in current year
-                 result.year = (targetMonth < currentMonth) ? currentYear + 1 : currentYear;
-                 result.month = targetMonth + 1;
-                 isAmbiguousMonthOrYear = true;
-                  console.log(`Pattern matched: standalone month ${identifiedText} (year ${result.year})`);
-            }
-        }
-        // Month/Day Only (Handle cautiously - existing logic seems okay but relies on chrono)
-        // Keep the existing logic using chrono's certainty flags if no other pattern matched
-        if (!parsedDate && !isAmbiguousMonthOrYear && parsedResult.start?.isCertain('month') && parsedResult.start?.isCertain('day') && !parsedResult.start?.isCertain('year')) {
-             // ... (keep existing logic using set() and chrono values) ...
-            const impliedChronoYear = parsedResult.start?.get('year');
-            const currentYear = getYear(referenceDate);
-            try {
-                parsedDate = set(new Date(0), {
-                    year: impliedChronoYear ?? currentYear,
-                    month: parsedResult.start.get('month')! - 1,
-                    date: parsedResult.start.get('day')!
-                });
-                 if(isValid(parsedDate)) {
-                    console.log(`Pattern matched: Month/Day only (using year ${getYear(parsedDate)})`);
-                 } else {
-                     parsedDate = null;
-                 }
-             } catch (e) { parsedDate = null; console.warn("Error setting Month/Day only", e); }
-        }
-    }
-
-     // 3.6 Standalone Year
-    if (!parsedDate && !isAmbiguousMonthOrYear) {
-        const yearMatch = identifiedText.match(/^(\d{4})$/);
-        if (yearMatch) {
-             result.year = parseInt(yearMatch[1], 10);
-             isAmbiguousMonthOrYear = true;
-             console.log(`Pattern matched: standalone year ${identifiedText}`);
-        }
-    }
-
-
-    // 4. Populate Components from parsedDate (if determined)
-    if (parsedDate && isValid(parsedDate)) {
-        console.log(`Populating components from specific parsed date: ${parsedDate.toISOString()}`);
-        // Only populate if not already set by relative month/year logic
-        if (result.year === undefined) result.year = getYear(parsedDate);
-        if (result.month === undefined) result.month = getMonth(parsedDate) + 1;
-         // Only set day if it wasn't a boundary match or ambiguous month/year
-        if (!isRelativeBoundary && !isAmbiguousMonthOrYear) {
-            result.day = getDate(parsedDate);
-        }
-        result.day_of_week = getDay(parsedDate);
-        try {
-             // Only set week if it makes sense (specific day or week boundary)
-             if (result.day !== undefined || unit === 'week') {
-                result.week_number = getWeek(parsedDate, { weekStartsOn: 1 });
+        // Basic validation
+        if (matchedHour >= 0 && matchedHour <= 23 && matchedMinute >= 0 && matchedMinute <= 59 && matchedSecond >= 0 && matchedSecond <= 59) {
+             if (ampm === 'pm' && matchedHour >= 1 && matchedHour <= 11) {
+                hour = matchedHour + 12;
+                periodFromRegex = periodFromRegex || 'Afternoon'; // PM implies Afternoon/Evening/Night
+             } else if (ampm === 'am' && matchedHour === 12) { // 12 AM is 00 hours
+                 hour = 0;
+                 periodFromRegex = periodFromRegex || 'Night'; // AM implies Night/Morning
+             } else if (!ampm && matchedHour >= 0 && matchedHour <= 23) { // 24-hour format
+                 hour = matchedHour;
+             } else if (ampm === 'am' && matchedHour >= 1 && matchedHour <= 11) {
+                 hour = matchedHour;
+                 periodFromRegex = periodFromRegex || 'Morning';
              }
-        } catch (e) { console.warn("Could not determine week number:", e)}
 
-         // Set note for boundary matches
-         if (isRelativeBoundary) {
-             result.note = `Boundary: ${boundary} of ${direction} ${unit}`;
-         }
-
-    } else if (!isAmbiguousMonthOrYear && !parsedDate) {
-        console.warn(`No specific date pattern could be parsed or matched for "${identifiedText}".`);
-        result.note = result.note || "Failed to parse date string into specific components.";
-    } else if (isAmbiguousMonthOrYear) {
-         console.log("Populated components for relative/standalone month/year.");
-         result.note = result.note || "Partial parse: Specific day not specified.";
+            if (hour !== undefined) {
+                 minute = matchedMinute;
+                 second = matchedSecond;
+                 console.log(`  -> Time parsed via regex: H=${hour}, M=${minute}, S=${second}, AM/PM=${ampm}`);
+            }
+        } else {
+            console.warn(`  -> Regex matched invalid time component: ${timeMatch[0]}`);
+        }
+    } else if (lowerString.includes("noon")) {
+        hour = 12;
+        minute = 0;
+        periodFromRegex = periodFromRegex || 'Afternoon';
+        console.log("  -> Time detected: noon");
+    } else if (lowerString.includes("midnight")) {
+        hour = 0;
+        minute = 0;
+        periodFromRegex = periodFromRegex || 'Night';
+        console.log("  -> Time detected: midnight");
     }
 
-
-    // 5. Handle Time Components (Keep existing logic, but use parsedDate if available)
-    const timeRefDate = parsedDate || referenceDate; // Use parsed date for time context if available
-    if (parsedResult.start?.isCertain('hour')) {
-        result.time_hour = parsedResult.start.get('hour') ?? undefined;
-        result.time_minute = parsedResult.start.get('minute') ?? 0;
-        result.time_second = parsedResult.start.get('second') ?? 0;
-        if (result.time_hour !== undefined) {
-            console.log(`Time components found via Chrono: H=${result.time_hour}, M=${result.time_minute}, S=${result.time_second}`);
+    // 2. Chrono-node fallback (Use cautiously, only extract time)
+    if (hour === undefined) {
+        try {
+            const chronoResults = chrono.parse(originalString);
+            if (chronoResults.length > 0 && chronoResults[0].start?.isCertain('hour')) {
+                const chronoHour = chronoResults[0].start.get('hour');
+                const chronoMinute = chronoResults[0].start.get('minute') ?? 0;
+                const chronoSecond = chronoResults[0].start.get('second') ?? 0;
+                 if (chronoHour !== null && chronoHour !== undefined && chronoHour >= 0 && chronoHour <= 23 &&
+                    chronoMinute >= 0 && chronoMinute <= 59 &&
+                    chronoSecond >= 0 && chronoSecond <= 59) {
+                     hour = chronoHour;
+                     minute = chronoMinute;
+                     second = chronoSecond;
+                     console.log(`  -> Time extracted via chrono fallback: H=${hour}, M=${minute}, S=${second}`);
+                 } else {
+                     console.log("  -> Chrono fallback found time but components were invalid/uncertain.");
+                 }
+            } else {
+                 console.log("  -> Chrono fallback did not find certain time components.");
+            }
+        } catch (e) {
+            console.error("  -> Error during chrono fallback for time extraction:", e);
         }
     }
-    // ... (keep regex time parsing logic as fallback) ...
-    else {
-        // Basic time keyword checks
-        if (/\b(noon)\b/i.test(identifiedText)) { result.time_hour = 12; result.time_minute = 0; }
-        else if (/\b(midnight)\b/i.test(identifiedText)) { result.time_hour = 0; result.time_minute = 0; }
-        const timeMatch = identifiedText.match(/(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(am|pm)/i);
-        if (timeMatch) {
-            let hour = parseInt(timeMatch[1], 10);
-            const minute = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
-            const second = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
-            const period = timeMatch[4].toLowerCase();
-            if (period === 'pm' && hour < 12) hour += 12;
-            if (period === 'am' && hour === 12) hour = 0; // 12 AM is 00 hours
-            result.time_hour = hour;
-            result.time_minute = minute;
-            result.time_second = second;
-            console.log(`Time components parsed via regex: H=${result.time_hour}, M=${result.time_minute}, S=${result.time_second}`);
-        }
+
+    // 3. Assign Components and Infer Period if needed
+    if (hour !== undefined) {
+        result.time_hour = hour;
+        result.time_minute = minute;
+        result.time_second = second;
     }
 
-
-    // 6. Determine Period (Prioritize explicitly parsed period, then qualifier, then time)
-    // Period might have been set during combined relative date+period parsing (step 3.2)
-    if (!result.period) {
-        if (periodFromQualifier) {
-            result.period = periodFromQualifier; // Use period derived from initial qualifier stripping
-        } else if (result.time_hour !== undefined) {
-            // Infer from time_hour if not set by qualifier or combined parse
-            if (result.time_hour >= 5 && result.time_hour < 12) result.period = 'Morning';
-            else if (result.time_hour >= 12 && result.time_hour < 18) result.period = 'Afternoon';
-            else if (result.time_hour >= 18 && result.time_hour < 22) result.period = 'Evening';
-            else result.period = 'Night'; // Handles 22:00 to 04:59
-        }
+    if (periodFromRegex) {
+        result.period = periodFromRegex;
+    } else if (hour !== undefined) {
+        // Infer period from hour if not explicitly found
+        if (hour >= 5 && hour < 12) result.period = 'Morning';
+        else if (hour >= 12 && hour < 18) result.period = 'Afternoon';
+        else if (hour >= 18 && hour < 22) result.period = 'Evening';
+        else result.period = 'Night'; // 22:00-04:59
     }
-     if(result.period) console.log(`Period determined: ${result.period}`);
 
-
-    // Final Logging & Return
-    console.log("Final parsed components:", JSON.stringify(result));
+    if (Object.keys(result).length > 0) {
+        console.log(`  -> Final time components extracted: ${JSON.stringify(result)}`);
+                 } else {
+        console.log("  -> No specific time components extracted.");
+    }
     return result;
 }
 
 /**
+ * v1.7: Parses an original date string (when GPT couldn't normalize) using only date-fns.
+ * Attempts a limited set of common, unambiguous formats. Does NOT use chrono-node.
+ * @param originalString The raw date string from user input or entities.
+ * @param referenceDate The reference date for context (e.g., for year inference if needed).
+ * @returns A partial EnhancedNormalizedDate object with date components, or empty if parsing fails.
+ */
+function parseOriginalStringDate(originalString: string, referenceDate: Date): Partial<EnhancedNormalizedDate> {
+    console.log(`Parsing original (non-normalized) date string: "${originalString}"`);
+    const result: Partial<EnhancedNormalizedDate> = {};
+    // Prioritize formats that are less ambiguous or common first
+    const formatsToTry = [
+        'MM/dd/yyyy', 'M/d/yyyy',
+        'yyyy-MM-dd',
+        'yyyy/MM/dd',
+        'MMMM d, yyyy', 'MMM d, yyyy', // "April 11, 2025", "Apr 11, 2025"
+        'MMMM dd, yyyy', 'MMM dd, yyyy', // "April 11, 2025", "Apr 11, 2025"
+        'd MMMM yyyy', 'd MMM yyyy', // "11 April 2025", "11 Apr 2025"
+        'dd MMMM yyyy', 'dd MMM yyyy' // "11 April 2025", "11 Apr 2025"
+        // Add more unambiguous formats if needed, but avoid overly flexible ones
+    ];
+
+    // Attempt to crudely strip ordinals (st, nd, rd, th) before parsing
+    const stringWithoutOrdinals = originalString.replace(/(?<=\d)(st|nd|rd|th)/gi, '');
+
+    for (const format of formatsToTry) {
+        try {
+            const parsedDate = dateFnsParse(stringWithoutOrdinals, format, referenceDate);
+            if (isValid(parsedDate)) {
+                console.log(`  -> Successfully parsed original string using format '${format}': ${parsedDate.toISOString()}`);
+                result.year = getYear(parsedDate);
+                result.month = getMonth(parsedDate) + 1;
+            result.day = getDate(parsedDate);
+        result.day_of_week = getDay(parsedDate);
+        try {
+                result.week_number = getWeek(parsedDate, { weekStartsOn: 1 });
+                } catch (e) {
+                    console.warn(`  -> Could not determine week number for ${originalString}:`, e);
+                }
+                // Successfully parsed, break the loop
+                return result;
+            }
+        } catch (e) {
+            // Ignore errors and try the next format
+        }
+    }
+
+    // If no format matched:
+    console.warn(`  -> Failed to parse original date string "${originalString}" using any of the predefined date-fns formats.`);
+    return {}; // Return empty object indicating failure
+}
+
+// --- END: v1.7 Date Parsing Helper Functions ---
+
+/**
  * Maps a database result (from vector search or FTS) to a ContextObject.
- * @param dbResult The result item from Supabase (SearchResultItem or FallbackResultItem).
- * @param sourceType The source of the result ('vector_store' or 'postgres_fallback_text').
- * @returns A ContextObject.
+ * Minor update: Ensure it uses the v1.7 ProcessedEntities/EnhancedNormalizedDate structure.
  */
 function mapDbResultToContextObject(
     dbResult: SearchResultItem | FallbackResultItem,
     sourceType: 'vector_store' | 'postgres_fallback_text'
 ): ContextObject {
-    let contextObject: Partial<ContextObject> = {}; // Use Partial for easier construction
+    let contextObject: Partial<ContextObject> = {};
 
     if (sourceType === 'vector_store') {
         const result = dbResult as SearchResultItem;
@@ -607,10 +450,11 @@ function mapDbResultToContextObject(
         contextObject.timestamp = result.metadata?.created_at ?? new Date(0).toISOString();
         contextObject.chunk_index = result.chunk_index;
         contextObject.similarity = result.similarity;
+        // Map metadata assuming it uses the new ProcessedEntities structure
         contextObject.entities_in_chunk = typeof result.metadata === 'object' && result.metadata !== null
             ? {
                 people: result.metadata.people,
-                dates: (result.metadata.dates as EnhancedNormalizedDate[]) || [],
+                dates: (result.metadata.dates as EnhancedNormalizedDate[]) || [], // Cast to v1.7 type
                 locations: result.metadata.locations,
                 topics: result.metadata.topics,
                 type: result.metadata.type,
@@ -621,14 +465,16 @@ function mapDbResultToContextObject(
     } else { // postgres_fallback_text
         const file = dbResult as FallbackResultItem;
         contextObject.file_id = file.id;
+        // Truncation logic remains the same
         contextObject.chunk = file.transcript_text.substring(0, 3000) + (file.transcript_text.length > 3000 ? '...' : '');
         contextObject.rank = file.rank;
         contextObject.timestamp = file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString();
-        contextObject.chunk_index = undefined; // FTS results are file-level
+        contextObject.chunk_index = undefined; // Still file-level
+        // Map metadata assuming it uses the new ProcessedEntities structure
         contextObject.entities_in_chunk = typeof file.file_metadata === 'object' && file.file_metadata !== null
             ? {
                 people: file.file_metadata.people,
-                dates: (file.file_metadata.dates as EnhancedNormalizedDate[]) || [],
+                dates: (file.file_metadata.dates as EnhancedNormalizedDate[]) || [], // Cast to v1.7 type
                 locations: file.file_metadata.locations,
                 topics: file.file_metadata.topics,
                 type: file.file_metadata.type,
@@ -643,11 +489,11 @@ function mapDbResultToContextObject(
     contextObject.timestamp = contextObject.timestamp ?? new Date(0).toISOString();
     contextObject.entities_in_chunk = contextObject.entities_in_chunk ?? {};
 
-    return contextObject as ContextObject; // Cast back to full type
+    return contextObject as ContextObject;
 }
 
 /**
- * Simple text chunking function.
+ * Simple text chunking function. (Keep as is)
  */
 function chunkText(text: string, size: number, overlap: number): string[] {
     const chunks: string[] = [];
@@ -657,14 +503,13 @@ function chunkText(text: string, size: number, overlap: number): string[] {
         chunks.push(text.substring(start, end));
         if (end === text.length) break;
         start += size - overlap;
-        // Ensure start doesn't go backward if overlap is large or size is small
         start = Math.max(start, end - overlap);
     }
     return chunks;
 }
 
 /**
- * Generates embeddings for an array of text chunks using OpenAI API.
+ * Generates embeddings for an array of text chunks using OpenAI API. (Keep as is)
  */
 async function generateEmbeddings(chunks: string[]): Promise<(number[] | null)[]> {
     if (!chunks || chunks.length === 0) return [];
@@ -672,15 +517,13 @@ async function generateEmbeddings(chunks: string[]): Promise<(number[] | null)[]
         const response = await openai.embeddings.create({
             model: EMBEDDING_MODEL,
             input: chunks,
-            dimensions: EMBEDDING_DIMENSIONS // Specify dimensions for newer models
+            dimensions: EMBEDDING_DIMENSIONS
         });
 
-        // Check if response format is as expected
         if (!response || !response.data || response.data.length !== chunks.length) {
             throw new Error('Unexpected response format from OpenAI embedding API');
         }
 
-        // Sort embeddings back to the original order based on index
         const embeddingsMap = new Map<number, number[]>();
         response.data.forEach(item => {
             embeddingsMap.set(item.index, item.embedding);
@@ -698,10 +541,7 @@ async function generateEmbeddings(chunks: string[]): Promise<(number[] | null)[]
     }
 }
 
-// NEW rerankResults function (Task 5)
-/**
- * Re-ranks retrieved context objects based on initial score and metadata overlap.
- */
+// Re-ranks retrieved context objects based on initial score and metadata overlap.
 async function rerankResults(
     candidates: ContextObject[],
     queryMetadata: ProcessedEntities,
@@ -840,7 +680,7 @@ async function rerankResults(
     return finalContext;
 }
 
-// --- Handler Function ---
+// --- Main Handler Function ---
 const handler: Handler = async (event: HandlerEvent, context: HandlerContext): Promise<{ statusCode: number; body: string; headers?: { [key: string]: string } }> => {
     const headers = { 'Content-Type': 'application/json' };
     try {
@@ -874,52 +714,67 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         let query_source: SuccessResponse['query_source'] = 'none';
         let message_for_gpt: string = ""; // Initialize message for GPT
 
-        // Prepare the metadata object, processing dates carefully
-        const processedMetadata: ProcessedEntities = { ...payload.extracted_entities, dates: [] }; // Initialize dates as empty array
-
-        // --- Date Parsing and Filtering Logic ---
-        const rawDates = payload.extracted_entities.dates;
+        // --- Date Processing (Applied to ALL modes upfront using v1.7 logic) ---
+        const processedMetadata: ProcessedEntities = { ...payload.extracted_entities, dates: [] }; // Initialize with other entities, clear dates array
+        const rawInputDates = payload.extracted_entities.dates;
         const successfullyParsedDates: EnhancedNormalizedDate[] = [];
         const referenceDate = new Date(); // Use current server time as reference
 
         console.log("Parsing dates with reference:", referenceDate.toISOString());
 
-        if (rawDates && Array.isArray(rawDates)) {
-            rawDates.forEach(dateInput => {
-                let dateString: string | undefined;
-                // Handle both string and object input formats safely
-                if (typeof dateInput === 'string') {
-                    dateString = dateInput;
-                } else if (dateInput && typeof dateInput === 'object' && typeof dateInput.original === 'string') {
-                    dateString = dateInput.original;
+        if (rawInputDates && Array.isArray(rawInputDates)) {
+            for (const dateEntity of rawInputDates) { // Use for...of for clarity
+                let originalString: string;
+                let normalizedDateString: string | undefined = undefined;
+                let datePart: Partial<EnhancedNormalizedDate> = {};
+
+                // 1. Determine original string and potential normalized string
+                if (typeof dateEntity === 'string') {
+                    originalString = dateEntity;
+                    console.log(`Processing date entity (string): "${originalString}"`);
+                } else if (dateEntity && typeof dateEntity === 'object' && typeof dateEntity.original === 'string') {
+                    originalString = dateEntity.original;
+                    normalizedDateString = dateEntity.normalized ?? undefined; // Use nullish coalescing
+                    console.log(`Processing date entity (object): original="${originalString}", normalized="${normalizedDateString}"`);
                 } else {
-                    console.warn("Skipping invalid date input format:", dateInput);
-                    return; // Skip this iteration
+                    console.warn("Skipping invalid date input format:", dateEntity);
+                    continue; // Skip this iteration
                 }
 
-                if (dateString) {
-                    try {
-                        const parsedDate = parseDateStringToEnhanced(dateString, referenceDate);
-                        // Check if parsing failed (indicated by the presence of a 'note')
-                        if (parsedDate.note && parsedDate.note.startsWith("Failed")) {
-                            // Log the failure server-side
-                            console.warn(`Failed to parse date string "${dateString}". Discarding from metadata.`);
-                            // Do NOT add to successfullyParsedDates
+                // 2. Parse Date Part (v1.7 Logic)
+                if (normalizedDateString) {
+                    // Prioritize parsing the GPT-provided normalized date ("Month DD, YYYY")
+                    datePart = parseNormalizedDate(normalizedDateString, referenceDate);
                         } else {
-                            // Parsing succeeded or produced a partial result without critical failure note
-                            successfullyParsedDates.push(parsedDate);
-                        }
-                    } catch (parseError) {
-                        console.error(`Error during parsing date string "${dateString}":`, parseError);
-                        // Also treat errors during parsing as failure, discard
-                    }
+                    // If no normalized date, attempt to parse the original string using date-fns only
+                    datePart = parseOriginalStringDate(originalString, referenceDate);
                 }
-            });
+
+                // 3. Always Extract Time Part from Original String (v1.7 Logic)
+                const timePart = extractTimeInfo(originalString);
+
+                // 4. Combine Date and Time Parts (v1.7 Logic)
+                const combinedComponents: Partial<EnhancedNormalizedDate> = { ...datePart, ...timePart };
+
+                // 5. Validation & Storage (v1.7 Logic)
+                // Store if we have at least year/month/day OR if we have *only* time components
+                // (avoids storing empty objects if all parsing failed)
+                if (Object.keys(combinedComponents).length > 0 && 
+                    (combinedComponents.year || combinedComponents.month || combinedComponents.day ||
+                     (!combinedComponents.year && !combinedComponents.month && !combinedComponents.day && (combinedComponents.time_hour !== undefined || combinedComponents.period))))
+                {
+                    console.log(`  -> Storing combined components: ${JSON.stringify(combinedComponents)}`);
+                    successfullyParsedDates.push(combinedComponents); // Add the valid, combined object
+                } else {
+                     console.warn(`  -> Discarding components for "${originalString}" as no core date/time info was extracted: ${JSON.stringify(combinedComponents)}`);
+                }
+            }
         }
-        // Assign only the successfully parsed dates to the final metadata
+        // Assign the successfully processed dates (EnhancedNormalizedDate[]) to the final metadata object
         processedMetadata.dates = successfullyParsedDates;
-        console.log("Processed Metadata (Dates Enhanced):", JSON.stringify(processedMetadata));
-        // --- End Date Parsing and Filtering Logic ---
+        console.log("--- Finished v1.7 Date Processing ---");
+        console.log("Final Processed Metadata:", JSON.stringify(processedMetadata));
+        // --- END: Date Processing (Applied to ALL modes upfront using v1.7 logic) ---
 
         // Mode handling: store, query, combined
         const mode = payload.mode;
@@ -1097,10 +952,16 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                 if (retrieved_context.length === 0) {
                     console.log("Attempt 2: Fallback - Full-Text Search on 'files' table using query entities...");
 
-                    // 1. Gather all string entities from the query metadata (EXCLUDING language)
+                    // 1. Gather entities for FTS (include ORIGINAL date strings from input)
                     const entityValues: string[] = [];
-                    // Include original date strings in FTS query
-                    (queryMetadata.dates || []).forEach(d => entityValues.push(d.original));
+                    if (payload.extracted_entities.dates) {
+                        // Access original strings from the INPUT payload, not processed metadata
+                        payload.extracted_entities.dates.forEach(dateInput => {
+                            if (typeof dateInput === 'string') {
+                                entityValues.push(dateInput);
+                            }
+                        });
+                    }
                     (queryMetadata.people || []).forEach(p => entityValues.push(p));
                     (queryMetadata.locations || []).forEach(l => entityValues.push(l));
                     (queryMetadata.topics || []).forEach(t => entityValues.push(t));

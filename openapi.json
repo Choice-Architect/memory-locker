@@ -124,19 +124,24 @@
           },
           "dates": {
             "type": "array",
-            "description": "Dates extracted by the GPT. Can be strings or basic objects with an 'original' property. The action will parse these into EnhancedNormalizedDate components.",
+            "description": "Dates extracted by the GPT. Can be strings or objects with 'original' and optional 'normalized'. The action will parse these into EnhancedNormalizedDate components.",
             "items": {
               "oneOf": [
                 {
                   "type": "string",
-                  "description": "A natural language date string (e.g., \"next Tuesday\") or ISO string."
+                  "description": "A natural language date string (e.g., \"next Tuesday\") or potentially other formats."
                 },
                 {
                   "type": "object",
                   "properties": {
-                    "original": { "type": "string" },
-                    "normalized": { "type": ["string", "null"], "format": "date-time", "description": "Optional, may be ignored by action"},
-                    "note": { "type": "string", "description": "Optional, may be ignored by action"}
+                    "original": {
+                      "type": "string",
+                      "description": "The original date string extracted by the GPT."
+                    },
+                    "normalized": {
+                      "type": "string",
+                      "description": "Optional normalized date in 'Month DD, YYYY' format provided by the GPT."
+                    }
                   },
                   "required": ["original"]
                 }
@@ -241,14 +246,6 @@
         "type": "object",
         "description": "Enhanced date object containing extracted components derived by the action.",
         "properties": {
-          "original": {
-            "type": "string",
-            "description": "The original date string expression provided."
-          },
-          "note": {
-            "type": "string",
-            "description": "Note regarding parsing (e.g., partial parse, failure reason)."
-          },
           "year": {
             "type": "integer",
             "format": "int32",
@@ -313,10 +310,7 @@
             ],
             "description": "Inferred period of day (Morning, Afternoon, Evening, Night)."
           }
-        },
-        "required": [
-          "original"
-        ]
+        }
       },
       "ContextObject": {
         "type": "object",

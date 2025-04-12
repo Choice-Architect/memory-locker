@@ -13,12 +13,12 @@
 
 **Phase 1: Upstream Configuration Updates**
 
-1.  **[ ] Update Custom GPT Instructions (`learnings/02_gpt_instructions.md`):**
+1.  **[x] Update Custom GPT Instructions (`learnings/02_gpt_instructions.md`):**
     *   Modify the instructions for date entity extraction.
-    *   Specifically instruct the GPT: "When you extract a date expression, if you can reliably normalize it to a specific date (like 'today' -> 'May 17, 2024', 'next Tuesday' -> 'May 21, 2024', 'last spring' -> 'March 01, 2024', 'first week of May 2025' -> 'May 01, 2025' etc., based on the current date), provide the result as a JSON object containing both the original text and the normalized date in `"Month DD, YYYY"` format: `{\"original\": \"...\", \"normalized\": \"Month DD, YYYY\"}`. Use the *start date* for ranges like weeks or seasons. If you cannot reliably normalize it (e.g., complex strings with specific times like 'April 28th, 2025, from 2:00 AM to 4:00 AM UTC'), provide only the original extracted string."
+    *   Specifically instruct the GPT: "When you extract a date expression, if you can reliably normalize it to a specific date (like 'today' -> 'May 17, 2024', 'next Tuesday' -> 'May 21, 2024', 'last spring' -> 'March 01, 2024', 'first week of May 2025' -> 'May 01, 2025' etc., based on the current date), provide the result as a JSON object containing both the original text and the normalized date in `"Month DD, YYYY"` format: `{"original": "...", "normalized": "Month DD, YYYY"}`. Use the *start date* for ranges like weeks or seasons. If you cannot reliably normalize it (e.g., complex strings with specific times like 'April 28th, 2025, from 2:00 AM to 4:00 AM UTC'), provide only the original extracted string."
     *   Verify examples match the target format.
 
-2.  **[ ] Update OpenAPI Schema (`openapi.json`):**
+2.  **[x] Update OpenAPI Schema (`openapi.json`):**
     *   Navigate to the `components.schemas.ExtractedEntities.properties.dates.items` definition.
     *   Change its type definition to accept *either* a `string` *or* an `object` using `oneOf`:
         ```json
@@ -47,7 +47,7 @@
 
 **Phase 2: Netlify Function (`memory-action.ts`) Implementation**
 
-3.  **[ ] Update TypeScript Interfaces:**
+3.  **[x] Update TypeScript Interfaces:**
     *   Define `InputDateEntity` type alias: `export type InputDateEntity = string | { original: string; normalized?: string; };`
     *   Refine `EnhancedNormalizedDate` interface:
         ```typescript
@@ -67,7 +67,7 @@
     *   Update `ContextObject` interface to use the new `EnhancedNormalizedDate`.
     *   Ensure `ScoredContextObject`, `SearchResultItem`, `FallbackResultItem` interfaces are present as per v1.3 needs for re-ranking.
 
-4.  **[ ] Refactor Main Date Processing Loop (`store`/`combined` handler):**
+4.  **[x] Refactor Main Date Processing Loop (`store`/`combined` handler):**
     *   Locate the loop iterating through `payload.entities.dates`.
     *   Modify the loop variable type to `InputDateEntity`.
     *   Inside the loop, initialize `parsedComponents: Partial<EnhancedNormalizedDate> = {};`, `let originalString: string;`, `let datePart: Partial<EnhancedNormalizedDate> = {};`.
@@ -91,54 +91,42 @@
         parsedComponents = { ...datePart, ...timeParts }; // Combine date and time parts
         ```
     *   Implement **Validation & Storage Logic**:
-        *   After combining parts, check if `parsedComponents` contains essential date information (e.g., `parsedComponents.year && parsedComponents.month`).
+        *   After combining parts, check if `parsedComponents` contains essential date information (e.g., `parsedComponents.year && parsedComponents.month`) or time information.
         *   If valid, add `parsedComponents` to the `processedMetadata.dates` array.
-        *   Log a warning if parsing failed to yield core date info.
+        *   Log a warning if parsing failed to yield core date/time info.
         *   Ensure the `original` field is *not* included in the object added to `processedMetadata.dates`.
 
-5.  **[ ] Implement `parseNormalizedDate` Function:**
-    *   Signature: `function parseNormalizedDate(normalizedDate: string, referenceDate: Date): Partial<EnhancedNormalizedDate>`
-    *   Use `dateFns.parse(normalizedDate, 'MMMM d, yyyy', referenceDate)`. **Important:** Verify 'MMMM d, yyyy' exactly matches GPT's output (e.g., is it "April 1, 2024" or "April 01, 2024"? Use 'd' vs 'dd'). Add error handling for `parse`.
-    *   Extract `year`, `month` (add 1 for 1-12), `day`.
-    *   Use `dateFns.getDay` for `day_of_week` (0=Sun).
-    *   Use `dateFns.getWeek` for `week_number` (check options for week start day).
-    *   Implement defensive "Past Date Check" if applicable (less likely with full date).
+5.  **[x] Implement `parseNormalizedDate` Function:**
+    *   Signature: `function parseNormalizedDate(normalizedDateString: string, referenceDate: Date): Partial<EnhancedNormalizedDate>`
+    *   Use `dateFns.parse(normalizedDateString, 'MMMM d, yyyy', referenceDate)`. Handle variations like 'MMMM dd, yyyy'. Add error handling.
+    *   Extract `year`, `month` (1-12), `day`, `day_of_week` (0=Sun), `week_number`.
     *   Return the partial `EnhancedNormalizedDate` object with *only date* components.
 
-6.  **[ ] Implement `extractTimeInfo` Function:**
+6.  **[x] Implement `extractTimeInfo` Function:**
     *   Signature: `function extractTimeInfo(originalString: string): Partial<EnhancedNormalizedDate>`
-    *   Use Regex first for common time patterns (HH:MM AM/PM, HH:MM 24hr) and periods ("morning", "afternoon", "evening", "night", "EOD"). Convert to 24hr, set `period`.
-    *   Optionally, use `chrono-node` on `originalString` *only if regex fails* as a secondary check. Extract *only time* components (`hour`, `minute`, `period`). Discard any date components `chrono` might infer.
-    *   Return the partial `EnhancedNormalizedDate` object containing *only* time components (`period`, `time_hour`, `time_minute`, `time_second`).
+    *   Use Regex first for common time patterns (HH:MM AM/PM, HH:MM 24hr) and periods. Convert to 24hr, set `period`.
+    *   Optionally, use `chrono-node` on `originalString` *only if regex fails* as a secondary check. Extract *only time* components. Discard inferred date parts.
+    *   Return the partial `EnhancedNormalizedDate` object containing *only* time components.
 
-7.  **[ ] Implement `parseOriginalStringDate` Function (New):**
+7.  **[x] Implement `parseOriginalStringDate` Function (New):**
     *   Signature: `function parseOriginalStringDate(originalString: string, referenceDate: Date): Partial<EnhancedNormalizedDate>`
-    *   **Starts Fresh for v1.7.** No legacy code.
-    *   **Goal:** Attempt to parse core date components (Year, Month, Day) from strings *not* normalized by GPT.
-    *   **Tools:** Use ONLY `date-fns.parse`. Try common, unambiguous formats like 'MM/dd/yyyy', 'yyyy-MM-dd'. Do **NOT** use `chrono-node` here.
-    *   If `dateFns.parse` succeeds with a format:
-        *   Extract `year`, `month` (1-12), `day`, `day_of_week` (0-6), `week_number`.
-        *   Return the partial `EnhancedNormalizedDate` object with *only date* components.
-    *   If all attempted `dateFns.parse` calls fail:
-        *   Return an empty object `{}`. (Accepts limitation for ambiguous/unsupported formats).
+    *   Use ONLY `date-fns.parse`. Try common, unambiguous formats ('MM/dd/yyyy', 'yyyy-MM-dd', 'MMMM d, yyyy', etc.). Do **NOT** use `chrono-node`.
+    *   If `dateFns.parse` succeeds: Extract `year`, `month` (1-12), `day`, `day_of_week` (0-6), `week_number`. Return partial object.
+    *   If all attempts fail: Return `{}`.
 
 **Phase 3: Querying & Cleanup**
 
-8.  **[ ] Update Query Date Parsing (`query`/`combined` modes):**
-    *   Locate where `queryMetadata.dates` (date strings extracted from the user's *query*) are processed before `rerankResults`.
-    *   Apply the new v1.7 parsing strategy:
-        *   Call `parseOriginalStringDate(queryString, referenceDate)` to get date parts.
-        *   Call `extractTimeInfo(queryString)` to get time parts.
-        *   Combine results into an `EnhancedNormalizedDate` object structure for each query date string.
-    *   Ensure the output structure matches the one used for stored dates.
+8.  **[x] Update Query Date Parsing (`query`/`combined` modes):**
+    *   Ensure that the date processing logic applied upfront (before mode checking) correctly populates `processedMetadata.dates` which is then used by `rerankResults`.
+    *   The `queryMetadata` variable correctly references this shared `processedMetadata`.
 
-9.  **[ ] Verify `rerankResults` Logic:**
-    *   Confirm that the component field names used in hierarchical date matching (`year`, `month`, `day`) and any period/time matching within `rerankResults` exactly match the fields populated by the new v1.7 parsing functions.
+9.  **[x] Verify `rerankResults` Logic:**
+    *   Confirm that the component field names used in hierarchical date matching (`year`, `month`, `day`, `period`) within `rerankResults` exactly match the fields populated by the v1.7 parsing functions.
 
 10. **[ ] Review Re-ranking Weights (Post-Implementation):**
     *   Task: After implementation and testing, re-evaluate if the existing boost values for date matching are appropriate given the potentially more reliable components. No changes planned initially.
 
-11. **[ ] Code Cleanup:**
+11. **[x] Code Cleanup:**
     *   Forensically remove *all* obsolete helper functions (e.g., old `parseDateStringToEnhanced`), constants, code comments, and documentation references related to previous date parsing attempts (v1.4-v1.6 specific logic, old fallback logic, YYYY-MM-DD format assumptions). Ensure a clean v1.7 implementation.
 
 **Phase 4: Testing**

@@ -35,7 +35,7 @@
 
 ## Implementation Steps (`memory-action.ts`)
 
-**1. Update TypeScript Interfaces:**
+**1. Update TypeScript Interfaces (Completed):**
     *   Define an input interface `InputDateEntity` representing the possibilities from the updated OpenAPI schema: `string | { original: string; normalized?: string; }`.
     *   Update the `EnhancedNormalizedDate` interface:
         *   Ensure all required output components are present (`year`, `month` (1-12), `day`, `day_of_week` (0-6, Sun-Sat), `week_number`, `period`, `time_hour`, `time_minute`, `time_second`). Add optional boolean flags like `is_normalized` if helpful for internal logic/debugging.
@@ -44,7 +44,8 @@
     *   Update `ContextObject` to use the refined `EnhancedNormalizedDate`.
     *   Keep `ScoredContextObject` and retrieval interfaces (`SearchResultItem`, `FallbackResultItem`) as defined previously for re-ranking.
 
-**2. Refactor Main Date Processing Logic (within `store`/`combined` handler):**
+**2. Refactor Main Date Processing Logic (Completed):**
+    *   (Applied upfront before mode checking)
     *   Iterate through the input `entities.dates` array (which contains `InputDateEntity` items).
     *   For each item:
         *   Initialize an empty `parsedComponents: Partial<EnhancedNormalizedDate> = {};`
@@ -61,9 +62,10 @@
                 *   Else (object but no normalized date):
                     *   Call `parseOriginalStringDate(originalString, referenceDate)` (see step 3). Assign result to `datePart`.
         *   **Always** call `extractTimeInfo(originalString)` (see step 3) and merge results with `datePart` into `parsedComponents`.
-        *   **Validation & Storage:** If `parsedComponents` contains essential date info (e.g., at least `year` and `month`), add it to the list of dates (`processedMetadata.dates`) to be stored. Do NOT store if parsing failed to yield core date info. (Replaces any old "note"-based filtering).
+        *   **Validation & Storage:** If `parsedComponents` contains essential date info (e.g., at least `year` and `month`) or time info, add it to the list of dates (`processedMetadata.dates`) to be stored.
+        *   Log warning otherwise.
 
-**3. Implement/Refactor Helper Functions:**
+**3. Implement/Refactor Helper Functions (Completed):**
 
     *   **`parseNormalizedDate(normalizedDate: string, referenceDate: Date): Partial<EnhancedNormalizedDate>`:**
         *   Uses `date-fns.parse(normalizedDate, 'MMMM d, yyyy', referenceDate)` (adjust format string if needed to exactly match GPT output). Handle potential parsing errors.
@@ -87,14 +89,15 @@
         *   If parsing fails, returns an empty object. Ambiguous relative dates not handled by GPT (e.g., "next weekend") will likely fail parsing here, which is acceptable.
         *   Returns the component object containing *only date* parts found.
 
-    *   **`populateComponents(...)` (Helper):** Refactor component population logic used by the above functions into a reusable helper if needed.
+    *   **`populateComponents(...)` (Helper):** (Not implemented as separate helper, logic integrated into parsers)
 
-**4. `query`/`combined` Mode - Re-ranking (`rerankResults`):**
+**4. `query`/`combined` Mode - Re-ranking (`rerankResults`) (Verified):**
     *   **No Major Changes Needed:** The existing `rerankResults` logic should still work correctly as it relies on the *stored components* (`year`, `month`, `day`, `period` etc.).
     *   **Verification:** Double-check that the component names used in `rerankResults` exactly match the field names being stored by the new v1.7 parsing logic.
-    *   **Query Date Parsing:** Ensure that date strings extracted from the *user's query* (`queryMetadata.dates`) are also parsed into the same `EnhancedNormalizedDate` component structure for comparison during re-ranking. This likely involves calling `parseOriginalStringDate` and `extractTimeInfo` on the query date strings.
+    *   **Query Date Parsing:** Date strings extracted from the *user's query* (`queryMetadata.dates`) are parsed into the same `EnhancedNormalizedDate` component structure using the same upfront logic for comparison during re-ranking.
+    *   **Note on Stored Data:** Currently, only date *components* are stored in metadata (not the GPT-provided `normalized` string). This ensures consistency but means direct string matching on the normalized date isn't possible in DB queries. This decision maintains focus on component-based relevance for v1.7 and can be re-evaluated when enhancing query logic specifically.
 
-**5. Constants & Cleanup:**
+**5. Constants & Cleanup (Completed):**
     *   Review and remove obsolete constants, comments, and functions related to previous date parsing attempts (v1.4-v1.6). Ensure no remnants of the old logic interfere with the clean v1.7 approach.
 
 ---

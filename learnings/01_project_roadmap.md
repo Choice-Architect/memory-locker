@@ -56,15 +56,15 @@
 
 ---
 
-### Phase 3: Custom GPT Configuration & Action Schema (Requires v1.7 Update)
+### Phase 3: Custom GPT Configuration & Action Schema (v1.7 Update Completed)
 
 **Objective:** Configured the Custom GPT, including instructions and Action definition.
 
 1.  **Custom GPT Creation:** Created GPT shell (name, description, etc.).
 2.  **Instruction Authoring (`learnings/02_gpt_instructions.md`):** Defined persona, purpose, behavior. Key instructions included entity extraction.
-    *   **v1.7 Update Needed:** Modify instructions to ask the GPT to provide *both* original date strings and normalized `"Month DD, YYYY"` versions where possible (e.g., `"April 15, 2025"`), using the *start date* for ranges/seasons. (Ref: `learnings/02_enhancement_plan.md` v1.7).
+    *   **v1.7 Update Completed:** Modified instructions to ask the GPT to provide *both* original date strings and normalized `"Month DD, YYYY"` versions where possible, using the *start date* for ranges/seasons. (Ref: `learnings/02_enhancement_plan.md` v1.7).
 3.  **Action Schema Definition (`openapi.json`):** Created OpenAPI spec.
-    *   **v1.7 Update Needed:** Modify the `entities.dates` schema to accept `string | {original: string, normalized?: string}` (where `normalized` is a string like `"Month DD, YYYY"`). Update `EnhancedNormalizedDate` in the response to only include components (no `original`, no `note`). (Ref: `learnings/02_enhancement_plan.md` v1.7).
+    *   **v1.7 Update Completed:** Modified the `entities.dates` schema to accept `string | {original: string, normalized?: string}`. Updated `EnhancedNormalizedDate` in the response to only include components (no `original`, no `note`). (Ref: `learnings/02_enhancement_plan.md` v1.7).
 4.  **Action Configuration:** Configured API key authentication.
 
 ---
@@ -86,6 +86,7 @@
 
 2.  **Implement Relevance Boosting (Completed v1.3):**
     *   **Status:** Implemented and remains the core query strategy. Relies on accurately stored date components. We should revise the weighting when we work on query mode again.
+    *   **Note (v1.7):** Date components (year, month, day, etc.) are stored, but the GPT-provided normalized string (e.g., "April 15, 2025") is *not* stored directly in metadata. Querying relies on component matching.
 
 3.  **Non-Date Entity Extraction (Completed & Stable):**
     *   **Status:** Stable baseline. We should not implement changes to the store mode that would alter the way non-date entities are processed currently.
@@ -102,7 +103,7 @@
             *   Correct any "Past Month/Day" inference logic if applicable.
             *   Ensure only structured components (no `original` string) are stored in metadata.
     *   **Rationale:** Simplifies the main parsing path, focuses Netlify logic on specific tasks (normalized date parsing, time extraction, simple original string parsing), maintains components needed for v1.3 query relevance, accepts limitations for ambiguous dates not normalized by GPT.
-    *   **Status:** **Planned (Current Phase).**
+    *   **Status:** **Completed (v1.7).**
 
 5.  **Future Considerations (Backlog):**
     *   Advanced Retrieval (Hybrid search, time decay, more sophisticated boosting).
