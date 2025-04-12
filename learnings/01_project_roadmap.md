@@ -44,13 +44,7 @@
         *   Stored file info and `file_metadata` in the `files` table.
         *   Stored chunks, embeddings, `chunk_index`, and chunk-level `metadata` in `transcript_embeddings`.
         *   **Date Handling (Iterative Refinement):** Initial versions used `chrono-node` and increasingly complex pattern-matching (`date-fns`) in `parseDateStringToEnhanced` to extract structured date components (`year`, `month`, `day`, `period`, etc.). This approach faced persistent challenges with reliability and edge cases (Ref: v1.4, v1.5, v1.6 plans/analyses).
-    *   **Query (`query`/`combined`) (v1.3 Implementation):**
-        *   Implemented a **Simplified Query Strategy with Application-Layer Re-ranking**:
-            1.  Primary Retrieval (Vector Search) via `search_memory_chunks` (Top 15).
-            2.  Fallback Retrieval (FTS) via `files` table (Top 20).
-            3.  Mapping & Truncation of results.
-            4.  Application-Layer Re-ranking (`rerankResults`) using `initial_score` (similarity/rank) plus `metadata_boost_score` (metadata overlap, hierarchical date matching based on stored components, past date boost for FTS).
-            5.  Final Selection (Top 5).
+    *   **Query (`query`/`combined`):** Foundational logic for retrieving stored memories was established. *(Note: The specific retrieval and ranking strategy was significantly redesigned in Phase 5 - see Item 5 below for the current plan)*.
 4.  **Error Handling & Logging:** Implemented try/catch blocks, basic logging.
 5.  **Deployment & Initial Testing:** Function deployed and tested.
 
@@ -85,7 +79,7 @@
 1.  **(Obsolete) Previous Date Refactoring Attempts:** Versions older than v1.7 involved iterative refinement of pattern-matching within the Netlify function, which proved complex and incomplete. v1.7.1 adopts a new hybrid approach.
 
 2.  **Implement Relevance Boosting (Completed v1.3):**
-    *   **Status:** Implemented and remains the core query strategy. Relies on accurately stored date components (`year`, `month`, `day`, `period`). We should revise the weighting when we work on query mode again.
+    *   **Status:** Implemented and remains the core query strategy. Relies on accurately stored date components (`year`, `month`, `day`, `period`). **Note (v1.8 Plan):** The re-ranking logic and weighting are being actively revised as part of the Phase 5 query enhancements detailed below and in `learnings/02_enhancement_plan.md`.
     *   **Note (v1.7.1):** Querying relies on component matching. The GPT-provided `normalized` date string is *not* stored directly in metadata.
 
 3.  **Non-Date Entity Extraction (Completed & Stable):**
@@ -94,18 +88,31 @@
 4.  **Refactor Date Parsing (Hybrid Approach - v1.7.1):**
     *   **Goal:** Achieve reliable date/time component extraction by leveraging upstream GPT normalization and targeted Netlify function logic.
     *   **Approach (v1.7.1 - Hybrid):** (Ref: `learnings/02_enhancement_plan.md` v1.7.1)
-        1.  **GPT Task (Completed):** Update GPT instructions (`02_gpt_instructions.md`) to request normalized `"Month DD, YYYY"` dates alongside original strings when possible.
+        1.  **GPT Task (Completed):** Update GPT instructions (`02_gpt_instructions.md`) to request normalized `\"Month DD, YYYY\"` dates alongside original strings when possible.
         2.  **Schema Update (Completed):** Update `openapi.json` to handle the new input date format and the simplified `EnhancedNormalizedDate` output format (only date components + `period`).
         3.  **Netlify Function (`memory-action.ts`) (Completed):**
-            *   Refactored date processing to prioritize parsing the GPT-provided `normalized` date (`"Month DD, YYYY"`) using `date-fns` (`parseNormalizedDate`).
+            *   Refactored date processing to prioritize parsing the GPT-provided `normalized` date (`\"Month DD, YYYY\"`) using `date-fns` (`parseNormalizedDate`).
             *   **Simplified** `extractTimeInfo` to use only keyword matching (on original string) to extract the `period` ('Morning', 'Afternoon', etc.). **Removed** parsing of specific hours/minutes/seconds.
             *   Implemented a new, clean function (`parseOriginalStringDate`) using only `date-fns` to attempt parsing dates the GPT couldn't normalize.
             *   Ensured only structured date components (`year`, `month`, `day`, `day_of_week`, `week_number`) and the extracted `period` are stored in metadata.
     *   **Rationale:** Simplifies the main parsing path, focuses Netlify logic on specific tasks (normalized date parsing, period extraction, simple original string parsing), maintains components needed for v1.3 query relevance, accepts limitations for ambiguous dates not normalized by GPT.
     *   **Status:** **Completed (v1.7.1).**
 
-5.  **Future Considerations (Backlog):**
-    *   Advanced Retrieval (Hybrid search, time decay, more sophisticated boosting - potentially revisit `rerankResults` weights).
+5.  **Enhance Query Retrieval & Ranking (Phase 5 - In Progress):**
+    *   **Goal:** Improve query relevance by implementing true hybrid retrieval and weighted re-ranking.
+    *   **Approach:** (Ref: `learnings/02_enhancement_plan.md` - Phase 5 Plan)
+        1.  Implement concurrent Vector Search and FTS search.
+        2.  Combine results using Reciprocal Rank Fusion (RRF).
+        3.  Refine `rerankResults` function:
+            *   Use normalized RRF score as the base `initial_score`.
+            *   Introduce `METADATA_WEIGHT` multiplier for metadata boosts.
+        4.  Update `query_source` handling in function, API schema, and GPT instructions.
+        5.  Tune `METADATA_WEIGHT` and RRF parameters based on evaluation.
+    *   **Rationale:** Leverage both semantic and keyword search upfront via RRF, then apply weighted, metadata-focused re-ranking for improved precision in the journaling context.
+    *   **Status:** **Planning Complete, Implementation Pending.**
+
+6.  **Future Considerations (Backlog):**
+    *   Time decay function in re-ranking (if needed after current enhancements).
     *   Third-Party Date Parsing API (as fallback within `parseOriginalStringDate` if needed).
 
 ---

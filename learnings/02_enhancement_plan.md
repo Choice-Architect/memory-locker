@@ -48,9 +48,10 @@
     *   **`extractTimeInfo`:** **Simplified** to use keyword/regex matching on the original string ONLY to find and return the `period` ('Morning', 'Afternoon', 'Evening', 'Night'). **Does not parse or return hour/minute/second.**
     *   **`parseOriginalStringDate`:** Implemented using ONLY `date-fns` to attempt parsing common formats from the original string when GPT provides no normalization. Returns date components.
 
-**4. [x] `query`/`combined` Mode - Re-ranking (`rerankResults`) Verified:**
-    *   Existing logic correctly uses stored components (`year`, `month`, `day`, `period`).
-    *   Query date strings are parsed into the same `EnhancedNormalizedDate` structure for comparison.
+**4. [x] `query`/`combined` Mode - Re-ranking (`rerankResults`) Verified (Post v1.7.1 Completion):**
+    *   After the v1.7.1 date parsing refactor was complete, the existing `rerankResults` logic correctly used the newly structured stored components (`year`, `month`, `day`, `period`).
+    *   Query date strings were also parsed into the same `EnhancedNormalizedDate` structure for comparison within `rerankResults`.
+    *   *(Note: This verification applies to the state before the planned Phase 5 RRF/weighting enhancements)*.
 
 **5. [x] Constants & Cleanup:**
     *   Obsolete constants, comments, and functions related to previous date/time parsing attempts were removed.
@@ -67,3 +68,53 @@
 *   Accepts the limitation that ambiguous date strings not normalized by GPT may not yield stored date components.
 
 **Overall Status:** **v1.7.1 Enhancement Complete.** The date parsing logic aligns with the refined plan, focusing on reliable date components and period extraction.
+**Verification:** Confirmed that both `store` and `query`/`combined` modes utilize the same centralized date processing logic and the consistent `EnhancedNormalizedDate` structure, ensuring alignment between data storage and query-time comparison/re-ranking.
+
+---
+
+## Future Enhancements (Phase 5 - Query Mode) - Proposed Plan
+
+Building upon the completed v1.7.1 date handling enhancements, this section outlines the proposed plan for the next phase of improvements focused on the query retrieval and ranking logic.
+
+**Goal:** Improve the relevance and accuracy of `query`/`combined` mode retrieval by implementing a true hybrid search strategy combined with weighted re-ranking based on metadata.
+
+**Core Principles:**
+
+*   **Hybrid Initial Retrieval:** Leverage both vector (semantic) search and FTS (keyword) search simultaneously to generate a richer set of initial candidates.
+*   **Reciprocal Rank Fusion (RRF):** Use RRF to effectively combine the ranked lists from vector and FTS searches into a single, improved candidate list.
+*   **Weighted Re-ranking:** Apply the existing custom re-ranking logic (`rerankResults`) to the RRF-fused list, but introduce a multiplier weight to increase the influence of metadata matches (including dates, people, topics, etc.) on the final score.
+*   **Iterative Tuning:** Use benchmark queries and evaluation to determine an appropriate value for the metadata weight multiplier.
+
+**Proposed Implementation Steps:**
+
+1.  **[ ] Implement Concurrent Search:**
+    *   Modify `memory-action.ts` to execute vector search (`search_memory_chunks`) and FTS search (`files` table) concurrently using `Promise.all()`.
+    *   Handle errors gracefully for each search.
+    *   Map results from each source into separate `ContextObject` arrays, preserving original scores.
+
+2.  **[ ] Implement RRF Function:**
+    *   Create a new `applyRRF(vectorResults, ftsResults, k)` helper function in `memory-action.ts`. *(Note: Specific `k` value, often 60, TBD pending discussion)*.
+    *   Implement the RRF logic: calculate `1 / (k + rank)` for each item in each list and sum scores for common items using a map.
+    *   Return a single list of `ContextObject`s sorted by descending RRF score.
+
+3.  **[ ] Integrate RRF:**
+    *   Call `applyRRF` after the concurrent searches resolve.
+    *   Pass the RRF-ranked list as the `candidates` to the `rerankResults` function.
+    *   Update `query_source` reporting logic in the response to use `'hybrid'` source type when applicable.
+
+4.  **[ ] Refine `rerankResults` with Weighting:**
+    *   **Decision:** Use the **Normalized RRF Score** as the `initial_score`. Normalize the `rrf_score` values from the candidate list using **min-max scaling** (`(score - min_score) / (max_score - min_score)`) before using them in the final score calculation.
+    *   Define a constant `METADATA_WEIGHT`. *(Note: Specific starting value, e.g., 1.5 or 2.0, TBD pending discussion)*.
+    *   Modify the `final_score` calculation to: `final_score = initial_score + (METADATA_WEIGHT * metadata_boost_score)`. Ensure clamping (`Math.min(1.0, ...)`).
+
+5.  **[ ] Update API Schema & GPT Instructions:**
+    *   Modify `openapi.json`: Update the `enum` for `SuccessResponse.properties.query_source` to include `'hybrid'`.
+    *   Modify `gpt_instructions.md`: Update the "Handling Action Responses" section to remove phrasing specific to `vector_store` or `postgres_fallback_text`. Instruct the GPT to use general phrasing for the `'hybrid'` source type.
+
+6.  **[ ] Evaluation and Tuning:**
+    *   Define a benchmark set of diverse queries and expected results.
+    *   Execute benchmarks and evaluate results using appropriate metrics.
+    *   Iteratively adjust `METADATA_WEIGHT` based on evaluation outcomes.
+    *   Document the final chosen weight and rationale.
+
+**Rationale:** This approach combines the strengths of both search methods early via RRF, providing a better candidate list for the final, metadata-focused re-ranking step. Using the **Normalized RRF score** as the basis for re-ranking leverages the combined confidence from the hybrid retrieval. Using a multiplicative weight allows explicit control over the importance of metadata matches relative to the initial retrieval score, aligning better with the journaling use case where specific entity recall is often crucial. Adjusting the `query_source` reporting ensures accurate communication back to the GPT.
