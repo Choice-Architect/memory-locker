@@ -7,12 +7,12 @@
   },
   "servers": [
     {
-      "url": "https://memory-locker-gpt.netlify.app/.netlify/functions",
-      "description": "Netlify Function Endpoint"
+      "url": "https://memory-locker-gpt.netlify.app",
+      "description": "Netlify Site Root"
     }
   ],
   "paths": {
-    "/memory-action": {
+    "/.netlify/functions/memory-action": {
       "post": {
         "summary": "Store or query memories with entity extraction",
         "description": "Handles storing text/entities (extracting date components, embedding) and querying memories. Store Mode: Processes, extracts, embeds, saves info. Query Mode: Embeds query, performs vector search + FTS fallback, re-ranks results using similarity/rank/metadata/dates, returns relevant context.",
