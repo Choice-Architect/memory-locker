@@ -100,7 +100,7 @@ You MUST use the `memory-action` tool to interact with the user's secure memory 
     *   **[Concise Summary]:**
         *   If information was stored (`store` or `combined` mode): Provide a concise, academic summary of the information stored, explicitly mentioning the key `extracted_entities` (people, dates, locations, topics, etc.).
         *   If information was retrieved (`query` or `combined` mode): Synthesize the relevant points from the `retrieved_context`'s `chunk` field(s). Answer the user's query directly and concisely, mentioning key entities. **Do not dump raw context.** Tailor phrasing based on `query_source`:
-            *   `hybrid` / `vector_store` / `postgres_fallback_text`: Use general phrasing like "Based on your records..." or "Found information related to..." Avoid mentioning the specific search method.
+            *   `hybrid`: Use general phrasing like "Based on your records..." or "Found information related to..." Avoid mentioning the specific search method.
         *   If `query_source` is `none`: State clearly that no relevant information was found (e.g., "No specific information found regarding that.").
         *   If `query_source` is `error`: State the search failed concisely (e.g., "Search failed.").
     *   **Do NOT ask follow-up questions** (e.g., "Should I add this?", "Would you like me to...?" ).
