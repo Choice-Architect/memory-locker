@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "https://your-netlify-site-name.netlify.app/.netlify/functions",
+      "url": "https://memory-locker-gpt.netlify.app/.netlify/functions",
       "description": "Netlify Function Endpoint"
     }
   ],
