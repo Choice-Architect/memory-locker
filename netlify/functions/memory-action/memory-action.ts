@@ -173,7 +173,7 @@ const EMBEDDING_MODEL = 'text-embedding-3-small';
 const EMBEDDING_DIMENSIONS = 1536;
 const CHUNK_SIZE = 1000;
 const CHUNK_OVERLAP = 200;
-const VECTOR_MATCH_THRESHOLD = 0.5;
+const VECTOR_MATCH_THRESHOLD = 0.4;
 const VECTOR_MATCH_COUNT = 15;
 const FALLBACK_MATCH_COUNT = 20;
 const FINAL_MATCH_COUNT = 5; // Number of results after re-ranking
@@ -638,6 +638,15 @@ async function executeVectorSearch(
 ): Promise<ContextObject[]> {
     console.log("Executing Vector Search...");
     try {
+        // Add logging for filters being sent
+        console.log(`  -> Vector search filters: ${JSON.stringify({
+            filter_topics: queryMetadata.topics || null,
+            filter_people: queryMetadata.people || null,
+            filter_locations: queryMetadata.locations || null,
+            filter_type: queryMetadata.type || null,
+            filter_sentiment: queryMetadata.sentiment || null,
+        })}`);
+
         const { data: searchResults, error: searchError } = await supabase.rpc(
             'search_memory_chunks',
             { // Use named parameters matching the SQL function definition
@@ -657,9 +666,12 @@ async function executeVectorSearch(
             return []; // Return empty on error
         }
 
+        // Add logging for raw results count
         const typedSearchResults = searchResults as SearchResultItem[] | null;
+        console.log(`  -> Vector search raw results count: ${typedSearchResults?.length ?? 0}`);
+
         if (typedSearchResults && typedSearchResults.length > 0) {
-            console.log(`Vector search found ${typedSearchResults.length} raw results.`);
+            // console.log(`Vector search found ${typedSearchResults.length} raw results.`); // Redundant now
             // Map results to ContextObject, adding source and preserving similarity
             return typedSearchResults.map(result => ({
                 chunk: result.content_chunk,
@@ -733,11 +745,11 @@ async function executeFtsSearch(
         // 3. Build the Supabase query with FTS
         const { data: ftsResults, error: ftsError } = await supabase
             .from('files')
-            .select('id, transcript_text, created_at, file_metadata, rank:ts_rank_cd(transcript_tsv, to_tsquery(\'english\', $1))')
+            // Simplify select: Remove explicit rank calculation. Relies on .textSearch() + .order() implicitly.
+            .select('id, transcript_text, created_at, file_metadata')
             .textSearch('transcript_tsv', ftsQueryString, {
                 config: 'english',
                 type: 'websearch',
-                // Removed explicit rank normalization here, will use raw rank for RRF position
             })
             .order('rank', { ascending: false }) // Higher rank is better
             .limit(FALLBACK_MATCH_COUNT); // Get more results initially for RRF
