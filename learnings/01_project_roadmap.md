@@ -119,4 +119,12 @@
 
 1.  **Final Checks:** Perform regression testing after v1.8.0 implementation, review security configurations, evaluate query performance.
 
+---
+
+### Known Limitations / Future Considerations (v1.8.0)
+
+1.  **Context Size Limit for Large Files:** The current query/combined modes return context based on either individual chunks (vector search) or truncated full transcripts (FTS search, currently limited to 3000 chars). This means for very large original inputs (e.g., long dictated emails), the GPT may not receive the *full* text in the retrieved context and cannot reconstruct it. Future enhancement could involve adding a dedicated retrieval mode (e.g., `retrieve_full_file`) to fetch the complete `transcript_text` when explicitly requested.
+2.  **RRF/Weight Tuning:** Evaluation and tuning of RRF `k` and `ENTITY_WEIGHTS` constants based on real-world usage patterns.
+3.  **Advanced Date/Time Queries:** Handling more complex temporal queries (e.g., recurring events, multi-day ranges beyond simple start date normalization).
+
 --- 

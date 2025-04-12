@@ -118,3 +118,10 @@ Building upon the completed v1.7.1 date handling, the query retrieval and rankin
 ---
 
 **Overall Status:** **v1.8 Enhancements Complete.** Date parsing (v1.7.1) and Query Enhancement (v1.8 - RRF + Weighted Re-ranking) logic implemented. Ready for testing and potential tuning.
+
+---
+
+### Post-v1.8 Considerations / Known Issues
+
+*   **Full File Retrieval Limitation:** As implemented, the context returned to the GPT is limited by chunk size (vector) or truncation (FTS, currently 3000 chars). For queries requesting large original documents (like long emails), the full text cannot be retrieved. A future enhancement could add a specific mode or mechanism to retrieve the full `transcript_text` from the `files` table when needed.
+*   **Tuning:** The `RRF_K` and `ENTITY_WEIGHTS` values require evaluation and tuning.

@@ -56,12 +56,11 @@ import * as chrono from 'chrono-node';
 
 // --- Interfaces for API Contract ---
 
-// v1.7: Interface for the flexible date input from GPT
+// Interface for the flexible date input from GPT
 export type InputDateEntity = string | { original: string; normalized?: string; };
 
 // Interface for Enhanced Date Components (Stored in Metadata/Context)
-// REMOVED 'original' and 'note'. All properties are optional.
-// v1.7.1: REMOVED time_hour, time_minute, time_second. Only period remains.
+// Properties are optional. Includes only date components and period.
 export interface EnhancedNormalizedDate {
     year?: number;           // e.g., 2024
     month?: number;          // e.g., 4 (1-12)
@@ -85,11 +84,11 @@ interface ExtractedEntities { // Kept for Request Payload structure
     [key: string]: any; // Allow flexible entity types
 }
 
-// Interface for entities AFTER internal processing (using v1.7 EnhancedNormalizedDate)
+// Interface for entities AFTER internal processing (using EnhancedNormalizedDate)
 // This is what gets stored in metadata and returned in context objects.
 interface ProcessedEntities {
     people?: string[];
-    dates?: EnhancedNormalizedDate[]; // Use the v1.7 enhanced structure
+    dates?: EnhancedNormalizedDate[]; // Use the enhanced structure
     locations?: string[];
     topics?: string[];
     type?: string;
@@ -97,7 +96,11 @@ interface ProcessedEntities {
     priority?: number;
     conversation_id?: string;
     thread_id?: string;
-    [key: string]: any;
+    rrf_score?: number; // Score after RRF, added internally
+    // Deprecated properties (to be removed in final ContextObject)
+    // initial_score?: number; // Used during reranking
+    // metadata_boost_score?: number; // Used during reranking
+    // final_score?: number; // Used during reranking
 }
 
 interface RequestPayload {
@@ -117,18 +120,17 @@ interface ContextObject {
     rank?: number; // Raw FTS rank
     // v1.8 additions
     source?: 'vector' | 'fts'; // Source of this specific context object before RRF
-    rrf_score?: number; // Score after RRF, added internally
     // Deprecated properties (to be removed in final ContextObject)
     // initial_score?: number; // Used during reranking
     // metadata_boost_score?: number; // Used during reranking
     // final_score?: number; // Used during reranking
 }
 
-// v1.8: Updated SuccessResponse for hybrid source
+// Updated SuccessResponse for hybrid source
 interface SuccessResponse {
     retrieved_context: ContextObject[]; // Will contain cleaned ContextObjects (no internal scores)
     storage_status: string;
-    // v1.8: Updated enum to match openapi.json (Removed old values)
+    // Updated enum to match openapi.json (Removed old values)
     query_source: 'hybrid' | 'none' | 'error';
     message_for_gpt?: string;
     error: null;
@@ -176,7 +178,7 @@ const VECTOR_MATCH_COUNT = 15;
 const FALLBACK_MATCH_COUNT = 20;
 const FINAL_MATCH_COUNT = 5; // Number of results after re-ranking
 
-// v1.8: Added constants for RRF and Entity Weighting
+// RRF constant and Entity Weighting for re-ranking
 const RRF_K = 60; // RRF constant
 const ENTITY_WEIGHTS = {
     people: 0.10,
@@ -249,10 +251,10 @@ function checkOverlap(arr1?: any[], arr2?: any[]): boolean {
     return arr2.some(item => set1.has(typeof item === 'string' ? item.toLowerCase() : item));
 }
 
-// --- START: v1.7 Date Parsing Helper Functions ---
+// --- START: Date Parsing Helper Functions ---
 
 /**
- * v1.7: Parses a date string in "Month DD, YYYY" format using date-fns.
+ * Parses a date string in "Month DD, YYYY" format using date-fns.
  * @param normalizedDateString The date string (e.g., "April 11, 2025").
  * @param referenceDate The reference date (currently unused for this format).
  * @returns A partial EnhancedNormalizedDate object with date components, or empty if parsing fails.
@@ -280,12 +282,12 @@ function parseNormalizedDate(normalizedDateString: string, referenceDate: Date):
         }
     } catch (e) {
         console.error(`Error parsing normalized date string "${normalizedDateString}":`, e);
-        }
-        return result;
     }
+    return result;
+}
 
 /**
- * v1.7.1: Extracts ONLY the period of day (Morning, Afternoon, Evening, Night)
+ * Extracts ONLY the period of day (Morning, Afternoon, Evening, Night)
  * from the original date/time string based on keywords.
  * Does not attempt to parse specific hours or minutes.
  *
@@ -321,13 +323,13 @@ function extractTimeInfo(originalString: string): Partial<EnhancedNormalizedDate
          components.period = 'Afternoon'; // Or Evening? Afternoon is safer default.
     }
 
-     // Remove chrono-node usage as it's not needed for period-only extraction
+    // Remove chrono-node usage as it's not needed for period-only extraction
     // console.log(`     -> Final time components extracted: ${JSON.stringify(components)}`);
     return components;
 }
 
 /**
- * v1.7: Parses an original date string (when GPT couldn't normalize) using only date-fns.
+ * Parses an original date string (when GPT couldn't normalize) using only date-fns.
  * Attempts a limited set of common, unambiguous formats. Does NOT use chrono-node.
  * @param originalString The raw date string from user input or entities.
  * @param referenceDate The reference date for context (e.g., for year inference if needed).
@@ -358,10 +360,10 @@ function parseOriginalStringDate(originalString: string, referenceDate: Date): P
                 console.log(`  -> Successfully parsed original string using format '${format}': ${parsedDate.toISOString()}`);
                 result.year = getYear(parsedDate);
                 result.month = getMonth(parsedDate) + 1;
-            result.day = getDate(parsedDate);
-        result.day_of_week = getDay(parsedDate);
-        try {
-                result.week_number = getWeek(parsedDate, { weekStartsOn: 1 });
+                result.day = getDate(parsedDate);
+                result.day_of_week = getDay(parsedDate);
+                try {
+                    result.week_number = getWeek(parsedDate, { weekStartsOn: 1 });
                 } catch (e) {
                     console.warn(`  -> Could not determine week number for ${originalString}:`, e);
                 }
@@ -378,69 +380,31 @@ function parseOriginalStringDate(originalString: string, referenceDate: Date): P
     return {}; // Return empty object indicating failure
 }
 
-// --- END: v1.7 Date Parsing Helper Functions ---
+// --- END: Date Parsing Helper Functions ---
 
 /**
- * Maps a database result (from vector search or FTS) to a ContextObject.
- * Minor update: Ensure it uses the v1.7 ProcessedEntities/EnhancedNormalizedDate structure.
+ * Safely maps raw database metadata (from vector or FTS search)
+ * to the ProcessedEntities structure used in ContextObjects.
  */
-function mapDbResultToContextObject(
-    dbResult: SearchResultItem | FallbackResultItem,
-    sourceType: 'vector_store' | 'postgres_fallback_text'
-): ContextObject {
-    let contextObject: Partial<ContextObject> = {};
-
-    if (sourceType === 'vector_store') {
-        const result = dbResult as SearchResultItem;
-        contextObject.file_id = result.file_id;
-        contextObject.chunk = result.content_chunk;
-        contextObject.timestamp = result.metadata?.created_at ?? new Date(0).toISOString();
-        contextObject.chunk_index = result.chunk_index;
-        contextObject.similarity = result.similarity;
-        // Map metadata assuming it uses the new ProcessedEntities structure
-        contextObject.entities_in_chunk = typeof result.metadata === 'object' && result.metadata !== null
-            ? {
-                people: result.metadata.people,
-                dates: (result.metadata.dates as EnhancedNormalizedDate[]) || [], // Cast to v1.7 type
-                locations: result.metadata.locations,
-                topics: result.metadata.topics,
-                type: result.metadata.type,
-                sentiment: result.metadata.sentiment,
-                priority: result.metadata.priority,
-              }
-            : {};
-    } else { // postgres_fallback_text
-        const file = dbResult as FallbackResultItem;
-        contextObject.file_id = file.id;
-        // Truncation logic remains the same
-        contextObject.chunk = file.transcript_text.substring(0, 3000) + (file.transcript_text.length > 3000 ? '...' : '');
-        contextObject.rank = file.rank;
-        contextObject.timestamp = file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString();
-        contextObject.chunk_index = undefined; // Still file-level
-        // Map metadata assuming it uses the new ProcessedEntities structure
-        contextObject.entities_in_chunk = typeof file.file_metadata === 'object' && file.file_metadata !== null
-            ? {
-                people: file.file_metadata.people,
-                dates: (file.file_metadata.dates as EnhancedNormalizedDate[]) || [], // Cast to v1.7 type
-                locations: file.file_metadata.locations,
-                topics: file.file_metadata.topics,
-                type: file.file_metadata.type,
-                sentiment: file.file_metadata.sentiment,
-                priority: file.file_metadata.priority,
-              }
-            : {};
+function mapDbMetadataToProcessedEntities(metadata: any): ProcessedEntities {
+    if (typeof metadata !== 'object' || metadata === null) {
+        return {}; // Return empty object if metadata is invalid or missing
     }
-
-    // Ensure all required fields are present (even if empty/default)
-    contextObject.chunk = contextObject.chunk ?? '';
-    contextObject.timestamp = contextObject.timestamp ?? new Date(0).toISOString();
-    contextObject.entities_in_chunk = contextObject.entities_in_chunk ?? {};
-
-    return contextObject as ContextObject;
+    return {
+        people: metadata.people || [],
+        // Ensure dates are correctly typed or default to empty array
+        dates: Array.isArray(metadata.dates) ? metadata.dates as EnhancedNormalizedDate[] : [],
+        locations: metadata.locations || [],
+        topics: metadata.topics || [],
+        type: metadata.type || undefined,
+        sentiment: metadata.sentiment || undefined,
+        priority: metadata.priority || undefined,
+        // conversation_id and thread_id are not typically stored in chunk/file metadata
+    };
 }
 
 /**
- * Simple text chunking function. (Keep as is)
+ * Simple text chunking function.
  */
 function chunkText(text: string, size: number, overlap: number): string[] {
     const chunks: string[] = [];
@@ -456,7 +420,7 @@ function chunkText(text: string, size: number, overlap: number): string[] {
 }
 
 /**
- * Generates embeddings for an array of text chunks using OpenAI API. (Keep as is)
+ * Generates embeddings for an array of text chunks using OpenAI API.
  */
 async function generateEmbeddings(chunks: string[]): Promise<(number[] | null)[]> {
     if (!chunks || chunks.length === 0) return [];
@@ -490,7 +454,7 @@ async function generateEmbeddings(chunks: string[]): Promise<(number[] | null)[]
 
 // Re-ranks retrieved context objects based on initial score and metadata overlap.
 async function rerankResults(
-    candidates: ContextObject[],
+    candidates: (ContextObject & { rrf_score?: number })[],
     queryMetadata: ProcessedEntities
 ): Promise<ContextObject[]> {
     if (!candidates || candidates.length === 0) {
@@ -519,94 +483,120 @@ async function rerankResults(
     };
 
     const scoredCandidates: ScoredContextObject[] = candidates.map(candidate => {
+        // a. Calculate initial_score (Normalized RRF Score 0-1)
         const initial_score = normalize(candidate.rrf_score);
 
-        // b. Calculate metadata_boost_score (Granular Additive Boosting)
+        // b. Calculate metadata_boost_score (Sum of weighted boosts based on ENTITY_WEIGHTS)
         let metadata_boost_score = 0.0;
         const candidateEntities = candidate.entities_in_chunk;
 
-        // Check overlaps for different entity types (+0.05 for each type of overlap)
-        if (checkOverlap(queryMetadata.people, candidateEntities?.people)) metadata_boost_score += 0.05;
-        if (checkOverlap(queryMetadata.locations, candidateEntities?.locations)) metadata_boost_score += 0.05;
-        if (checkOverlap(queryMetadata.topics, candidateEntities?.topics)) metadata_boost_score += 0.05;
+        // Check entity overlaps and add weights
+        if (checkOverlap(queryMetadata.people, candidateEntities?.people)) {
+            metadata_boost_score += ENTITY_WEIGHTS.people;
+            console.log(`Applied boost: +${ENTITY_WEIGHTS.people} (people) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
+        }
+        if (checkOverlap(queryMetadata.locations, candidateEntities?.locations)) {
+            metadata_boost_score += ENTITY_WEIGHTS.locations;
+            console.log(`Applied boost: +${ENTITY_WEIGHTS.locations} (locations) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
+        }
+        if (checkOverlap(queryMetadata.topics, candidateEntities?.topics)) {
+            metadata_boost_score += ENTITY_WEIGHTS.topics;
+            console.log(`Applied boost: +${ENTITY_WEIGHTS.topics} (topics) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
+        }
 
         // Check for exact match on type
-        if (queryMetadata.type && candidateEntities?.type && queryMetadata.type === candidateEntities.type) metadata_boost_score += 0.05;
+        if (queryMetadata.type && candidateEntities?.type && queryMetadata.type === candidateEntities.type) {
+            metadata_boost_score += ENTITY_WEIGHTS.type;
+            console.log(`Applied boost: +${ENTITY_WEIGHTS.type} (type) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
+        }
 
         // Check for exact match on sentiment
-        if (queryMetadata.sentiment && candidateEntities?.sentiment && queryMetadata.sentiment === candidateEntities.sentiment) metadata_boost_score += 0.05;
+        if (queryMetadata.sentiment && candidateEntities?.sentiment && queryMetadata.sentiment === candidateEntities.sentiment) {
+            metadata_boost_score += ENTITY_WEIGHTS.sentiment;
+            console.log(`Applied boost: +${ENTITY_WEIGHTS.sentiment} (sentiment) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
+        }
 
-        // --- START: Revised Hierarchical Date Matching Boost ---
+        // --- START: Granular Date Matching Boost (using ENTITY_WEIGHTS) ---
+        let dateBoostApplied = 0.0; // Track total date boost for logging
         if (queryMetadata.dates && queryMetadata.dates.length > 0 && candidateEntities?.dates && candidateEntities.dates.length > 0) {
-            let dateBoostApplied = 0.0;
             for (const queryDate of queryMetadata.dates) {
-                let bestMatchBoost = 0.0;
+                let bestMatchBoostForQueryDate = 0.0;
                 for (const candidateDate of candidateEntities.dates) {
                     let currentMatchBoost = 0.0;
-                    // Check Day-Level Match (highest priority)
+                    // Day-Level Match
                     if (queryDate.year && queryDate.month && queryDate.day &&
                         candidateDate.year === queryDate.year &&
                         candidateDate.month === queryDate.month &&
                         candidateDate.day === queryDate.day) {
-                        currentMatchBoost = 0.05; // Higher boost for exact day
+                        currentMatchBoost = ENTITY_WEIGHTS.date_day;
                     }
-                    // Check Month-Level Match (medium priority)
+                    // Month-Level Match
                     else if (queryDate.year && queryDate.month &&
                              candidateDate.year === queryDate.year &&
                              candidateDate.month === queryDate.month) {
-                        currentMatchBoost = Math.max(currentMatchBoost, 0.03); // Medium boost if month matches (don't overwrite higher day boost)
+                        currentMatchBoost = Math.max(currentMatchBoost, ENTITY_WEIGHTS.date_month);
                     }
-                    // Check Year-Level Match (lowest priority)
+                    // Year-Level Match
                     else if (queryDate.year && candidateDate.year === queryDate.year) {
-                        currentMatchBoost = Math.max(currentMatchBoost, 0.01); // Low boost if only year matches
+                        currentMatchBoost = Math.max(currentMatchBoost, ENTITY_WEIGHTS.date_year);
+                    }
+
+                    // Check Period Match (Independent of date components)
+                    if (queryDate.period && candidateDate.period && queryDate.period === candidateDate.period) {
+                        // Add period boost *in addition* to any date component boost found
+                        currentMatchBoost += ENTITY_WEIGHTS.date_period;
                     }
 
                     // Keep the highest boost found for this queryDate across all candidateDates
-                    bestMatchBoost = Math.max(bestMatchBoost, currentMatchBoost);
-                    // If we found the best possible match (day level), no need to check other candidateDates for this queryDate
-                    if (bestMatchBoost === 0.05) break;
+                    bestMatchBoostForQueryDate = Math.max(bestMatchBoostForQueryDate, currentMatchBoost);
+                    // If we found the best possible date match (day level), no need to check other candidateDates for this queryDate's DATE components
+                    // However, we might still need to check for a period match on other candidateDates if the first one didn't have it.
+                    // Simplification: Assume highest boost found so far is good enough for this queryDate.
+                    // Potential refinement: Could track best date boost and best period boost separately.
                 }
-                // Add the best boost found for this queryDate to the total
-                dateBoostApplied += bestMatchBoost;
+                // Add the best boost found for *this specific queryDate* to the running total
+                metadata_boost_score += bestMatchBoostForQueryDate;
+                dateBoostApplied += bestMatchBoostForQueryDate; // Accumulate for logging
             }
-            metadata_boost_score += dateBoostApplied;
-             console.log(`Applied hierarchical date boost: +${dateBoostApplied.toFixed(3)} for candidate file ${candidate.file_id} chunk ${candidate.chunk_index}`);
+            if (dateBoostApplied > 0) {
+                console.log(`Applied total date/period boost: +${dateBoostApplied.toFixed(3)} for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
+            }
         }
-        // --- END: Revised Hierarchical Date Matching Boost ---
+        // --- END: Granular Date Matching Boost ---
 
         // Language is explicitly excluded
 
-        // --- FTS Date Range Boost (Applied only if source was FTS and query has dates) ---
-        // Linter Fix: Compare candidate.source to 'fts' instead of 'postgres_fallback_text'
+        // --- FTS Date Range Boost (Using ENTITY_WEIGHTS.fts_date_range) ---
+        let ftsRangeBoostApplied = false; // Ensure applied only once per candidate
         if (candidate.source === 'fts' && queryMetadata.dates && queryMetadata.dates.length > 0) {
-            let rangeBoostApplied = false;
             for (const queryDate of queryMetadata.dates) {
-                // Derive potential range STARTING from queryDate (year, month, day if available)
                 if (queryDate.year && queryDate.month && queryDate.day) {
                     try {
                         const rangeDate = new Date(queryDate.year, queryDate.month - 1, queryDate.day);
-                        if (isValid(rangeDate) && isPast(rangeDate)) { // Only boost for past ranges
+                        if (isValid(rangeDate)) { // Check if the constructed date is valid
                              const rangeStart = startOfDay(rangeDate);
                              const rangeEnd = endOfDay(rangeDate);
                              const candidateTimestamp = parseISO(candidate.timestamp);
 
                             if (isValid(candidateTimestamp) && candidateTimestamp >= rangeStart && candidateTimestamp <= rangeEnd) {
-                                console.log(`Applying +0.10 date boost to FTS result (timestamp: ${candidate.timestamp} within ${formatISO(rangeStart)}-${formatISO(rangeEnd)})`);
-                                metadata_boost_score += 0.10;
-                                rangeBoostApplied = true;
-                                break; // Apply boost only once per candidate
+                                console.log(`Applying FTS date range boost: +${ENTITY_WEIGHTS.fts_date_range} (timestamp: ${candidate.timestamp} within ${formatISO(rangeStart)}-${formatISO(rangeEnd)})`);
+                                metadata_boost_score += ENTITY_WEIGHTS.fts_date_range;
+                                ftsRangeBoostApplied = true;
+                                break; // Apply boost only once per candidate, as confirmed
                             }
                         }
-                    } catch (e) { console.warn(`Error creating date range for FTS boost from queryDate ${JSON.stringify(queryDate)}:`, e); }
+                    } catch (e) { console.warn(`Error processing date for FTS boost from queryDate ${JSON.stringify(queryDate)}:`, e); }
                 }
-                // Can add logic here for year/month ranges if needed
+                 if (ftsRangeBoostApplied) break; // Break outer loop if boost already applied
             }
         }
 
-        // d. Calculate final_score
+        // c. Calculate final_score (Clamped between 0 and 1)
         let final_score = Math.min(1.0, initial_score + metadata_boost_score);
+        // Ensure final_score is not negative (though unlikely with current boosts)
+        final_score = Math.max(0.0, final_score);
 
-        // e. Populate Scored Object
+        // d. Populate Scored Object
         return {
             ...candidate,
             initial_score,
@@ -634,7 +624,7 @@ async function rerankResults(
     return finalContext;
 }
 
-// --- START: v1.8 Hybrid Search Helper Functions ---
+// --- START: Hybrid Search Helper Functions ---
 
 /**
  * Executes the vector search RPC call against Supabase.
@@ -674,17 +664,7 @@ async function executeVectorSearch(
             return typedSearchResults.map(result => ({
                 chunk: result.content_chunk,
                 timestamp: result.metadata?.created_at ?? new Date(0).toISOString(),
-                entities_in_chunk: typeof result.metadata === 'object' && result.metadata !== null
-                    ? {
-                        people: result.metadata.people,
-                        dates: (result.metadata.dates as EnhancedNormalizedDate[]) || [],
-                        locations: result.metadata.locations,
-                        topics: result.metadata.topics,
-                        type: result.metadata.type,
-                        sentiment: result.metadata.sentiment,
-                        priority: result.metadata.priority,
-                      }
-                    : {},
+                entities_in_chunk: mapDbMetadataToProcessedEntities(result.metadata),
                 file_id: result.file_id,
                 chunk_id: undefined, // chunk_id not returned by current RPC, adjust if needed
                 chunk_index: result.chunk_index,
@@ -775,17 +755,7 @@ async function executeFtsSearch(
             return typedTextResults.map(file => ({
                 chunk: file.transcript_text.substring(0, 3000) + (file.transcript_text.length > 3000 ? '...' : ''), // Truncate
                 timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
-                entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
-                    ? {
-                        people: file.file_metadata.people,
-                        dates: (file.file_metadata.dates as EnhancedNormalizedDate[]) || [],
-                        locations: file.file_metadata.locations,
-                        topics: file.file_metadata.topics,
-                        type: file.file_metadata.type,
-                        sentiment: file.file_metadata.sentiment,
-                        priority: file.file_metadata.priority,
-                      }
-                    : {},
+                entities_in_chunk: mapDbMetadataToProcessedEntities(file.file_metadata),
                 file_id: file.id, // Use 'id' from files table as file_id
                 chunk_id: undefined, // Not applicable for FTS
                 chunk_index: undefined, // Not applicable for FTS
@@ -859,7 +829,7 @@ function applyRRF(
     }));
 }
 
-// --- END: v1.8 Hybrid Search Helper Functions ---
+// --- END: Hybrid Search Helper Functions ---
 
 // --- Main Handler Function ---
 const handler: Handler = async (event: HandlerEvent, context: HandlerContext): Promise<{ statusCode: number; body: string; headers?: { [key: string]: string } }> => {
@@ -892,11 +862,11 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         // Initialize response variables
         let retrieved_context: ContextObject[] = [];
         let storage_status: string = "No storage operation performed.";
-        // v1.8: Default query source to 'none', will be updated based on search results
+        // Default query source to 'none', will be updated based on search results
         let query_source: SuccessResponse['query_source'] = 'none';
         let message_for_gpt: string = ""; // Initialize message for GPT
 
-        // --- Date Processing (Applied to ALL modes upfront using v1.7 logic) ---
+        // --- Date Processing ---
         const processedMetadata: ProcessedEntities = { ...payload.extracted_entities, dates: [] }; // Initialize with other entities, clear dates array
         const rawInputDates = payload.extracted_entities.dates;
         const successfullyParsedDates: EnhancedNormalizedDate[] = [];
@@ -923,27 +893,27 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                     continue; // Skip this iteration
                 }
 
-                // 2. Parse Date Part (v1.7 Logic)
+                // 2. Parse Date Part
                 if (normalizedDateString) {
                     // Prioritize parsing the GPT-provided normalized date ("Month DD, YYYY")
                     datePart = parseNormalizedDate(normalizedDateString, referenceDate);
-                        } else {
+                } else {
                     // If no normalized date, attempt to parse the original string using date-fns only
                     datePart = parseOriginalStringDate(originalString, referenceDate);
                 }
 
-                // 3. Always Extract Time Part from Original String (v1.7 Logic)
+                // 3. Always Extract Time Part from Original String
                 const timePart = extractTimeInfo(originalString);
 
-                // 4. Combine Date and Time Parts (v1.7 Logic)
+                // 4. Combine Date and Time Parts
                 const combinedComponents: Partial<EnhancedNormalizedDate> = { ...datePart, ...timePart };
 
-                // 5. Validation & Storage (v1.7 Logic)
-                // Store if we have at least year/month/day OR if we have *only* time components (i.e., just period now)
+                // 5. Validation & Storage
+                // Store if we have at least year/month/day OR if we have only period
                 // (avoids storing empty objects if all parsing failed)
                 if (Object.keys(combinedComponents).length > 0 &&
                     (combinedComponents.year || combinedComponents.month || combinedComponents.day ||
-                     // v1.7.1: Check only for period if date components are missing
+                     // Check only for period if date components are missing
                      (!combinedComponents.year && !combinedComponents.month && !combinedComponents.day && (combinedComponents.period))))
                 {
                     console.log(`  -> Storing combined components: ${JSON.stringify(combinedComponents)}`);
@@ -955,9 +925,9 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         }
         // Assign the successfully processed dates (EnhancedNormalizedDate[]) to the final metadata object
         processedMetadata.dates = successfullyParsedDates;
-        console.log("--- Finished v1.7 Date Processing ---");
+        console.log("--- Finished Date Processing ---");
         console.log("Final Processed Metadata:", JSON.stringify(processedMetadata));
-        // --- END: Date Processing (Applied to ALL modes upfront using v1.7 logic) ---
+        // --- END: Date Processing ---
 
         // Mode handling: store, query, combined
         const mode = payload.mode;
