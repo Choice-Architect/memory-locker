@@ -100,15 +100,16 @@
 
 5.  **Enhance Query Retrieval & Ranking (Phase 5 - In Progress):**
     *   **Goal:** Improve query relevance by implementing true hybrid retrieval and weighted re-ranking.
-    *   **Approach:** (Ref: `learnings/02_enhancement_plan.md` - Phase 5 Plan)
-        1.  Implement concurrent Vector Search and FTS search.
-        2.  Combine results using Reciprocal Rank Fusion (RRF).
+    *   **Approach:** (Ref: `learnings/02_enhancement_plan.md` - Phase 5 Plan for full details)
+        1.  Implement concurrent Vector Search (`search_memory_chunks`) and FTS search (`files` table).
+        2.  Combine results using Reciprocal Rank Fusion (RRF) with `k = 60`.
         3.  Refine `rerankResults` function:
-            *   Use normalized RRF score as the base `initial_score`.
-            *   Introduce `METADATA_WEIGHT` multiplier for metadata boosts.
-        4.  Update `query_source` handling in function, API schema, and GPT instructions.
-        5.  Tune `METADATA_WEIGHT` and RRF parameters based on evaluation.
-    *   **Rationale:** Leverage both semantic and keyword search upfront via RRF, then apply weighted, metadata-focused re-ranking for improved precision in the journaling context.
+            *   Use normalized RRF score (min-max scaled) as the base `initial_score`.
+            *   Implement additive, granular metadata boosts using defined weights per entity type (e.g., `date_day`, `people`, `locations`, `topics`, etc.).
+            *   Calculate `final_score = Math.min(1.0, initial_score + metadata_boost_score)`.
+        4.  Update `query_source` handling to include `'hybrid'`.
+        5.  Plan for future tuning of RRF `k` and metadata weights based on evaluation.
+    *   **Rationale:** Leverage both semantic and keyword search upfront via RRF, then apply granular, weighted, metadata-focused re-ranking for improved precision in the journaling context.
     *   **Status:** **Planning Complete, Implementation Pending.**
 
 6.  **Future Considerations (Backlog):**

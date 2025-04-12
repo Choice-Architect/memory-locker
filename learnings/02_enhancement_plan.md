@@ -93,7 +93,7 @@ Building upon the completed v1.7.1 date handling enhancements, this section outl
     *   Map results from each source into separate `ContextObject` arrays, preserving original scores.
 
 2.  **[ ] Implement RRF Function:**
-    *   Create a new `applyRRF(vectorResults, ftsResults, k)` helper function in `memory-action.ts`. *(Note: Specific `k` value, often 60, TBD pending discussion)*.
+    *   Create a new `applyRRF(vectorResults, ftsResults, k)` helper function in `memory-action.ts`. *(Note: Decision made to use initial k = 60)*.
     *   Implement the RRF logic: calculate `1 / (k + rank)` for each item in each list and sum scores for common items using a map.
     *   Return a single list of `ContextObject`s sorted by descending RRF score.
 
@@ -103,9 +103,10 @@ Building upon the completed v1.7.1 date handling enhancements, this section outl
     *   Update `query_source` reporting logic in the response to use `'hybrid'` source type when applicable.
 
 4.  **[ ] Refine `rerankResults` with Weighting:**
-    *   **Decision:** Use the **Normalized RRF Score** as the `initial_score`. Normalize the `rrf_score` values from the candidate list using **min-max scaling** (`(score - min_score) / (max_score - min_score)`) before using them in the final score calculation.
-    *   Define a constant `METADATA_WEIGHT`. *(Note: Specific starting value, e.g., 1.5 or 2.0, TBD pending discussion)*.
-    *   Modify the `final_score` calculation to: `final_score = initial_score + (METADATA_WEIGHT * metadata_boost_score)`. Ensure clamping (`Math.min(1.0, ...)`).
+    *   **Decision:** Use the **Normalized RRF Score** as the `initial_score`. Normalize the `rrf_score` values from the candidate list using **min-max scaling** (`(score - min_score) / (max_score - min_score)`) before using them as the base `initial_score` (ranging 0-1).
+    *   **Decision:** Implement **granular weighting** for metadata boosts. Define constants for each entity type's contribution to the boost score (using `ENTITY_WEIGHTS = { people: 0.10, locations: 0.10, topics: 0.05, type: 0.05, sentiment: 0.05, date_day: 0.15, date_month: 0.10, date_year: 0.05, date_period: 0.05, fts_date_range: 0.10 }`).
+    *   Modify `rerankResults` to calculate `metadata_boost_score` by summing the applicable weights for each matching entity type between the query and the candidate.
+    *   Modify the `final_score` calculation to: `final_score = initial_score + metadata_boost_score`. Ensure clamping (`Math.min(1.0, ...)`).
 
 5.  **[ ] Update API Schema & GPT Instructions:**
     *   Modify `openapi.json`: Update the `enum` for `SuccessResponse.properties.query_source` to include `'hybrid'`.
@@ -117,4 +118,4 @@ Building upon the completed v1.7.1 date handling enhancements, this section outl
     *   Iteratively adjust `METADATA_WEIGHT` based on evaluation outcomes.
     *   Document the final chosen weight and rationale.
 
-**Rationale:** This approach combines the strengths of both search methods early via RRF, providing a better candidate list for the final, metadata-focused re-ranking step. Using the **Normalized RRF score** as the basis for re-ranking leverages the combined confidence from the hybrid retrieval. Using a multiplicative weight allows explicit control over the importance of metadata matches relative to the initial retrieval score, aligning better with the journaling use case where specific entity recall is often crucial. Adjusting the `query_source` reporting ensures accurate communication back to the GPT.
+**Rationale:** This approach combines the strengths of both search methods early via RRF (using `k=60`), providing a better candidate list for the final, metadata-focused re-ranking step. Using the **Normalized RRF score** as the basis for re-ranking leverages the combined confidence from the hybrid retrieval. Using **granular, additive weights** for metadata matching provides direct control over the importance of specific entity types, aligning better with the journaling use case where specific entity recall is often crucial. Adjusting the `query_source` reporting ensures accurate communication back to the GPT.
