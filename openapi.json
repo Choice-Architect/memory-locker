@@ -354,13 +354,11 @@
           "query_source": {
             "type": "string",
             "enum": [
-              "vector_store",
-              "postgres_fallback_text",
+              "hybrid",
               "none",
-              "combined",
               "error"
             ],
-            "description": "Indicates the primary source of the retrieved context (vector, FTS text) or if none was found/an error occurred."
+            "description": "Indicates the primary source of the retrieved context (vector, FTS text, hybrid combination) or if none was found/an error occurred."
           },
           "message_for_gpt": {
             "type": "string",

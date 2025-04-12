@@ -1,23 +1,31 @@
-# Memory Locker: Implementation Plan v1.7.1 - Hybrid Date Parsing (Period Only)
+# Memory Locker: Implementation Plan v1.8 - Hybrid Date Parsing & Query Enhancements
 
-**Version:** 1.7.1 (Reflects implemented state as of audit)
+**Version:** 1.8 (Reflects implemented state including Phase 5 Query Enhancements)
 
-**Goal:** Implement a hybrid date parsing strategy in `store` mode leveraging upstream GPT normalization and targeted Netlify function logic. Maintain and refine the application-layer re-ranking in `query`/`combined` modes based on the reliably extracted date components. **Time component extraction was simplified to only store the `period` ('Morning', 'Afternoon', etc.).**
+**Goal:** Implement a hybrid date parsing strategy (v1.7.1) and enhance query retrieval with concurrent vector/FTS search, Reciprocal Rank Fusion (RRF), and weighted metadata re-ranking (v1.8).
 
-**Core Principles:**
+**Core Principles (Date Parsing - v1.7.1 - Completed):**
 
 *   **Leverage Upstream GPT:** Utilize the Custom GPT's ability to normalize common date expressions into a standard `"Month DD, YYYY"` format. For ranges, the GPT provides the normalized *start date*.
-*   **Netlify Function Focus:** The Netlify function (`memory-action.ts`) focuses on:
-    *   Parsing the standardized `"Month DD, YYYY"` format from the GPT using `date-fns` (`parseNormalizedDate`).
-    *   Extracting *only the period* information (e.g., "Morning", "Evening") from the *original* user date string using targeted keyword matching (`extractTimeInfo`). **Does NOT store specific hours/minutes/seconds.**
-    *   Handling cases where the GPT *cannot* normalize the date via a dedicated `parseOriginalStringDate` function, using only `date-fns` for date parsing.
-    *   Storing only structured components (year, month, day, day_of_week, week_number, period) in metadata (no `original` string).
-    *   Performing application-layer re-ranking (`rerankResults`) using the stored components.
-*   **Query Relevance:** Ensure the stored components support effective date-based querying and the existing re-ranking strategy (hierarchical date match, period match, past date boost).
+*   **Netlify Function Focus (Date Parsing):**
+    *   Parses the standardized `"Month DD, YYYY"` format from the GPT using `date-fns` (`parseNormalizedDate`).
+    *   Extracts *only the period* information (e.g., "Morning", "Evening") from the *original* user date string using targeted keyword matching (`extractTimeInfo`). **Does NOT store specific hours/minutes/seconds.**
+    *   Handles cases where the GPT *cannot* normalize the date via a dedicated `parseOriginalStringDate` function, using only `date-fns` for date parsing.
+    *   Stores only structured components (year, month, day, day_of_week, week_number, period) in metadata (no `original` string).
+*   **Query Relevance (Date Parsing):** Ensure the stored date components support effective querying and re-ranking.
+
+**Core Principles (Query Enhancement - v1.8 - Completed):**
+
+*   **Hybrid Initial Retrieval:** Leverages both vector (semantic) search (`executeVectorSearch`) and FTS (keyword) search (`executeFtsSearch`) concurrently using `Promise.allSettled` to generate a richer set of initial candidates.
+*   **Reciprocal Rank Fusion (RRF):** Uses RRF (`applyRRF` function with `k = 60`) to effectively combine the ranked lists from vector and FTS searches into a single, improved candidate list based on `file_id`.
+*   **Weighted Re-ranking:** Applies refined re-ranking logic (`rerankResults`) to the RRF-fused list. The final score is calculated as `Math.min(1.0, initial_score + metadata_boost_score)` where:
+    *   `initial_score` is the min-max normalized RRF score (0-1).
+    *   `metadata_boost_score` is the sum of granular, additive weights (`ENTITY_WEIGHTS` constant) for matching entity types (people, locations, topics, type, sentiment, hierarchical date components, period, FTS date range) between the query and candidate.
+*   **Simplified Query Source Reporting:** Reports `query_source` as `'hybrid'` if results are found from either search, `'none'` if no results, or `'error'` if issues occurred.
 
 ---
 
-## Implementation Steps (General) - Completed
+## Implementation Steps (General - Date Parsing v1.7.1) - Completed
 
 1.  **[x] Update Custom GPT Instructions (`learnings/02_gpt_instructions.md`):**
     *   Instructed the GPT to provide `{"original": "...", "normalized": "Month DD, YYYY"}` when possible, otherwise just the original string.
@@ -28,7 +36,7 @@
 
 ---
 
-## Implementation Steps (`memory-action.ts`) - Completed
+## Implementation Steps (`memory-action.ts` - Date Parsing v1.7.1) - Completed
 
 **1. [x] Update TypeScript Interfaces:**
     *   Defined `InputDateEntity` type alias.
@@ -49,73 +57,64 @@
     *   **`parseOriginalStringDate`:** Implemented using ONLY `date-fns` to attempt parsing common formats from the original string when GPT provides no normalization. Returns date components.
 
 **4. [x] `query`/`combined` Mode - Re-ranking (`rerankResults`) Verified (Post v1.7.1 Completion):**
-    *   After the v1.7.1 date parsing refactor was complete, the existing `rerankResults` logic correctly used the newly structured stored components (`year`, `month`, `day`, `period`).
-    *   Query date strings were also parsed into the same `EnhancedNormalizedDate` structure for comparison within `rerankResults`.
-    *   *(Note: This verification applies to the state before the planned Phase 5 RRF/weighting enhancements)*.
+    *   *(Note: This verification applies to the state before the Phase 5 RRF/weighting enhancements were implemented in v1.8)*.
 
 **5. [x] Constants & Cleanup:**
     *   Obsolete constants, comments, and functions related to previous date/time parsing attempts were removed.
 
 ---
 
-**Impact Statement (v1.7.1):**
+**Impact Statement (v1.7.1 - Date Parsing):**
 
-*   The v1.7 hybrid approach was successfully implemented and refined.
+*   The v1.7 hybrid date parsing approach was successfully implemented and refined.
 *   Primary date normalization relies on upstream GPT for common cases.
 *   Netlify function reliably parses `"Month DD, YYYY"` dates (`parseNormalizedDate`) and attempts simple original string date parsing (`parseOriginalStringDate`).
 *   **Time processing was simplified to only extract and store the `period` (`extractTimeInfo`), improving reliability by removing error-prone hour/minute parsing.**
 *   Maintains necessary structured components (`year`, `month`, `day`, `period`) for the query re-ranking mechanism.
 *   Accepts the limitation that ambiguous date strings not normalized by GPT may not yield stored date components.
 
-**Overall Status:** **v1.7.1 Enhancement Complete.** The date parsing logic aligns with the refined plan, focusing on reliable date components and period extraction.
-**Verification:** Confirmed that both `store` and `query`/`combined` modes utilize the same centralized date processing logic and the consistent `EnhancedNormalizedDate` structure, ensuring alignment between data storage and query-time comparison/re-ranking.
-
 ---
 
-## Future Enhancements (Phase 5 - Query Mode) - Proposed Plan
+## Query Enhancements (Phase 5 / v1.8) - Completed
 
-Building upon the completed v1.7.1 date handling enhancements, this section outlines the proposed plan for the next phase of improvements focused on the query retrieval and ranking logic.
+Building upon the completed v1.7.1 date handling, the query retrieval and ranking logic was enhanced as follows:
 
 **Goal:** Improve the relevance and accuracy of `query`/`combined` mode retrieval by implementing a true hybrid search strategy combined with weighted re-ranking based on metadata.
 
-**Core Principles:**
+**Implementation Steps (`memory-action.ts` - Query Enhancement v1.8) - Completed**
 
-*   **Hybrid Initial Retrieval:** Leverage both vector (semantic) search and FTS (keyword) search simultaneously to generate a richer set of initial candidates.
-*   **Reciprocal Rank Fusion (RRF):** Use RRF to effectively combine the ranked lists from vector and FTS searches into a single, improved candidate list.
-*   **Weighted Re-ranking:** Apply the existing custom re-ranking logic (`rerankResults`) to the RRF-fused list, but introduce a multiplier weight to increase the influence of metadata matches (including dates, people, topics, etc.) on the final score.
-*   **Iterative Tuning:** Use benchmark queries and evaluation to determine an appropriate value for the metadata weight multiplier.
+1.  **[x] Implement Concurrent Search:**
+    *   Modified `memory-action.ts` to execute vector search (`executeVectorSearch`) and FTS search (`executeFtsSearch` on `files` table) concurrently using `Promise.allSettled()`.
+    *   Error handling allows one search to fail while the other potentially succeeds.
+    *   Results mapped to `ContextObject` arrays, preserving original scores/ranks and adding `source` ('vector' or 'fts').
 
-**Proposed Implementation Steps:**
+2.  **[x] Implement RRF Function:**
+    *   Created the `applyRRF(vectorResults, ftsResults, k)` helper function.
+    *   Implemented RRF logic using `k = 60`, summing `1 / (k + rank)` for vector and FTS results based on shared `file_id`.
+    *   Returns a single list of `ContextObject`s sorted by descending RRF score, with `rrf_score` added.
 
-1.  **[ ] Implement Concurrent Search:**
-    *   Modify `memory-action.ts` to execute vector search (`search_memory_chunks`) and FTS search (`files` table) concurrently using `Promise.all()`.
-    *   Handle errors gracefully for each search.
-    *   Map results from each source into separate `ContextObject` arrays, preserving original scores.
+3.  **[x] Integrate RRF:**
+    *   Called `applyRRF` after concurrent searches resolve.
+    *   Passed the RRF-ranked list (`rrf_score` included) as `candidates` to the `rerankResults` function.
+    *   Updated `query_source` reporting logic to use `'hybrid'`, `'none'`, or `'error'` based on search success and result presence.
 
-2.  **[ ] Implement RRF Function:**
-    *   Create a new `applyRRF(vectorResults, ftsResults, k)` helper function in `memory-action.ts`. *(Note: Decision made to use initial k = 60)*.
-    *   Implement the RRF logic: calculate `1 / (k + rank)` for each item in each list and sum scores for common items using a map.
-    *   Return a single list of `ContextObject`s sorted by descending RRF score.
+4.  **[x] Refine `rerankResults` with Weighting:**
+    *   Used the **Normalized RRF Score** (min-max scaled 0-1) as the `initial_score`.
+    *   Implemented **granular, additive weighting** for metadata boosts using the `ENTITY_WEIGHTS` constant.
+    *   Calculated `metadata_boost_score` by summing weights for matching entity types (people, locations, topics, type, sentiment, date_day/month/year, date_period, fts_date_range).
+    *   Calculated `final_score = Math.min(1.0, initial_score + metadata_boost_score)`.
+    *   Removed temporary scores (`rrf_score`, `initial_score`, `metadata_boost_score`, `final_score`, `source`) before returning final results.
 
-3.  **[ ] Integrate RRF:**
-    *   Call `applyRRF` after the concurrent searches resolve.
-    *   Pass the RRF-ranked list as the `candidates` to the `rerankResults` function.
-    *   Update `query_source` reporting logic in the response to use `'hybrid'` source type when applicable.
+5.  **[x] Update API Schema & GPT Instructions:**
+    *   Modified `openapi.json`: Updated the `enum` for `SuccessResponse.properties.query_source` to only include `'hybrid'`, `'none'`, `'error'`.
+    *   Modified `gpt_instructions.md`: Updated the "Handling Action Responses" section to remove specific phrasing for obsolete sources (`vector_store`, `postgres_fallback_text`) and use general phrasing.
 
-4.  **[ ] Refine `rerankResults` with Weighting:**
-    *   **Decision:** Use the **Normalized RRF Score** as the `initial_score`. Normalize the `rrf_score` values from the candidate list using **min-max scaling** (`(score - min_score) / (max_score - min_score)`) before using them as the base `initial_score` (ranging 0-1).
-    *   **Decision:** Implement **granular weighting** for metadata boosts. Define constants for each entity type's contribution to the boost score (using `ENTITY_WEIGHTS = { people: 0.10, locations: 0.10, topics: 0.05, type: 0.05, sentiment: 0.05, date_day: 0.15, date_month: 0.10, date_year: 0.05, date_period: 0.05, fts_date_range: 0.10 }`).
-    *   Modify `rerankResults` to calculate `metadata_boost_score` by summing the applicable weights for each matching entity type between the query and the candidate.
-    *   Modify the `final_score` calculation to: `final_score = initial_score + metadata_boost_score`. Ensure clamping (`Math.min(1.0, ...)`).
+6.  **[ ] Evaluation and Tuning:** (Status: **Pending / Future Task**) 
+    *   Initial weights in `ENTITY_WEIGHTS` and `RRF_K=60` are set.
+    *   Future work involves defining benchmarks and iteratively tuning these constants based on evaluation.
 
-5.  **[ ] Update API Schema & GPT Instructions:**
-    *   Modify `openapi.json`: Update the `enum` for `SuccessResponse.properties.query_source` to include `'hybrid'`.
-    *   Modify `gpt_instructions.md`: Update the "Handling Action Responses" section to remove phrasing specific to `vector_store` or `postgres_fallback_text`. Instruct the GPT to use general phrasing for the `'hybrid'` source type.
+**Rationale:** This approach combines the strengths of both search methods early via RRF, providing a better candidate list for the final, metadata-focused re-ranking step. Using the Normalized RRF score as the basis leverages combined confidence. Granular, additive weights provide direct control over entity importance, aligning with the journaling use case. Simplified `query_source` reporting matches the unified hybrid retrieval logic.
 
-6.  **[ ] Evaluation and Tuning:**
-    *   Define a benchmark set of diverse queries and expected results.
-    *   Execute benchmarks and evaluate results using appropriate metrics.
-    *   Iteratively adjust `METADATA_WEIGHT` based on evaluation outcomes.
-    *   Document the final chosen weight and rationale.
+---
 
-**Rationale:** This approach combines the strengths of both search methods early via RRF (using `k=60`), providing a better candidate list for the final, metadata-focused re-ranking step. Using the **Normalized RRF score** as the basis for re-ranking leverages the combined confidence from the hybrid retrieval. Using **granular, additive weights** for metadata matching provides direct control over the importance of specific entity types, aligning better with the journaling use case where specific entity recall is often crucial. Adjusting the `query_source` reporting ensures accurate communication back to the GPT.
+**Overall Status:** **v1.8 Enhancements Complete.** Date parsing (v1.7.1) and Query Enhancement (v1.8 - RRF + Weighted Re-ranking) logic implemented. Ready for testing and potential tuning.

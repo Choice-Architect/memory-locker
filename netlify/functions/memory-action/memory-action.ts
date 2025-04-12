@@ -110,17 +110,26 @@ interface ContextObject {
     chunk: string;
     timestamp: string; // ISO 8601 format
     entities_in_chunk: ProcessedEntities; // Output uses ProcessedEntities with v1.7 EnhancedNormalizedDate
-    file_id?: string; // UUID as string
-    chunk_id?: string; // UUID as string
-    chunk_index?: number;
-    similarity?: number;
-    rank?: number;
+    file_id: string; // UUID as string - Now guaranteed for both sources
+    chunk_id?: string; // UUID as string (from vector search)
+    chunk_index?: number; // (from vector search)
+    similarity?: number; // Raw vector similarity
+    rank?: number; // Raw FTS rank
+    // v1.8 additions
+    source?: 'vector' | 'fts'; // Source of this specific context object before RRF
+    rrf_score?: number; // Score after RRF, added internally
+    // Deprecated properties (to be removed in final ContextObject)
+    // initial_score?: number; // Used during reranking
+    // metadata_boost_score?: number; // Used during reranking
+    // final_score?: number; // Used during reranking
 }
 
+// v1.8: Updated SuccessResponse for hybrid source
 interface SuccessResponse {
-    retrieved_context: ContextObject[];
+    retrieved_context: ContextObject[]; // Will contain cleaned ContextObjects (no internal scores)
     storage_status: string;
-    query_source: 'vector_store' | 'postgres_fallback' | 'postgres_fallback_metadata' | 'postgres_fallback_text' | 'none' | 'combined' | 'error';
+    // v1.8: Updated enum to match openapi.json (Removed old values)
+    query_source: 'hybrid' | 'none' | 'error';
     message_for_gpt?: string;
     error: null;
 }
@@ -142,6 +151,7 @@ interface SearchResultItem {
 // Define interface for the structure returned by the fallback files query
 interface FallbackResultItem {
     id: string; // UUID as string
+    file_id: string; // Alias for id
     transcript_text: string;
     created_at: string | null;
     // file_metadata from DB should now contain ProcessedEntities structure
@@ -151,9 +161,9 @@ interface FallbackResultItem {
 
 // Interface for internal re-ranking
 interface ScoredContextObject extends ContextObject {
-    initial_score: number;
-    metadata_boost_score: number;
-    final_score: number;
+    initial_score: number; // Normalized RRF score (0-1)
+    metadata_boost_score: number; // Sum of weighted boosts
+    final_score: number; // Clamped sum of initial + boost
 }
 
 // --- Constants ---
@@ -164,7 +174,22 @@ const CHUNK_OVERLAP = 200;
 const VECTOR_MATCH_THRESHOLD = 0.5;
 const VECTOR_MATCH_COUNT = 15;
 const FALLBACK_MATCH_COUNT = 20;
-const FINAL_MATCH_COUNT = 5;
+const FINAL_MATCH_COUNT = 5; // Number of results after re-ranking
+
+// v1.8: Added constants for RRF and Entity Weighting
+const RRF_K = 60; // RRF constant
+const ENTITY_WEIGHTS = {
+    people: 0.10,
+    locations: 0.10,
+    topics: 0.05,
+    type: 0.05,
+    sentiment: 0.05,
+    date_day: 0.15,     // Highest date precision
+    date_month: 0.10,   // Medium date precision
+    date_year: 0.05,    // Lowest date precision
+    date_period: 0.05,  // Morning, Afternoon, etc.
+    fts_date_range: 0.10 // Boost for FTS results falling in query date range (applied once)
+};
 
 // Simple list of common English stop words - Keep as is
 const STOP_WORDS = new Set([
@@ -466,31 +491,37 @@ async function generateEmbeddings(chunks: string[]): Promise<(number[] | null)[]
 // Re-ranks retrieved context objects based on initial score and metadata overlap.
 async function rerankResults(
     candidates: ContextObject[],
-    queryMetadata: ProcessedEntities,
-    query_source: Extract<SuccessResponse['query_source'], 'vector_store' | 'postgres_fallback_text'>
+    queryMetadata: ProcessedEntities
 ): Promise<ContextObject[]> {
     if (!candidates || candidates.length === 0) {
         return [];
     }
 
-    console.log(`Re-ranking ${candidates.length} candidates from source: ${query_source}`);
+    console.log(`Re-ranking ${candidates.length} candidates...`);
+
+    // 1. Normalize RRF Scores (Min-Max Scaling to 0-1)
+    let minRrfScore = Infinity;
+    let maxRrfScore = -Infinity;
+    candidates.forEach(c => {
+        if (c.rrf_score !== undefined) {
+            minRrfScore = Math.min(minRrfScore, c.rrf_score);
+            maxRrfScore = Math.max(maxRrfScore, c.rrf_score);
+        }
+    });
+
+    const range = maxRrfScore - minRrfScore;
+
+    // Define the normalization function (Moved here)
+    const normalize = (score: number | undefined): number => {
+        if (score === undefined) return 0; // Handle undefined scores
+        if (range === 0) return 1; // Avoid division by zero if all scores are the same
+        return (score - minRrfScore) / range;
+    };
 
     const scoredCandidates: ScoredContextObject[] = candidates.map(candidate => {
-        // a. Map to Scored Objects & b. Calculate initial_score
-        let initial_score = 0;
-        if (query_source === 'vector_store') {
-            // Use similarity score from vector search (already mapped in ContextObject)
-            initial_score = candidate.similarity || 0;
-            // Ensure similarity is within 0-1 range (clamp if necessary, though unlikely)
-            initial_score = Math.max(0, Math.min(1, initial_score));
-        } else { // postgres_fallback_text
-            // Use rank score from FTS (already mapped in ContextObject)
-            initial_score = candidate.rank || 0;
-             // Assume rank is already normalized (0-1). If not, normalization needed here.
-             initial_score = Math.max(0, Math.min(1, initial_score)); // Clamp just in case
-        }
+        const initial_score = normalize(candidate.rrf_score);
 
-        // c. Calculate metadata_boost_score
+        // b. Calculate metadata_boost_score (Granular Additive Boosting)
         let metadata_boost_score = 0.0;
         const candidateEntities = candidate.entities_in_chunk;
 
@@ -545,8 +576,9 @@ async function rerankResults(
 
         // Language is explicitly excluded
 
-        // NEW: Apply Date Range Boost (FTS Only)
-        if (query_source === 'postgres_fallback_text' && queryMetadata.dates && queryMetadata.dates.length > 0) {
+        // --- FTS Date Range Boost (Applied only if source was FTS and query has dates) ---
+        // Linter Fix: Compare candidate.source to 'fts' instead of 'postgres_fallback_text'
+        if (candidate.source === 'fts' && queryMetadata.dates && queryMetadata.dates.length > 0) {
             let rangeBoostApplied = false;
             for (const queryDate of queryMetadata.dates) {
                 // Derive potential range STARTING from queryDate (year, month, day if available)
@@ -602,6 +634,233 @@ async function rerankResults(
     return finalContext;
 }
 
+// --- START: v1.8 Hybrid Search Helper Functions ---
+
+/**
+ * Executes the vector search RPC call against Supabase.
+ * @param embedding The query embedding vector.
+ * @param queryMetadata Processed query entities for filtering.
+ * @returns A promise resolving to an array of ContextObjects from vector search, or empty array on error.
+ */
+async function executeVectorSearch(
+    embedding: number[],
+    queryMetadata: ProcessedEntities
+): Promise<ContextObject[]> {
+    console.log("Executing Vector Search...");
+    try {
+        const { data: searchResults, error: searchError } = await supabase.rpc(
+            'search_memory_chunks',
+            { // Use named parameters matching the SQL function definition
+                query_embedding: embedding,
+                match_threshold: VECTOR_MATCH_THRESHOLD,
+                match_count: VECTOR_MATCH_COUNT, // Get more results initially for RRF
+                filter_topics: queryMetadata.topics || null,
+                filter_people: queryMetadata.people || null,
+                filter_locations: queryMetadata.locations || null,
+                filter_type: queryMetadata.type || null,
+                filter_sentiment: queryMetadata.sentiment || null,
+            }
+        );
+
+        if (searchError) {
+            console.error("Error during vector search RPC call:", searchError);
+            return []; // Return empty on error
+        }
+
+        const typedSearchResults = searchResults as SearchResultItem[] | null;
+        if (typedSearchResults && typedSearchResults.length > 0) {
+            console.log(`Vector search found ${typedSearchResults.length} raw results.`);
+            // Map results to ContextObject, adding source and preserving similarity
+            return typedSearchResults.map(result => ({
+                chunk: result.content_chunk,
+                timestamp: result.metadata?.created_at ?? new Date(0).toISOString(),
+                entities_in_chunk: typeof result.metadata === 'object' && result.metadata !== null
+                    ? {
+                        people: result.metadata.people,
+                        dates: (result.metadata.dates as EnhancedNormalizedDate[]) || [],
+                        locations: result.metadata.locations,
+                        topics: result.metadata.topics,
+                        type: result.metadata.type,
+                        sentiment: result.metadata.sentiment,
+                        priority: result.metadata.priority,
+                      }
+                    : {},
+                file_id: result.file_id,
+                chunk_id: undefined, // chunk_id not returned by current RPC, adjust if needed
+                chunk_index: result.chunk_index,
+                similarity: result.similarity,
+                source: 'vector', // Set source
+                rank: undefined, // Not applicable for vector
+            }));
+        } else {
+            console.log("Vector search yielded no results.");
+            return [];
+        }
+    } catch (error) {
+        console.error("Unexpected error during vector search execution:", error);
+        return []; // Return empty on unexpected errors
+    }
+}
+
+/**
+ * Executes the Full-Text Search (FTS) query against the 'files' table.
+ * @param queryMetadata Processed query entities.
+ * @param originalQueryEntities Original entities from the request (needed for raw date strings).
+ * @returns A promise resolving to an array of ContextObjects from FTS search, or empty array on error.
+ */
+async function executeFtsSearch(
+    queryMetadata: ProcessedEntities,
+    originalQueryEntities: ExtractedEntities
+): Promise<ContextObject[]> {
+    console.log("Executing FTS Search...");
+    try {
+        // 1. Gather entities for FTS (include ORIGINAL date strings from input)
+        const entityValues: string[] = [];
+        // Use originalQueryEntities to get raw date strings
+        if (originalQueryEntities.dates) {
+            originalQueryEntities.dates.forEach(dateInput => {
+                if (typeof dateInput === 'string') {
+                    entityValues.push(dateInput);
+                } else if (typeof dateInput === 'object' && dateInput.original) {
+                    entityValues.push(dateInput.original); // Use original string from object
+                }
+            });
+        }
+        // Use processedMetadata for other entities
+        (queryMetadata.people || []).forEach(p => entityValues.push(p));
+        (queryMetadata.locations || []).forEach(l => entityValues.push(l));
+        (queryMetadata.topics || []).forEach(t => entityValues.push(t));
+        if (queryMetadata.type) entityValues.push(queryMetadata.type);
+        if (queryMetadata.sentiment) entityValues.push(queryMetadata.sentiment);
+        // DO NOT include queryMetadata.language
+
+        // Remove duplicates and empty strings
+        const uniqueEntities = [...new Set(entityValues)].filter(e => e && e.trim() !== '');
+
+        if (uniqueEntities.length === 0) {
+            console.log("No valid non-language entities found for FTS query.");
+            return [];
+        }
+
+        // 2. Construct the FTS query string
+        const ftsQueryString = uniqueEntities
+            .map(term => term.replace(/['&|!():*]/g, '')) // Basic escaping
+            .filter(term => term.trim() !== '')
+            .join(' | ');
+
+        console.log(`FTS Search: Using query string: "${ftsQueryString}"`);
+
+        // 3. Build the Supabase query with FTS
+        const { data: ftsResults, error: ftsError } = await supabase
+            .from('files')
+            .select('id, transcript_text, created_at, file_metadata, rank:ts_rank_cd(transcript_tsv, to_tsquery(\'english\', $1))')
+            .textSearch('transcript_tsv', ftsQueryString, {
+                config: 'english',
+                type: 'websearch',
+                // Removed explicit rank normalization here, will use raw rank for RRF position
+            })
+            .order('rank', { ascending: false }) // Higher rank is better
+            .limit(FALLBACK_MATCH_COUNT); // Get more results initially for RRF
+
+        if (ftsError) {
+            console.error("Error during FTS search:", ftsError);
+            return [];
+        }
+        // Linter Fix: Add 'as any' to handle potential type mismatch from Supabase client
+        const typedTextResults = ftsResults as any as (FallbackResultItem & { rank?: number })[] | null;
+
+        if (typedTextResults && typedTextResults.length > 0) {
+            console.log(`FTS search found ${typedTextResults.length} raw results.`);
+            // Map results to ContextObject, adding source and preserving rank
+            return typedTextResults.map(file => ({
+                chunk: file.transcript_text.substring(0, 3000) + (file.transcript_text.length > 3000 ? '...' : ''), // Truncate
+                timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
+                entities_in_chunk: typeof file.file_metadata === 'object' && file.file_metadata !== null
+                    ? {
+                        people: file.file_metadata.people,
+                        dates: (file.file_metadata.dates as EnhancedNormalizedDate[]) || [],
+                        locations: file.file_metadata.locations,
+                        topics: file.file_metadata.topics,
+                        type: file.file_metadata.type,
+                        sentiment: file.file_metadata.sentiment,
+                        priority: file.file_metadata.priority,
+                      }
+                    : {},
+                file_id: file.id, // Use 'id' from files table as file_id
+                chunk_id: undefined, // Not applicable for FTS
+                chunk_index: undefined, // Not applicable for FTS
+                similarity: undefined, // Not applicable for FTS
+                rank: file.rank, // Preserve raw FTS rank
+                source: 'fts', // Set source
+            }));
+        } else {
+            console.log("FTS search yielded no results.");
+            return [];
+        }
+    } catch (error) {
+        console.error("Unexpected error during FTS search execution:", error);
+        return [];
+    }
+}
+
+/**
+ * Applies Reciprocal Rank Fusion (RRF) to combine results from vector and FTS searches.
+ * @param vectorResults Array of ContextObjects from vector search.
+ * @param ftsResults Array of ContextObjects from FTS search.
+ * @param k The RRF ranking constant (default: 60).
+ * @returns A single array of ContextObjects sorted by descending RRF score, with rrf_score property added.
+ */
+function applyRRF(
+    vectorResults: ContextObject[],
+    ftsResults: ContextObject[],
+    k: number = RRF_K
+): ContextObject[] {
+    console.log(`Applying RRF with k=${k} to ${vectorResults.length} vector and ${ftsResults.length} FTS results.`);
+    // Use file_id as the primary key for fusion
+    const rrfScores = new Map<string, { score: number; context: ContextObject }>();
+
+    // Process vector results (ranked by index implicitly)
+    vectorResults.forEach((result, index) => {
+        const rank = index + 1;
+        const scoreIncrement = 1 / (k + rank);
+        const existing = rrfScores.get(result.file_id);
+        if (existing) {
+            existing.score += scoreIncrement;
+            // Keep the vector context if collision (usually more granular)
+        } else {
+            rrfScores.set(result.file_id, { score: scoreIncrement, context: result });
+        }
+    });
+
+    // Process FTS results (ranked by index implicitly)
+    ftsResults.forEach((result, index) => {
+        const rank = index + 1;
+        const scoreIncrement = 1 / (k + rank);
+        const existing = rrfScores.get(result.file_id);
+        if (existing) {
+            existing.score += scoreIncrement;
+            // If vector context exists, don't overwrite. FTS rank is stored on its context object.
+        } else {
+            // Only add if not already present from vector search
+            rrfScores.set(result.file_id, { score: scoreIncrement, context: result });
+        }
+    });
+
+    // Convert map to array and sort by RRF score descending
+    const fusedResults = Array.from(rrfScores.values())
+        .sort((a, b) => b.score - a.score);
+
+    console.log(`RRF produced ${fusedResults.length} fused results.`);
+
+    // Map back to ContextObject[], adding the rrf_score
+    return fusedResults.map(item => ({
+        ...item.context,
+        rrf_score: item.score // Add the calculated RRF score
+    }));
+}
+
+// --- END: v1.8 Hybrid Search Helper Functions ---
+
 // --- Main Handler Function ---
 const handler: Handler = async (event: HandlerEvent, context: HandlerContext): Promise<{ statusCode: number; body: string; headers?: { [key: string]: string } }> => {
     const headers = { 'Content-Type': 'application/json' };
@@ -633,6 +892,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         // Initialize response variables
         let retrieved_context: ContextObject[] = [];
         let storage_status: string = "No storage operation performed.";
+        // v1.8: Default query source to 'none', will be updated based on search results
         let query_source: SuccessResponse['query_source'] = 'none';
         let message_for_gpt: string = ""; // Initialize message for GPT
 
@@ -813,6 +1073,8 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             const queryText = payload.query_text;
             // Use processedMetadata which has EnhancedNormalizedDate[]
             const queryMetadata = processedMetadata;
+             // Use original entities for FTS query construction (raw date strings)
+            const originalQueryEntities = payload.extracted_entities;
 
             if (!queryText) {
                  throw new Error("query_text is required for 'query' or 'combined' mode.");
@@ -820,168 +1082,117 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
             // a. Generate embedding for the query text
             console.log("Generating embedding for query text...");
-            const queryEmbeddingResponse = await openai.embeddings.create({
-                model: EMBEDDING_MODEL,
-                input: queryText,
-                dimensions: EMBEDDING_DIMENSIONS,
-            });
-            queryEmbedding = queryEmbeddingResponse?.data[0]?.embedding;
-
-            if (!queryEmbedding) {
-                throw new Error("Failed to generate query embedding.");
-            }
-
-            // b. Vector Search Call Update
-            console.log("Attempt 1: Searching via vector search...");
-
-            // UPDATE RPC Call parameters:
-            const { data: searchResults, error: searchError } = await supabase.rpc(
-                'search_memory_chunks',
-                { // Use named parameters matching the *new* SQL function definition
-                    query_embedding: queryEmbedding,
-                    match_threshold: VECTOR_MATCH_THRESHOLD,
-                    match_count: VECTOR_MATCH_COUNT,
-                    filter_topics: queryMetadata.topics || null,
-                    filter_people: queryMetadata.people || null,
-                    filter_locations: queryMetadata.locations || null,
-                    filter_type: queryMetadata.type || null,
-                    filter_sentiment: queryMetadata.sentiment || null,
+            try {
+                const queryEmbeddingResponse = await openai.embeddings.create({
+                    model: EMBEDDING_MODEL,
+                    input: queryText,
+                    dimensions: EMBEDDING_DIMENSIONS,
+                });
+                queryEmbedding = queryEmbeddingResponse?.data[0]?.embedding;
+                if (!queryEmbedding) {
+                    throw new Error("Failed to generate query embedding (empty response).");
                 }
-            );
-            const typedSearchResults = searchResults as SearchResultItem[] | null;
-
-            let vectorSearchFailed = false;
-            if (searchError) {
-                console.error("Error during vector search RPC call:", searchError);
-                query_source = 'error';
-                message_for_gpt = `Error during vector search: ${searchError.message}. Trying fallback.`;
-                vectorSearchFailed = true;
-            } else if (typedSearchResults && typedSearchResults.length > 0) {
-                console.log(`Found ${typedSearchResults.length} chunks via vector search.`);
-                query_source = 'vector_store';
-                // USE HELPER FUNCTION FOR MAPPING
-                retrieved_context = typedSearchResults.map(result =>
-                    mapDbResultToContextObject(result, 'vector_store')
-                );
-            } else {
-                console.log("Vector search yielded no results.");
+            } catch (embeddingError) {
+                 console.error("Error generating query embedding:", embeddingError);
+                 // Don't throw here, allow FTS to proceed if embedding fails
+                 message_for_gpt = `Warning: Failed to generate query embedding. Proceeding with text search only. Error: ${embeddingError instanceof Error ? embeddingError.message : String(embeddingError)}`;
+                 query_source = 'error'; // Indicate an error occurred, even if FTS works
             }
 
 
-            // c. Fallback Logic Update
-            if (retrieved_context.length === 0) {
+            // b. Execute Concurrent Searches (Vector + FTS)
+            let vectorResults: ContextObject[] = [];
+            let ftsResults: ContextObject[] = [];
 
-                // Attempt Text Search Fallback (Now the primary fallback)
-                if (retrieved_context.length === 0) {
-                    console.log("Attempt 2: Fallback - Full-Text Search on 'files' table using query entities...");
-
-                    // 1. Gather entities for FTS (include ORIGINAL date strings from input)
-                    const entityValues: string[] = [];
-                    if (payload.extracted_entities.dates) {
-                        // Access original strings from the INPUT payload, not processed metadata
-                        payload.extracted_entities.dates.forEach(dateInput => {
-                            if (typeof dateInput === 'string') {
-                                entityValues.push(dateInput);
-                            }
-                        });
-                    }
-                    (queryMetadata.people || []).forEach(p => entityValues.push(p));
-                    (queryMetadata.locations || []).forEach(l => entityValues.push(l));
-                    (queryMetadata.topics || []).forEach(t => entityValues.push(t));
-                    if (queryMetadata.type) entityValues.push(queryMetadata.type);
-                    if (queryMetadata.sentiment) entityValues.push(queryMetadata.sentiment);
-                    // DO NOT include queryMetadata.language
-
-                    // Remove duplicates and empty strings
-                    const uniqueEntities = [...new Set(entityValues)].filter(e => e && e.trim() !== '');
-
-                    if (uniqueEntities.length > 0) {
-                        // 2. Construct the FTS query string
-                        const ftsQueryString = uniqueEntities
-                            .map(term => term.replace(/['&|!():*]/g, '')) // Basic escaping
-                            .filter(term => term.trim() !== '')
-                            .join(' | ');
-
-                        console.log(`Fallback FTS: Searching for entities: ${ftsQueryString}`);
-
-                        // 3. Build the Supabase query with FTS
-                        let ftsQueryBuilder = supabase
-                            .from('files')
-                            .select('id, transcript_text, created_at, file_metadata, rank:ts_rank_cd(transcript_tsv, to_tsquery(\'english\', $1))')
-                            .textSearch('transcript_tsv', ftsQueryString, {
-                                config: 'english',
-                                type: 'websearch'
-                            })
-                            .order('rank', { ascending: false })
-                            .limit(FALLBACK_MATCH_COUNT);
-
-                        // 4. Execute the FTS query
-                        console.log("Executing Fallback FTS Query...");
-                        const { data: ftsResults, error: ftsError } = await ftsQueryBuilder;
-                        const typedTextResults = ftsResults as (FallbackResultItem & { rank?: number })[] | null;
-
-                        if (ftsError) {
-                            console.error("Error during fallback FTS search:", ftsError);
-                            // Simpler error message handling now
-                            if (!vectorSearchFailed) message_for_gpt = `Vector search found nothing. Fallback text search failed: ${ftsError.message}`;
-                            else message_for_gpt += ` Fallback text search also failed: ${ftsError.message}`;
-                            if (query_source !== 'error') query_source = 'error';
-                        } else if (typedTextResults && typedTextResults.length > 0) {
-                            console.log(`Found ${typedTextResults.length} files via fallback FTS search.`);
-                            query_source = 'postgres_fallback_text'; // Set correct source
-
-                            if (vectorSearchFailed) {
-                                message_for_gpt += ` Found ${typedTextResults.length} potential match(es) via text fallback.`;
-                            } else {
-                                message_for_gpt = `Found ${typedTextResults.length} potential match(es) via text search.`;
-                            }
-
-                            // USE HELPER FUNCTION FOR MAPPING
-                            retrieved_context = typedTextResults.map(file =>
-                                mapDbResultToContextObject(file, 'postgres_fallback_text')
-                            );
-                        } else {
-                            console.log("Fallback FTS search also found no results.");
-                            if (query_source !== 'error') {
-                                query_source = 'none';
-                                message_for_gpt = "I couldn't find any relevant information using vector or text search."; // Updated message
-                            } else {
-                                message_for_gpt += " Fallback text search also found nothing.";
-                            }
-                        }
-                    } else {
-                        console.log("No valid non-language entities found in the query to perform FTS fallback, skipping.");
-                        if (query_source !== 'error') {
-                            query_source = 'none';
-                            message_for_gpt = "I couldn't find any relevant information based on the query filters, and no specific entities were provided for text search.";
-                        } else {
-                            message_for_gpt += " No specific non-language entities provided for text fallback.";
-                        }
-                    }
-                } // End Text Search Fallback attempt
-
-            } // End of Fallback Logic block
-
-            // --- START: Integrate Re-ranking Call (Task 6) ---
-            if (retrieved_context.length > 0 && (query_source === 'vector_store' || query_source === 'postgres_fallback_text')) {
-                console.log(`Calling rerankResults for ${retrieved_context.length} candidates from ${query_source}...`);
-                retrieved_context = await rerankResults(retrieved_context, queryMetadata, query_source);
-                // query_source remains unchanged, reflecting the initial retrieval method
+            // Only run vector search if embedding was successful
+            const searchPromises: Promise<ContextObject[]>[] = [];
+            if (queryEmbedding) {
+                searchPromises.push(executeVectorSearch(queryEmbedding, queryMetadata));
             } else {
-                 console.log("Skipping re-ranking due to no initial results or non-rankable source.");
+                 searchPromises.push(Promise.resolve([])); // Add placeholder if embedding failed
             }
-            // --- END: Integrate Re-ranking Call ---
+            // Always run FTS search
+            searchPromises.push(executeFtsSearch(queryMetadata, originalQueryEntities));
+
+
+            const searchResultsSettled = await Promise.allSettled(searchPromises);
+
+            if (searchResultsSettled[0].status === 'fulfilled') {
+                 vectorResults = searchResultsSettled[0].value;
+            } else {
+                 console.error("Vector search promise rejected:", searchResultsSettled[0].reason);
+                 if(query_source !== 'error') message_for_gpt += " Vector search failed."; // Append if no embedding error yet
+                 query_source = 'error';
+            }
+
+            if (searchResultsSettled[1].status === 'fulfilled') {
+                 ftsResults = searchResultsSettled[1].value;
+            } else {
+                 console.error("FTS search promise rejected:", searchResultsSettled[1].reason);
+                  if(query_source !== 'error') message_for_gpt += " Text search failed.";
+                  query_source = 'error';
+            }
+
+            console.log(`Concurrent searches finished. Vector: ${vectorResults.length}, FTS: ${ftsResults.length}`);
+
+            // c. Apply RRF
+            let combinedResults: ContextObject[] = [];
+            if (vectorResults.length > 0 || ftsResults.length > 0) {
+                 combinedResults = applyRRF(vectorResults, ftsResults);
+            } else {
+                 console.log("No results from either vector or FTS search before RRF.");
+            }
+
+
+            // d. Determine Query Source (based on results *before* re-ranking)
+            if (query_source !== 'error') { // Only set non-error source if no errors occurred
+                // Simplified logic: If any results exist, it must be hybrid (or handled by 'none' later)
+                if (combinedResults.length > 0) {
+                    query_source = 'hybrid';
+                    message_for_gpt = `Found ${combinedResults.length} potential matches from combined vector and text search.`;
+                } else {
+                    query_source = 'none';
+                    message_for_gpt = "I couldn't find any relevant information matching your query.";
+                }
+            } else {
+                 // Keep error message, but clarify if *any* results were found despite errors
+                 if(combinedResults.length > 0) {
+                      message_for_gpt += ` Found ${combinedResults.length} partial results despite errors.`;
+                 } else {
+                      message_for_gpt += " No results found.";
+                 }
+            }
+
+
+            // e. Apply Re-ranking
+            if (combinedResults.length > 0) {
+                 console.log(`Calling rerankResults for ${combinedResults.length} candidates from source: ${query_source}...`);
+                 // Pass the RRF results (with rrf_score) to the new rerankResults
+                 retrieved_context = await rerankResults(combinedResults, queryMetadata);
+                 // Update message if results were trimmed
+                 if (retrieved_context.length < combinedResults.length && retrieved_context.length > 0) {
+                     message_for_gpt += ` Displaying top ${retrieved_context.length} after re-ranking.`;
+                 } else if (retrieved_context.length === 0 && combinedResults.length > 0) {
+                      message_for_gpt = "Found initial matches, but none scored high enough after re-ranking.";
+                      query_source = 'none'; // Set source to none if re-ranking filters everything
+                 }
+            } else {
+                 console.log("Skipping re-ranking as there are no combined results.");
+                 retrieved_context = []; // Ensure context is empty
+            }
 
         } // End of 'query'/'combined' block
 
-        // Final response construction
-        console.log(`DEBUG: Final retrieved_context count after potential re-ranking: ${retrieved_context.length}`);
+
+        // --- Final Response Construction ---
+        console.log(`Final retrieved_context count: ${retrieved_context.length}, final query_source: ${query_source}`);
 
         const successResponse: SuccessResponse = {
-            retrieved_context: retrieved_context, // Use the potentially re-ranked context
+            retrieved_context: retrieved_context, // Contains cleaned ContextObjects after re-ranking
             storage_status: storage_status,
-            query_source: retrieved_context.length > 0 ? query_source : (query_source === 'error' ? 'error' : 'none'), // Refine source logic
-            message_for_gpt: message_for_gpt,
+            // Ensure query_source reflects the final state (e.g., 'none' if re-ranking removed all)
+            query_source: retrieved_context.length > 0 ? query_source : (query_source === 'error' ? 'error' : 'none'),
+            message_for_gpt: message_for_gpt || (query_source === 'none' ? "No relevant information found." : ""), // Provide default 'none' message if empty
             error: null,
         };
 
