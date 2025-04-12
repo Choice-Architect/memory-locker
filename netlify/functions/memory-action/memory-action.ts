@@ -743,36 +743,35 @@ async function executeFtsSearch(
         console.log(`FTS Search: Using query string: "${ftsQueryString}"`);
 
         // 3. Build the Supabase query with FTS
-        const { data: ftsResults, error: ftsError } = await supabase
-            .from('files')
-            // Simplify select: Remove explicit rank calculation. Relies on .textSearch() + .order() implicitly.
-            .select('id, transcript_text, created_at, file_metadata')
-            .textSearch('transcript_tsv', ftsQueryString, {
-                config: 'english',
-                type: 'websearch',
-            })
-            .order('rank', { ascending: false }) // Higher rank is better
-            .limit(FALLBACK_MATCH_COUNT); // Get more results initially for RRF
+        const { data: ftsResults, error: ftsError } = await supabase.rpc(
+            'fts_search_files',
+            {
+                query_string: ftsQueryString,
+                match_count: FALLBACK_MATCH_COUNT // Pass the desired match count
+            }
+        );
 
         if (ftsError) {
-            console.error("Error during FTS search:", ftsError);
+            console.error("Error during FTS search RPC call:", ftsError);
             return [];
         }
         // Linter Fix: Add 'as any' to handle potential type mismatch from Supabase client
-        const typedTextResults = ftsResults as any as (FallbackResultItem & { rank?: number })[] | null;
+        // Cast directly to the expected structure from the RPC
+        const typedTextResults = ftsResults as any as FallbackResultItem[] | null;
 
         if (typedTextResults && typedTextResults.length > 0) {
-            console.log(`FTS search found ${typedTextResults.length} raw results.`);
+            console.log(`FTS search found ${typedTextResults.length} raw results via RPC.`);
             // Map results to ContextObject, adding source and preserving rank
             return typedTextResults.map(file => ({
-                chunk: file.transcript_text.substring(0, 3000) + (file.transcript_text.length > 3000 ? '...' : ''), // Truncate
+                // Truncate transcript_text, provide default for created_at if null
+                chunk: (file.transcript_text || '').substring(0, 3000) + ((file.transcript_text?.length || 0) > 3000 ? '...' : ''),
                 timestamp: file.created_at ? new Date(file.created_at).toISOString() : new Date(0).toISOString(),
                 entities_in_chunk: mapDbMetadataToProcessedEntities(file.file_metadata),
-                file_id: file.id, // Use 'id' from files table as file_id
+                file_id: file.id, // Use 'id' from RPC result as file_id
                 chunk_id: undefined, // Not applicable for FTS
                 chunk_index: undefined, // Not applicable for FTS
                 similarity: undefined, // Not applicable for FTS
-                rank: file.rank, // Preserve raw FTS rank
+                rank: file.rank, // Preserve raw FTS rank from RPC result
                 source: 'fts', // Set source
             }));
         } else {

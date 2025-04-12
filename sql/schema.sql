@@ -267,4 +267,35 @@ BEGIN
   LIMIT match_count;
 END;
 $function$
-; 
+;
+
+-- Function for Full-Text Search (FTS) on files table, handling ranking internally
+-- Returns file data including the calculated rank.
+CREATE OR REPLACE FUNCTION public.fts_search_files(
+    query_string TEXT,
+    match_count INTEGER
+)
+RETURNS TABLE (
+    id UUID,
+    transcript_text TEXT,
+    created_at TIMESTAMPTZ,
+    file_metadata JSONB,
+    rank REAL -- Use REAL for ts_rank_cd result
+)
+LANGUAGE sql STABLE -- Use STABLE as it only reads data
+SET search_path = 'public', 'extensions'
+AS $$
+    SELECT
+        f.id,
+        f.transcript_text,
+        f.created_at,
+        f.file_metadata,
+        ts_rank_cd(f.transcript_tsv, websearch_to_tsquery('english', query_string)) AS rank
+    FROM
+        files AS f
+    WHERE
+        f.transcript_tsv @@ websearch_to_tsquery('english', query_string)
+    ORDER BY
+        rank DESC
+    LIMIT match_count;
+$$; 
