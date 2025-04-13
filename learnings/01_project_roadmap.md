@@ -37,6 +37,7 @@
 **Objective:** Built the `memory-action` serverless function (`memory-action.ts`) bridging the GPT Action and Supabase, including initial Storage and Query logic.
 
 1.  **API Endpoint Design:** Defined a single endpoint (`/.netlify/functions/memory-action`) using POST, managed by the `mode` parameter (`store`, `query`, `combined`). API contract specified in `openapi.json`. Authentication uses `x-api-key`. *(Note: `combined` mode was removed in v1.8)*
+    *   **Standard Authentication Method (v1.8 onwards):** The function code explicitly checks for a secret key provided in the `x-api-key` request header. The OpenAPI specification (`openapi.json`) uses the `x-oai-openai-integration` block at the root level to define this `api_key` authentication method for seamless integration with ChatGPT Actions. Configuration in `netlify.toml` ensures this header is passed through.
 2.  **Supabase Integration:** Implemented client initialization and secure connection using environment variables and the service role key (bypassing RLS).
 3.  **Core Function Logic (Pre-v1.7):**
     *   **Storage (`store`/`combined`):**
