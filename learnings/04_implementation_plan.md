@@ -43,46 +43,53 @@
     *   Remove any other filtering logic.
     *   Save changes.
 
-5.  **Task 2.3: Deploy SQL Changes (Manual Supabase Action - *User Assistance Needed*)**
+5.  **Task 2.3: Deploy SQL Changes (Manual Supabase Action - *User Assistance Needed*)** (Status: **Completed**)
     *   **Action:** Connect to Supabase DB and execute the modified `CREATE OR REPLACE FUNCTION...` statements for both functions from the updated `sql/schema.sql`.
     *   **Verification:** Confirm deployed functions reflect the simplified logic.
 
 **Phase 3: Middleware Refactoring (`netlify/functions/memory-action/memory-action.ts`)**
 
-6.  **Task 3.1: Update `executeVectorSearch` Call**
+6.  **Task 3.1: Update `executeVectorSearch` Call** (Status: **Pending**)
     *   **Action:** Remove arguments corresponding to the removed metadata filter parameters in the `supabase.rpc('search_memory_chunks', ...)` call.
 
-7.  **Task 3.2: Update `executeFtsSearch` Call**
+7.  **Task 3.2: Update `executeFtsSearch` Call** (Status: **Pending**)
     *   **Action:** Change the `query_string` argument in the `supabase.rpc('fts_search_files', ...)` call to use `payload.query_text`.
 
-8.  **Task 3.3: Implement Stemming Logic in `rerankResults`**
+8.  **Task 3.3: Implement Stemming Logic in `rerankResults`** (Status: **Pending**)
     *   **Action:** Before metadata overlap checks (people, locations, topics):
         *   Define/use helper logic to stem words within entity strings for both query and candidate metadata.
         *   Store these stemmed representations (e.g., sets of stemmed words).
 
-9.  **Task 3.4: Refactor Re-ranking Boosts for Stemmed Overlap**
+9.  **Task 3.4: Refactor Re-ranking Boosts for Stemmed Overlap** (Status: **Pending**)
     *   **Action:** Modify `metadata_boost_score` calculation in `rerankResults`.
     *   Compare stemmed representations (from Task 3.3) for people, locations, topics. Apply `ENTITY_WEIGHTS` boost on intersection.
     *   Keep date component logic as is.
 
-10. **Task 3.5: Remove `combined` Mode Logic**
+10. **Task 3.5: Remove `combined` Mode Logic** (Status: **Completed**)
     *   **Action:** Delete any conditional logic (`if`/`else if`) specifically checking for or handling `payload.mode === 'combined'` within the main handler. The code structure should now only need to handle `store` and `query` modes distinctly.
 
-11. **Task 3.6: Implement Enhanced Logging**
+11. **Task 3.6: Implement Enhanced Logging** (Status: **Completed**)
     *   **Action:** Add detailed `console.log` statements (as outlined in `learnings/03_fixes.md`, Plan Item 7) throughout the query/re-ranking process.
 
 **Phase 4: Documentation & Testing**
 
-12. **Task 4.1: Update Documentation (`learnings/*.md`)**
+12. **Task 4.1: Update Documentation (`learnings/*.md`)** (Status: **Partially Completed - Current Session**)
     *   **Action:** Review all learning files (`01`, `02`, `03`, `04`) to ensure consistency with this implemented plan.
     *   Add commit hash(es) to `03_fixes.md`.
 
-13. **Task 4.2: Testing**
+13. **Task 4.2: Testing** (Status: **Pending**)
     *   **Action:** Perform comprehensive testing (direct API & Custom GPT) focusing on previous failure points and the new sequential call logic for combined intents.
     *   Review Netlify logs.
 
-14. **Task 4.3: Analysis & Tuning**
+14. **Task 4.3: Analysis & Tuning** (Status: **Pending**)
     *   **Action:** Analyze results and logs. Tune constants (`VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT`, `RRF_K`, `ENTITY_WEIGHTS`) iteratively.
+
+---
+
+**Next Session Discussion Points:**
+*   Review potential improvements for the Stop Words list (`memory-action.ts`).
+*   Review the complexity and logic of the `rerankResults` function (`memory-action.ts`).
+*   Continue with pending implementation tasks (3.1-3.4, 4.2, 4.3).
 
 ---
 
@@ -91,4 +98,6 @@
 *   Delegating intent splitting to GPT simplifies middleware.
 *   Simplifying SQL functions improves database maintainability.
 *   Consolidating augmentation logic (stemming, boosting) in `rerankResults` keeps middleware logic focused.
+*   Refactoring date processing logic into `processInputDates` enhances clarity (DRY Principle).
+*   Removing unused imports and comments improves code hygiene.
 *   Enhanced logging is key for future maintainability and tuning. 

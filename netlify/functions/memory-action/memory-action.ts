@@ -52,7 +52,6 @@ import {
     parse as dateFnsParse,
     differenceInCalendarDays
 } from 'date-fns';
-import * as chrono from 'chrono-node';
 
 // --- Interfaces for API Contract ---
 
@@ -97,16 +96,13 @@ interface ProcessedEntities {
     conversation_id?: string;
     thread_id?: string;
     rrf_score?: number; // Score after RRF, added internally
-    // Deprecated properties (to be removed in final ContextObject)
-    // initial_score?: number; // Used during reranking
-    // metadata_boost_score?: number; // Used during reranking
-    // final_score?: number; // Used during reranking
 }
 
 interface RequestPayload {
     query_text: string;
     extracted_entities: ExtractedEntities; // Input uses the original ExtractedEntities
     mode: 'store' | 'query';
+    source?: 'vector' | 'fts'; // Source of this specific context object before RRF
 }
 
 interface ContextObject {
@@ -120,10 +116,6 @@ interface ContextObject {
     rank?: number; // Raw FTS rank
     // v1.8 additions
     source?: 'vector' | 'fts'; // Source of this specific context object before RRF
-    // Deprecated properties (to be removed in final ContextObject)
-    // initial_score?: number; // Used during reranking
-    // metadata_boost_score?: number; // Used during reranking
-    // final_score?: number; // Used during reranking
 }
 
 // Updated SuccessResponse for hybrid source
@@ -409,6 +401,74 @@ function parseOriginalStringDate(originalString: string, referenceDate: Date): P
 }
 
 // --- END: Date Parsing Helper Functions ---
+
+/**
+ * Processes the raw date entities extracted by GPT, parsing and normalizing them.
+ * @param rawInputDates The array of date entities from the request payload.
+ * @param referenceDate The current date/time to use as a reference for parsing relative dates.
+ * @returns An array of successfully parsed and structured EnhancedNormalizedDate objects.
+ */
+function processInputDates(
+    rawInputDates: InputDateEntity[] | undefined,
+    referenceDate: Date
+): EnhancedNormalizedDate[] {
+    const successfullyParsedDates: EnhancedNormalizedDate[] = [];
+    console.log("Parsing dates with reference:", referenceDate.toISOString());
+
+    if (!rawInputDates || !Array.isArray(rawInputDates)) {
+        return successfullyParsedDates; // Return empty if no valid input
+    }
+
+    for (const dateEntity of rawInputDates) { // Use for...of for clarity
+        let originalString: string;
+        let normalizedDateString: string | undefined = undefined;
+        let datePart: Partial<EnhancedNormalizedDate> = {};
+
+        // 1. Determine original string and potential normalized string
+        if (typeof dateEntity === 'string') {
+            originalString = dateEntity;
+            console.log(`Processing date entity (string): "${originalString}"`);
+        } else if (dateEntity && typeof dateEntity === 'object' && typeof dateEntity.original === 'string') {
+            originalString = dateEntity.original;
+            normalizedDateString = dateEntity.normalized ?? undefined; // Use nullish coalescing
+            console.log(`Processing date entity (object): original="${originalString}", normalized="${normalizedDateString}"`);
+        } else {
+            console.warn("Skipping invalid date input format:", dateEntity);
+            continue; // Skip this iteration
+        }
+
+        // 2. Parse Date Part
+        if (normalizedDateString) {
+            // Prioritize parsing the GPT-provided normalized date ("Month DD, YYYY")
+            datePart = parseNormalizedDate(normalizedDateString, referenceDate);
+        } else {
+            // If no normalized date, attempt to parse the original string using date-fns only
+            datePart = parseOriginalStringDate(originalString, referenceDate);
+        }
+
+        // 3. Always Extract Time Part from Original String
+        const timePart = extractTimeInfo(originalString);
+
+        // 4. Combine Date and Time Parts
+        const combinedComponents: Partial<EnhancedNormalizedDate> = { ...datePart, ...timePart };
+
+        // 5. Validation & Storage
+        // Store if we have at least year/month/day OR if we have only period
+        // (avoids storing empty objects if all parsing failed)
+        if (Object.keys(combinedComponents).length > 0 &&
+            (combinedComponents.year || combinedComponents.month || combinedComponents.day ||
+                // Check only for period if date components are missing
+                (!combinedComponents.year && !combinedComponents.month && !combinedComponents.day && (combinedComponents.period))))
+        {
+            console.log(`  -> Storing combined components: ${JSON.stringify(combinedComponents)}`);
+            successfullyParsedDates.push(combinedComponents as EnhancedNormalizedDate); // Add the valid, combined object
+        } else {
+            console.warn(`  -> Discarding components for "${originalString}" as no core date/time info was extracted: ${JSON.stringify(combinedComponents)}`);
+        }
+    }
+     console.log("--- Finished Date Processing ---");
+    return successfullyParsedDates;
+}
 
 /**
  * Safely maps raw database metadata (from vector or FTS search)
@@ -700,7 +760,6 @@ async function executeVectorSearch(
         console.log(`  -> Vector search raw results count: ${typedSearchResults?.length ?? 0}`);
 
         if (typedSearchResults && typedSearchResults.length > 0) {
-            // console.log(`Vector search found ${typedSearchResults.length} raw results.`); // Redundant now
             // Map results to ContextObject, adding source and preserving similarity
             return typedSearchResults.map(result => ({
                 chunk: result.content_chunk,
@@ -756,7 +815,6 @@ async function executeFtsSearch(
             console.error("Error during FTS search RPC call:", ftsError);
             return [];
         }
-        // Linter Fix: Add 'as any' to handle potential type mismatch from Supabase client
         // Cast directly to the expected structure from the RPC
         const typedTextResults = ftsResults as any as FallbackResultItem[] | null;
 
@@ -879,66 +937,20 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         let message_for_gpt: string = ""; // Initialize message for GPT
 
         // --- Date Processing ---
-        const processedMetadata: ProcessedEntities = { ...payload.extracted_entities, dates: [] }; // Initialize with other entities, clear dates array
-        const rawInputDates = payload.extracted_entities.dates;
-        const successfullyParsedDates: EnhancedNormalizedDate[] = [];
+        // Encapsulated date processing logic
         const referenceDate = new Date(); // Use current server time as reference
+        const successfullyParsedDates = processInputDates(payload.extracted_entities.dates, referenceDate);
 
-        console.log("Parsing dates with reference:", referenceDate.toISOString());
+        // Prepare metadata object using the processed dates
+        const processedMetadata: ProcessedEntities = {
+             // Spread other entities first
+            ...(payload.extracted_entities as Omit<ExtractedEntities, 'dates'>), // Cast to omit dates for type safety
+            dates: successfullyParsedDates // Assign the processed dates array
+        };
+        // Remove language if present, as per instructions (though we decided to ignore the field overall later)
+        // delete processedMetadata.language;
 
-        if (rawInputDates && Array.isArray(rawInputDates)) {
-            for (const dateEntity of rawInputDates) { // Use for...of for clarity
-                let originalString: string;
-                let normalizedDateString: string | undefined = undefined;
-                let datePart: Partial<EnhancedNormalizedDate> = {};
-
-                // 1. Determine original string and potential normalized string
-                if (typeof dateEntity === 'string') {
-                    originalString = dateEntity;
-                    console.log(`Processing date entity (string): "${originalString}"`);
-                } else if (dateEntity && typeof dateEntity === 'object' && typeof dateEntity.original === 'string') {
-                    originalString = dateEntity.original;
-                    normalizedDateString = dateEntity.normalized ?? undefined; // Use nullish coalescing
-                    console.log(`Processing date entity (object): original="${originalString}", normalized="${normalizedDateString}"`);
-                } else {
-                    console.warn("Skipping invalid date input format:", dateEntity);
-                    continue; // Skip this iteration
-                }
-
-                // 2. Parse Date Part
-                if (normalizedDateString) {
-                    // Prioritize parsing the GPT-provided normalized date ("Month DD, YYYY")
-                    datePart = parseNormalizedDate(normalizedDateString, referenceDate);
-                } else {
-                    // If no normalized date, attempt to parse the original string using date-fns only
-                    datePart = parseOriginalStringDate(originalString, referenceDate);
-                }
-
-                // 3. Always Extract Time Part from Original String
-                const timePart = extractTimeInfo(originalString);
-
-                // 4. Combine Date and Time Parts
-                const combinedComponents: Partial<EnhancedNormalizedDate> = { ...datePart, ...timePart };
-
-                // 5. Validation & Storage
-                // Store if we have at least year/month/day OR if we have only period
-                // (avoids storing empty objects if all parsing failed)
-                if (Object.keys(combinedComponents).length > 0 &&
-                    (combinedComponents.year || combinedComponents.month || combinedComponents.day ||
-                     // Check only for period if date components are missing
-                     (!combinedComponents.year && !combinedComponents.month && !combinedComponents.day && (combinedComponents.period))))
-                {
-                    console.log(`  -> Storing combined components: ${JSON.stringify(combinedComponents)}`);
-                    successfullyParsedDates.push(combinedComponents); // Add the valid, combined object
-                } else {
-                     console.warn(`  -> Discarding components for "${originalString}" as no core date/time info was extracted: ${JSON.stringify(combinedComponents)}`);
-                }
-            }
-        }
-        // Assign the successfully processed dates (EnhancedNormalizedDate[]) to the final metadata object
-        processedMetadata.dates = successfullyParsedDates;
-        console.log("--- Finished Date Processing ---");
-        console.log("Final Processed Metadata:", JSON.stringify(processedMetadata));
+        console.log("Final Processed Metadata (excluding language):", JSON.stringify(processedMetadata));
         // --- END: Date Processing ---
 
         // Mode handling: store or query
@@ -1124,8 +1136,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             let combinedResults: ContextObject[] = [];
             if (vectorResults.length > 0 || ftsResults.length > 0) {
                  combinedResults = applyRRF(vectorResults, ftsResults);
-                // Log RRF scores before normalization (already logged in applyRRF)
-                // Cast to any for logging the internal rrf_score property
+                // Log RRF scores before normalization
                 console.log("Combined results after RRF (before re-ranking):", combinedResults.map(c => ({ file_id: c.file_id, chunk_index: c.chunk_index, source: c.source, rrf_score: (c as any).rrf_score?.toFixed(4) })) );
             } else {
                  console.log("No results from either vector or FTS search before RRF.");

@@ -83,14 +83,16 @@ You MUST use the `memory-action` tool to interact with the user's secure memory 
 ```
 
 **3. Dual Intent Example (Sequential Calls):**
-*User Input:* "Who did I meet at Central Park yesterday? and add a reminder for me to call them"
+*User Input:* "Remember to buy milk on the way home today. Also, what did Sarah say about the conference last Tuesday?"
 
 *First Action Payload (Store)*:
 ```json
 {
   "mode": "store",
-  "query_text": "add a reminder for me to call them",
+  "query_text": "Remember to buy milk on the way home today.",
   "extracted_entities": {
+    "topics": ["buy milk"],
+    "dates": [{"original": "today", "normalized": "Month DD, YYYY"}],
     "type": "reminder"
   }
 }
@@ -100,10 +102,11 @@ You MUST use the `memory-action` tool to interact with the user's secure memory 
 ```json
 {
   "mode": "query",
-  "query_text": "Who did I meet at Central Park yesterday?",
+  "query_text": "what did Sarah say about the conference last Tuesday?",
   "extracted_entities": {
-    "locations": ["Central Park"],
-    "dates": [{"original": "yesterday", "normalized": "Month DD, YYYY"}]
+    "people": ["Sarah"],
+    "topics": ["conference"],
+    "dates": [{"original": "last Tuesday", "normalized": "Month DD, YYYY"}]
   }
 }
 ```

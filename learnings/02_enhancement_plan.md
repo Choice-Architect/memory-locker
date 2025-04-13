@@ -61,10 +61,13 @@
 
 **5. [x] Constants & Cleanup:**
     *   Obsolete constants, comments, and functions related to previous date/time parsing attempts were removed.
+    *   Unused `chrono-node` import removed.
+    *   Unnecessary development comments (e.g., regarding deprecated fields) removed.
+    *   Date processing logic refactored into `processInputDates` function.
 
 ---
 
-**Impact Statement (v1.7.1 - Date Parsing):**
+**Impact Statement (v1.7.1 - Date Parsing & Subsequent Cleanup):**
 
 *   The v1.7 hybrid date parsing approach was successfully implemented and refined.
 *   Primary date normalization relies on upstream GPT for common cases.
@@ -72,6 +75,7 @@
 *   **Time processing was simplified to only extract and store the `period` (`extractTimeInfo`), improving reliability by removing error-prone hour/minute parsing.**
 *   Maintains necessary structured components (`year`, `month`, `day`, `period`) for the query re-ranking mechanism.
 *   Accepts the limitation that ambiguous date strings not normalized by GPT may not yield stored date components.
+*   Code hygiene improved through removal of artifacts and refactoring (DRY principle).
 
 ---
 
@@ -116,6 +120,7 @@ Building upon the completed v1.7.1 date handling, the query retrieval process wa
 
 10. **[x] Implement Enhanced Logging (`memory-action.ts`):** (Status: **Completed**)
     *   Detailed logging for debugging and tuning added.
+    *   Cleanup of unnecessary comments completed.
 
 11. **[ ] Evaluation and Tuning:** (Status: **Pending / Next Step - Requires Testing Data**)
     *   Constants (`ENTITY_WEIGHTS`, `RRF_K`, `VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT`) require tuning.
@@ -124,7 +129,7 @@ Building upon the completed v1.7.1 date handling, the query retrieval process wa
 
 ---
 
-**Overall Status:** **v1.8 Enhancements Implemented.** Core logic, stemming, and enhanced logging are complete. Ready for testing and tuning.
+**Overall Status:** **v1.8 Enhancements Implemented.** Core logic, stemming, enhanced logging, and code cleanup/refactoring are complete. Ready for testing and tuning.
 
 ---
 
