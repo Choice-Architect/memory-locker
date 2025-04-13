@@ -1,57 +1,42 @@
-# Memory Locker: Historical Fix Log & v1.8 Architecture Shift
+# Memory Locker: Fix Log & Current FTS Plan
 
-## Background Summary (Pre-v1.8 "Upstream Splitting")
+## Background: v1.8 Architecture Shift ("Upstream Splitting")
 
-Initial attempts to fix query retrieval issues after v1.8.0 focused on resolving SQL errors in the Full-Text Search (FTS) implementation. Syntax errors (`PGRST100`) and PostgreSQL logical errors (`42809 WITHIN GROUP`) were addressed by refactoring the FTS query to use a dedicated RPC function (`fts_search_files`).
+*(Summary: Previous attempts to fix FTS query errors pre-v1.8 led to a fundamental architecture change. See `01_project_roadmap.md` & `02_enhancement_plan.md` for full history.)*
 
-However, subsequent testing (`test-3-results.csv`) revealed that while the RPC executed without error, it consistently returned zero results. Concurrently, vector search performance remained unreliable, and specific issues were identified:
+Based on challenges with query filtering and combined intent handling, the v1.8 architecture ("Upstream Splitting") was adopted:
 
-*   **Overly Strict Filtering:** Metadata fields used as filters in the initial SQL queries prevented relevant results from being returned due to slight mismatches.
-*   **Combined Mode Pollution:** The `combined` mode query logic was incorrectly using entities from the entire input, contaminating the search filters.
+1.  **GPT Handles Intent:** The Custom GPT was instructed to make separate `store` and `query` calls.
+2.  **`combined` Mode Removed:** Simplified the OpenAPI schema and middleware logic.
+3.  **Simplified Database Retrieval:** SQL functions (`search_memory_chunks`, `fts_search_files`) were simplified to perform only core search (vector similarity or text match), removing metadata filters.
+4.  **Middleware Re-ranking for Augmentation:** `rerankResults` in the middleware became solely responsible for applying boosts based on metadata (using stemming) after combining Vector and FTS results via RRF.
 
-Further analysis led to a fundamental shift in strategy: instead of using metadata for strict initial filtering, the database retrieval (Vector & FTS) should be broad, based only on core similarity/text match. Metadata should be used *exclusively* within the middleware's re-ranking step to augment relevance, using techniques like stemming.
-
-Additionally, the handling of combined user intents (store + query) was identified as a source of complexity and potential error in the middleware. The ideal solution is to delegate this intent splitting to the upstream Custom GPT.
-
----
-
-## v1.8 Architectural Decision: "Upstream Splitting" (April 13, 2025)
-
-Based on the challenges identified above (primarily ineffective FTS and problematic combined mode/metadata filtering), a new architecture was adopted:
-
-1.  **GPT Handles Intent:** The Custom GPT was instructed to identify combined `store` and `query` intents in user messages and make separate, sequential calls to the action (`store` first, then `query`).
-2.  **`combined` Mode Removed:** The `combined` mode was completely removed from the OpenAPI schema and the Netlify function's logic, simplifying the middleware significantly.
-3.  **Simplified Database Retrieval:** Both the vector search (`search_memory_chunks`) and FTS (`fts_search_files`) SQL functions were simplified to perform *only* their core search operation (vector similarity or text match against the full query text). All metadata filtering parameters and logic were removed from these database functions.
-4.  **Middleware Re-ranking for Augmentation:** The responsibility for leveraging metadata shifted entirely to the `rerankResults` function within the Netlify middleware. This function now:
-    *   Receives broadly retrieved results from concurrent Vector and FTS searches.
-    *   Combines these results using Reciprocal Rank Fusion (RRF).
-    *   Applies boosts based on metadata overlap (people, locations, topics using **stemming**), date component matching, and other factors, using the defined `ENTITY_WEIGHTS`.
-5.  **Enhanced Logging:** Detailed logging was added throughout the query process in the middleware to facilitate future debugging and performance tuning.
-
-**Rationale:** This "Upstream Splitting" approach leverages the GPT's strengths for intent parsing, drastically simplifies the middleware and database logic, ensures a broad initial retrieval of potentially relevant candidates, and centralizes the sophisticated relevance augmentation logic within the re-ranking step.
-
-**(Note:** Add relevant commit hash(es) here when available: __________)
+**Rationale:** This approach leverages the GPT's strengths, simplifies middleware/DB logic, ensures broad initial retrieval, and centralizes relevance augmentation in the re-ranking step.
 
 ---
 
-## Correction Plan: Re-integrate `organizations` Entity (Post v1.8 Discovery)
+## Completed Fix: `organizations` Entity Integration (Post v1.8 Discovery)
 
-**Issue:** It was discovered after the v1.8 "Upstream Splitting" implementation that the `organizations` entity, while present in `gpt_instructions.md`, was unintentionally omitted from the `openapi.json` schema and `memory-action.ts` implementation. This meant the entity was being ignored by the backend.
+**Issue:** The `organizations` entity was unintentionally omitted from the backend implementation despite being in GPT instructions.
+**Fix:** Fully integrated `organizations` into schema, interfaces, storage mapping, and re-ranking (`rerankResults` using stemming and `ENTITY_WEIGHTS`).
+**Status:** Implemented, documented, and verified working in initial tests (`testing/tests-results-4.csv`).
 
-**Goal:** Fully integrate the `organizations` entity, treating it consistently with other stemmed entities (`people`, `locations`, `topics`) for storage and relevance boosting.
+---
 
-**Plan:**
+## Current Plan: FTS Relevance Logic Correction (Post v1.8.1)
 
-1.  **[x] Schema & Interfaces:** Add `organizations` (optional `string[]`) to `ExtractedEntities` and `ProcessedEntities` in `openapi.json` and `memory-action.ts`.
-2.  **[x] Storage:** Verify `organizations` data is captured in `processedMetadata` and stored in database JSONB columns (no code change expected for storage itself).
-3.  **[x] Re-ranking (`rerankResults`):**
-    *   Add `organizations: 0.10` to the `ENTITY_WEIGHTS` constant.
-    *   Implement stemming for `organizations` similar to `people`/`locations`/`topics`.
-    *   Apply boost based on stemmed `organizations` overlap using the new weight.
-    *   Update logging to include `organizations` stemming/boost details.
-4.  **[x] GPT Instructions:** Verify existing instruction is sufficient (no change expected).
-5.  **[ ] Documentation:** Update `learnings/*.md` files to reflect `organizations` as a supported entity.
+**Issue:** Further analysis revealed a fundamental mismatch between the FTS implementation goal and its behavior. The use of `websearch_to_tsquery` (producing `&`-connected queries) combined with the strict `@@` match operator in the `WHERE` clause demands that *all* significant terms from the user query must be present in the document's `tsvector` for it to be considered a match. This "all-or-nothing" approach incorrectly discards documents with relevant partial matches, failing to identify documents based on *shared common terms* as intended.
 
-**Rationale:** This corrects an oversight and ensures the `organizations` entity is properly utilized for memory storage and retrieval relevance, aligning the implementation with the intended functionality described in the GPT instructions.
+**Goal:** Modify the FTS logic to return documents containing *any* of the significant query terms and rank them based on relevance (term frequency, proximity, number of matching terms), aligning with standard search expectations.
 
-**Status:** Correction implemented. Documentation update pending (this step). 
+**Revised Plan:**
+
+1.  **[ ] Modify `fts_search_files` SQL Function:**
+    *   Remove the strict `WHERE f.transcript_tsv @@ websearch_to_tsquery(...)` clause.
+    *   Add a rank-based filtering clause, e.g., `WHERE ts_rank(f.transcript_tsv, websearch_to_tsquery('english', query_string)) > 0.01`. This threshold ensures a baseline level of relevance and allows documents with partial term matches to be included.
+    *   Retain `ORDER BY rank DESC` and `LIMIT match_count` to return the top-ranked results.
+2.  **[ ] Apply Changes:** Update the function definition in `sql/schema.sql` locally and apply the `CREATE OR REPLACE FUNCTION` statement in the Supabase SQL Editor.
+3.  **[ ] Re-Test:** Re-run previous FTS test cases (e.g., Q1) to verify that the function now returns relevant rows, including those with partial matches.
+4.  **[ ] Integrate & Tune:** Once FTS returns ranked results correctly, proceed with broader testing and tuning of RRF/weights as previously planned.
+
+**Rationale:** Shifting from strict `@@` matching to rank-based filtering allows the FTS component to function as intended – identifying potentially relevant documents based on shared keywords and letting the ranking mechanism determine the best matches. This fixes the core logical flaw where partially relevant documents were being incorrectly excluded. 

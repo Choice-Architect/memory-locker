@@ -1,5 +1,3 @@
-
-
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
@@ -19,9 +17,9 @@ ALTER SCHEMA "public" OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."fts_search_files"("query_string" "text", "match_count" integer) RETURNS TABLE("id" "uuid", "transcript_text" "text", "created_at" timestamp with time zone, "file_metadata" "jsonb", "rank" real)
-    LANGUAGE "sql" STABLE
+    LANGUAGE "sql" VOLATILE
+    SET "search_path" TO 'pg_catalog', 'public', 'extensions'
     AS $$
-  SET search_path = pg_catalog, public;
   SELECT
     f.id,
     f.transcript_text,
@@ -39,9 +37,9 @@ ALTER FUNCTION "public"."fts_search_files"("query_string" "text", "match_count" 
 
 
 CREATE OR REPLACE FUNCTION "public"."search_memory_chunks"("query_embedding" "extensions"."vector", "match_threshold" double precision, "match_count" integer) RETURNS TABLE("file_id" "uuid", "content_chunk" "text", "metadata" "jsonb", "similarity" double precision, "chunk_index" integer)
-    LANGUAGE "sql" STABLE
+    LANGUAGE "sql" VOLATILE
+    SET "search_path" TO 'pg_catalog', 'public', 'extensions'
     AS $$
-  SET search_path = pg_catalog, public;
   SELECT
     te.file_id,
     te.content_chunk,

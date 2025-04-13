@@ -99,35 +99,41 @@
 5.  **Enhance Query Retrieval & Ranking (v1.8.0 - Architecturally Revised Post-Testing):**
     *   **Goal:** Improved query relevance and simpler logic by having the GPT handle combined intents (store+query) via sequential calls, removing `combined` mode from middleware, broadening DB retrieval, and using metadata purely for augmentation during re-ranking.
     *   **Approach (v1.8.0 - "Upstream Splitting"):** (Ref: `learnings/02_enhancement_plan.md` v1.8 Rev for full details)
-        1.  **GPT Instruction Update:** Instructed GPT to recognize dual intent and make sequential `store` then `query` calls.
-        2.  **OpenAPI Schema Update:** Removed `combined` mode from the schema.
-        3.  **Simplified SQL Retrieval:** Modified `search_memory_chunks` and `fts_search_files` to retrieve based **only** on core search logic (vector similarity or FTS match on full query text), removing all metadata filters.
-        4.  **Updated Function Calls:** Calls to SQL functions updated in `memory-action.ts`.
-        5.  **Concurrent Search:** Implemented concurrent Vector Search + FTS search using `Promise.allSettled`.
-        6.  **RRF Combination:** Combined results using Reciprocal Rank Fusion (`applyRRF` function).
-        7.  **Weighted Re-ranking for Augmentation:** Refined `rerankResults` function to use stemming for `people`/`locations`/`topics`/`organizations` boosts.
-        8.  **Removed `combined` Mode Logic:** Simplified middleware handler by removing `combined` mode handling.
-        9.  **Tuning (Pending):** RRF `k`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT` constants require tuning, facilitated by enhanced logging.
-    *   **Rationale (Revised):** Leverages GPT for intent splitting, simplifies middleware, ensures broad initial DB retrieval, and uses metadata purely for augmentation in re-ranking.
-    *   **Status:** **Implemented.** Code implementation and enhanced logging complete. Tuning pending based on testing.
+        1.  **[x] GPT Instruction Update:** Instructed GPT to recognize dual intent and make sequential `store` then `query` calls.
+        2.  **[x] OpenAPI Schema Update:** Removed `combined` mode from the schema.
+        3.  **[x] Simplified SQL Retrieval:** Modified `search_memory_chunks` and `fts_search_files` to retrieve based **only** on core search logic (vector similarity or FTS match on full query text), removing all metadata filters.
+        4.  **[x] Updated Function Calls:** Calls to SQL functions updated in `memory-action.ts`.
+        5.  **[x] Concurrent Search:** Implemented concurrent Vector Search + FTS search using `Promise.allSettled`.
+        6.  **[x] RRF Combination:** Combined results using Reciprocal Rank Fusion (`applyRRF` function).
+        7.  **[x] Weighted Re-ranking for Augmentation:** Refined `rerankResults` function to use stemming for `people`/`locations`/`topics`/`organizations` boosts.
+        8.  **[x] Removed `combined` Mode Logic:** Simplified middleware handler by removing `combined` mode handling.
+        9.  **[x] Enhanced Logging:** Implemented enhanced logging to facilitate tuning.
+        10. **[~] Tuning (Pending):** RRF `k`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT` constants require tuning, facilitated by enhanced logging. Initial tests (`testing/tests-results-4.csv`) show good performance, but FTS yielded no results, requiring investigation.
+        11. **[~] FTS Logic Correction (Identified):** Realized FTS logic using strict `@@` matching was flawed, discarding partial matches. Plan revised to use rank-based filtering (See `03_fixes.md`).
+    *   **Rationale (Revised):** Leverages GPT for intent splitting, simplifies middleware, ensures broad initial DB retrieval, and uses metadata purely for augmentation in re-ranking. FTS logic to be corrected for relevance.
+    *   **Status:** Implemented & Initial Testing Positive (Vector/RRF). Core logic including `organizations` integration and upstream splitting is complete and functions correctly in initial tests. **FTS logic requires correction** (rank-based filtering) before proceeding with full hybrid testing and tuning.
 
 6.  **Future Considerations (Backlog):**
-    *   Evaluation and tuning of RRF `k` and `ENTITY_WEIGHTS`.
+    *   Implementation of corrected FTS logic (rank-based filtering).
+    *   Evaluation and tuning of RRF `k` and `ENTITY_WEIGHTS` after FTS correction.
+    *   Investigation into FTS performance/configuration after logical correction.
 
 ---
 
-### Phase 6: Testing & Launch (Pending / Ready to Start)
+### Phase 6: Testing & Launch (Underway)
 
-1.  **Final Checks:** Perform regression testing after v1.8.0 / `organizations` implementation, review security configurations, evaluate query performance and relevance.
+1.  **Initial Checks:** Performed initial regression testing after v1.8.0 / `organizations` implementation (`testing/tests-results-4.csv`). Reviewed security configurations. Initial query performance and relevance are good via vector search.
+2.  **Next Steps:** Correct FTS logic (rank-based filtering). Perform comprehensive hybrid search testing and tune parameters (`ENTITY_WEIGHTS`, `RRF_K`, etc.).
 
 ---
 
 ### Known Limitations / Future Considerations (Post v1.8 Revision)
 
 1.  **Context Size Limit for Large Files:** Remains unchanged.
-2.  **RRF/Weight Tuning:** Requires evaluation and tuning based on real-world usage patterns and enhanced logging.
-3.  **Advanced Date/Time Queries:** Remains a future consideration.
-4.  **Enhanced Logging:** (Completed in v1.8 implementation) Detailed logging in `memory-action.ts` aids debugging and tuning.
+2.  **RRF/Weight Tuning:** Requires evaluation and tuning based on real-world usage patterns and enhanced logging (pending FTS correction).
+3.  **FTS Logic:** Initial FTS implementation used strict `@@` matching, incorrectly discarding partial matches. Awaiting correction to use rank-based filtering.
+4.  **Advanced Date/Time Queries:** Remains a future consideration.
+5.  **Enhanced Logging:** (Completed in v1.8 implementation) Detailed logging in `memory-action.ts` aids debugging and tuning.
 
 ---
 
