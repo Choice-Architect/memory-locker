@@ -20,7 +20,7 @@
 *   **Hybrid Initial Retrieval:** Leverages both vector (semantic) search (`executeVectorSearch`) and FTS (keyword) search (`executeFtsSearch`) concurrently using `Promise.allSettled`.
 *   **Broad Database Retrieval:** The underlying SQL functions (`search_memory_chunks`, `fts_search_files`) are simplified to retrieve results based *only* on the core search mechanism (vector similarity threshold or FTS text match against the full query text). Metadata filters are removed from the initial database query.
 *   **Reciprocal Rank Fusion (RRF):** Uses RRF (`applyRRF` function with `k = 60`) to effectively combine the ranked lists from vector and FTS searches.
-*   **Weighted Re-ranking for Augmentation:** Applies refined re-ranking logic (`rerankResults`) to the RRF-fused list. Metadata is used *here* to augment relevance. Boosts for `people`, `locations`, `topics` are applied based on **stemmed** overlap. Date boosts use granular component matching.
+*   **Weighted Re-ranking for Augmentation:** Applies refined re-ranking logic (`rerankResults`) to the RRF-fused list. Metadata is used *here* to augment relevance. Boosts for `people`, `locations`, `topics`, `organizations` are applied based on **stemmed** overlap. Date boosts use granular component matching.
 *   **Simplified Query Source Reporting:** Reports `query_source` as `'hybrid'`, `'none'`, or `'error'`.
 
 ---
@@ -83,7 +83,7 @@
 
 Building upon the completed v1.7.1 date handling, the query retrieval process was fundamentally revised based on testing and a strategic shift:
 
-**Goal:** Improve relevance and simplify logic by having the GPT handle combined intents (making separate store/query calls), removing the `combined` mode, broadening database retrieval, and using metadata purely for augmentation during middleware re-ranking.
+**Goal:** Improve relevance and simplify logic by having the GPT handle combined intents (making separate store/query calls), removing the `combined` mode, broadening database retrieval, and using metadata (including `organizations`) purely for augmentation during middleware re-ranking.
 
 **Implementation Steps (`memory-action.ts`, `sql/schema.sql`, `gpt_instructions.md`, `openapi.json`) - Revised**
 
@@ -112,7 +112,7 @@ Building upon the completed v1.7.1 date handling, the query retrieval process wa
     *   Called after concurrent searches resolve.
 
 8.  **[x] Refine `rerankResults` with Stemming & Weighting (`memory-action.ts` - Revision):**
-    *   Implemented **stemming** for people/locations/topics comparison.
+    *   Implemented **stemming** for people/locations/topics (and planned `organizations`) comparison.
     *   Boosts applied based on stemmed overlap and date component matching using `ENTITY_WEIGHTS`.
 
 9.  **[x] Remove `combined` Mode Logic (`memory-action.ts` - Revision):**
@@ -123,7 +123,7 @@ Building upon the completed v1.7.1 date handling, the query retrieval process wa
     *   Cleanup of unnecessary comments completed.
 
 11. **[ ] Evaluation and Tuning:** (Status: **Pending / Next Step - Requires Testing Data**)
-    *   Constants (`ENTITY_WEIGHTS`, `RRF_K`, `VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`) require tuning.
+    *   Constants (`ENTITY_WEIGHTS` including `organizations`, `RRF_K`, `VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`) require tuning.
 
 **Rationale (Revised "Upstream Splitting"):** This approach simplifies the action's responsibility by delegating intent splitting to the GPT. It ensures broad initial data retrieval and uses metadata appropriately for augmentation during re-ranking in the middleware, leading to a cleaner, more robust, and potentially more accurate system.
 
@@ -137,3 +137,14 @@ Building upon the completed v1.7.1 date handling, the query retrieval process wa
 
 *   **Full File Retrieval Limitation:** As implemented, the context returned to the GPT is limited by chunk size (vector) or truncation (FTS, currently 3000 chars). For queries requesting large original documents (like long emails), the full text cannot be retrieved. A future enhancement could add a specific mode or mechanism to retrieve the full `transcript_text` from the `files` table when needed.
 *   **Tuning:** Constants (`RRF_K`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`) require evaluation and tuning, facilitated by enhanced logging.
+
+---
+
+### Next Steps (Post-v1.8 Implementation & `organizations` Correction Plan)
+
+1.  **Implement `organizations` Correction Plan:** Execute the steps outlined in `learnings/03_fixes.md` to add `organizations` support to the schema, interfaces, and re-ranking logic.
+2.  **Testing:** Perform comprehensive testing (direct API & Custom GPT) focusing on previous failure points, the new sequential call logic for combined intents, and specific tests for `organizations` handling.
+3.  **Analysis & Tuning:** Analyze test results and logs. Tune constants (`VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`, `RRF_K`, `ENTITY_WEIGHTS` including `organizations`) iteratively based on performance and result quality.
+4.  **Discussion Points for Next Session:**
+    *   Review potential improvements for the Stop Words list (`memory-action.ts`).
+    *   Review the complexity and logic of the `rerankResults` function (`memory-action.ts`) after `organizations` integration.

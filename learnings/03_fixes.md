@@ -30,4 +30,26 @@ Based on the challenges identified above (primarily ineffective FTS and problema
 
 **Rationale:** This "Upstream Splitting" approach leverages the GPT's strengths for intent parsing, drastically simplifies the middleware and database logic, ensures a broad initial retrieval of potentially relevant candidates, and centralizes the sophisticated relevance augmentation logic within the re-ranking step.
 
-**(Note:** Add relevant commit hash(es) here when available: __________) 
+**(Note:** Add relevant commit hash(es) here when available: __________)
+
+---
+
+## Correction Plan: Re-integrate `organizations` Entity (Post v1.8 Discovery)
+
+**Issue:** It was discovered after the v1.8 "Upstream Splitting" implementation that the `organizations` entity, while present in `gpt_instructions.md`, was unintentionally omitted from the `openapi.json` schema and `memory-action.ts` implementation. This meant the entity was being ignored by the backend.
+
+**Goal:** Fully integrate the `organizations` entity, treating it consistently with other stemmed entities (`people`, `locations`, `topics`) for storage and relevance boosting.
+
+**Plan:**
+
+1.  **Schema & Interfaces:** Add `organizations` (optional `string[]`) to `ExtractedEntities` and `ProcessedEntities` in `openapi.json` and `memory-action.ts`.
+2.  **Storage:** Verify `organizations` data is captured in `processedMetadata` and stored in database JSONB columns (no code change expected for storage itself).
+3.  **Re-ranking (`rerankResults`):**
+    *   Add `organizations: 0.10` to the `ENTITY_WEIGHTS` constant.
+    *   Implement stemming for `organizations` similar to `people`/`locations`/`topics`.
+    *   Apply boost based on stemmed `organizations` overlap using the new weight.
+    *   Update logging to include `organizations` stemming/boost details.
+4.  **GPT Instructions:** Verify existing instruction is sufficient (no change expected).
+5.  **Documentation:** Update `learnings/*.md` files to reflect `organizations` as a supported entity.
+
+**Rationale:** This corrects an oversight and ensures the `organizations` entity is properly utilized for memory storage and retrieval relevance, aligning the implementation with the intended functionality described in the GPT instructions. 

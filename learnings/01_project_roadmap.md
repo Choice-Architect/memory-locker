@@ -81,7 +81,7 @@
 2.  **(Obsolete) Relevance Boosting (v1.3 - Superseded):** The original relevance boosting from v1.3, which relied solely on hierarchical date/period matching after vector search, has been superseded by the v1.8 hybrid search and weighted re-ranking approach.
 
 3.  **Non-Date Entity Extraction (Completed & Stable):**
-    *   **Status:** Stable baseline. No changes made.
+    *   **Status:** Stable baseline. Extraction of `people`, `locations`, `topics`, `type`, `sentiment`, `priority` (and intended `organizations`) established.
 
 4.  **Refactor Date Parsing (Hybrid Approach - v1.7.1 - Completed):**
     *   **Goal:** Achieved reliable date/time component extraction by leveraging upstream GPT normalization and targeted Netlify function logic.
@@ -105,7 +105,7 @@
         4.  **Updated Function Calls:** Calls to SQL functions updated in `memory-action.ts`.
         5.  **Concurrent Search:** Implemented concurrent Vector Search + FTS search using `Promise.allSettled`.
         6.  **RRF Combination:** Combined results using Reciprocal Rank Fusion (`applyRRF` function).
-        7.  **Weighted Re-ranking for Augmentation:** Refined `rerankResults` function to use stemming for people/locations/topics boosts.
+        7.  **Weighted Re-ranking for Augmentation:** Refined `rerankResults` function to use stemming for `people`/`locations`/`topics` (and planned `organizations`) boosts.
         8.  **Removed `combined` Mode Logic:** Simplified middleware handler by removing `combined` mode handling.
         9.  **Tuning (Pending):** RRF `k`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT` constants require tuning, facilitated by enhanced logging.
     *   **Rationale (Revised):** Leverages GPT for intent splitting, simplifies middleware, ensures broad initial DB retrieval, and uses metadata purely for augmentation in re-ranking.
