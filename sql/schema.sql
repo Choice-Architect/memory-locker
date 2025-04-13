@@ -399,3 +399,4 @@ GRANT ALL ON TABLE "public"."transcript_embeddings" TO "service_role";
 
 
 RESET ALL;
+
