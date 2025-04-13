@@ -14,14 +14,14 @@
     *   Stores only structured components (year, month, day, day_of_week, week_number, period) in metadata (no `original` string).
 *   **Query Relevance (Date Parsing):** Ensure the stored date components support effective querying and re-ranking.
 
-**Core Principles (Query Enhancement - v1.8 - Completed):**
+**Core Principles (Query Enhancement - v1.8 - Revised Post-v1.8 "Upstream Splitting")**
 
-*   **Hybrid Initial Retrieval:** Leverages both vector (semantic) search (`executeVectorSearch`) and FTS (keyword) search (`executeFtsSearch`) concurrently using `Promise.allSettled` to generate a richer set of initial candidates.
-*   **Reciprocal Rank Fusion (RRF):** Uses RRF (`applyRRF` function with `k = 60`) to effectively combine the ranked lists from vector and FTS searches into a single, improved candidate list based on `file_id`.
-*   **Weighted Re-ranking:** Applies refined re-ranking logic (`rerankResults`) to the RRF-fused list. The final score is calculated as `Math.min(1.0, initial_score + metadata_boost_score)` where:
-    *   `initial_score` is the min-max normalized RRF score (0-1).
-    *   `metadata_boost_score` is the sum of granular, additive weights (`ENTITY_WEIGHTS` constant) for matching entity types (people, locations, topics, type, sentiment, hierarchical date components, period, FTS date range) between the query and candidate.
-*   **Simplified Query Source Reporting:** Reports `query_source` as `'hybrid'` if results are found from either search, `'none'` if no results, or `'error'` if issues occurred.
+*   **GPT-Handled Intent Splitting:** The Custom GPT is instructed to recognize combined intents (store + query) and make separate, sequential `store` and `query` calls. The `combined` mode is removed from the action schema and middleware.
+*   **Hybrid Initial Retrieval:** Leverages both vector (semantic) search (`executeVectorSearch`) and FTS (keyword) search (`executeFtsSearch`) concurrently using `Promise.allSettled`.
+*   **Broad Database Retrieval:** The underlying SQL functions (`search_memory_chunks`, `fts_search_files`) are simplified to retrieve results based *only* on the core search mechanism (vector similarity threshold or FTS text match against the full query text). Metadata filters are removed from the initial database query.
+*   **Reciprocal Rank Fusion (RRF):** Uses RRF (`applyRRF` function with `k = 60`) to effectively combine the ranked lists from vector and FTS searches.
+*   **Weighted Re-ranking for Augmentation:** Applies refined re-ranking logic (`rerankResults`) to the RRF-fused list. Metadata is used *here* to augment relevance. Boosts for `people`, `locations`, `topics` are applied based on **stemmed** overlap. Date boosts use granular component matching.
+*   **Simplified Query Source Reporting:** Reports `query_source` as `'hybrid'`, `'none'`, or `'error'`.
 
 ---
 
@@ -75,53 +75,60 @@
 
 ---
 
-## Query Enhancements (Phase 5 / v1.8) - Completed
+## Query Enhancements (Phase 5 / v1.8 & Post-v1.8 Revisions "Upstream Splitting") - Revised
 
-Building upon the completed v1.7.1 date handling, the query retrieval and ranking logic was enhanced as follows:
+Building upon the completed v1.7.1 date handling, the query retrieval process was fundamentally revised based on testing and a strategic shift:
 
-**Goal:** Improve the relevance and accuracy of `query`/`combined` mode retrieval by implementing a true hybrid search strategy combined with weighted re-ranking based on metadata.
+**Goal:** Improve relevance and simplify logic by having the GPT handle combined intents (making separate store/query calls), removing the `combined` mode, broadening database retrieval, and using metadata purely for augmentation during middleware re-ranking.
 
-**Implementation Steps (`memory-action.ts` - Query Enhancement v1.8) - Completed**
+**Implementation Steps (`memory-action.ts`, `sql/schema.sql`, `gpt_instructions.md`, `openapi.json`) - Revised**
 
-1.  **[x] Implement Concurrent Search:**
-    *   Modified `memory-action.ts` to execute vector search (`executeVectorSearch`) and FTS search (`executeFtsSearch` on `files` table) concurrently using `Promise.allSettled()`.
-    *   Error handling allows one search to fail while the other potentially succeeds.
-    *   Results mapped to `ContextObject` arrays, preserving original scores/ranks and adding `source` ('vector' or 'fts').
+1.  **[x] Update GPT Instructions (`gpt_instructions.md` - Revision):**
+    *   Removed references to `combined` mode.
+    *   Added logic for GPT to detect dual intent and make sequential `store` then `query` calls.
 
-2.  **[x] Implement RRF Function:**
-    *   Created the `applyRRF(vectorResults, ftsResults, k)` helper function.
-    *   Implemented RRF logic using `k = 60`, summing `1 / (k + rank)` for vector and FTS results based on shared `file_id`.
-    *   Returns a single list of `ContextObject`s sorted by descending RRF score, with `rrf_score` added.
+2.  **[x] Update OpenAPI Schema (`openapi.json` - Revision):**
+    *   Removed `"combined"` from the `mode` enum in `RequestPayload`.
 
-3.  **[x] Integrate RRF:**
-    *   Called `applyRRF` after concurrent searches resolve.
-    *   Passed the RRF-ranked list (`rrf_score` included) as `candidates` to the `rerankResults` function.
-    *   Updated `query_source` reporting logic to use `'hybrid'`, `'none'`, or `'error'` based on search success and result presence.
+3.  **[x] Simplify SQL Retrieval Functions (`sql/schema.sql` - Revision):**
+    *   Modified `search_memory_chunks` to remove all metadata filter parameters/logic.
+    *   Modified `fts_search_files` to remove internal filters and rely only on `websearch_to_tsquery` match.
 
-4.  **[x] Refine `rerankResults` with Weighting:**
-    *   Used the **Normalized RRF Score** (min-max scaled 0-1) as the `initial_score`.
-    *   Implemented **granular, additive weighting** for metadata boosts using the `ENTITY_WEIGHTS` constant.
-    *   Calculated `metadata_boost_score` by summing weights for matching entity types (people, locations, topics, type, sentiment, date_day/month/year, date_period, fts_date_range).
-    *   Calculated `final_score = Math.min(1.0, initial_score + metadata_boost_score)`.
-    *   Removed temporary scores (`rrf_score`, `initial_score`, `metadata_boost_score`, `final_score`, `source`) before returning final results.
+4.  **[x] Update Function Calls (`memory-action.ts` - Revision):**
+    *   Call to `search_memory_chunks` simplified.
+    *   Call to `fts_search_files` modified to pass `payload.query_text`.
 
-5.  **[x] Update API Schema & GPT Instructions:**
-    *   Modified `openapi.json`: Updated the `enum` for `SuccessResponse.properties.query_source` to only include `'hybrid'`, `'none'`, `'error'`.
-    *   Modified `gpt_instructions.md`: Updated the "Handling Action Responses" section to remove specific phrasing for obsolete sources (`vector_store`, `postgres_fallback_text`) and use general phrasing.
+5.  **[x] Implement Concurrent Search (`memory-action.ts`):** (No change in core execution)
+    *   Executes simplified `executeVectorSearch` and `executeFtsSearch` concurrently.
 
-6.  **[ ] Evaluation and Tuning:** (Status: **Pending / Future Task**) 
-    *   Initial weights in `ENTITY_WEIGHTS` and `RRF_K=60` are set.
-    *   Future work involves defining benchmarks and iteratively tuning these constants based on evaluation.
+6.  **[x] Implement RRF Function (`memory-action.ts`):** (No change in function logic)
+    *   `applyRRF` combines results based on `file_id`.
 
-**Rationale:** This approach combines the strengths of both search methods early via RRF, providing a better candidate list for the final, metadata-focused re-ranking step. Using the Normalized RRF score as the basis leverages combined confidence. Granular, additive weights provide direct control over entity importance, aligning with the journaling use case. Simplified `query_source` reporting matches the unified hybrid retrieval logic.
+7.  **[x] Integrate RRF (`memory-action.ts`):** (No change in integration logic)
+    *   Called after concurrent searches resolve.
+
+8.  **[x] Refine `rerankResults` with Stemming & Weighting (`memory-action.ts` - Revision):**
+    *   Implemented **stemming** for people/locations/topics comparison.
+    *   Boosts applied based on stemmed overlap and date component matching using `ENTITY_WEIGHTS`.
+
+9.  **[x] Remove `combined` Mode Logic (`memory-action.ts` - Revision):**
+    *   Removed conditional handling for the obsolete `combined` mode.
+
+10. **[x] Implement Enhanced Logging (`memory-action.ts`):** (Status: **Completed**)
+    *   Detailed logging for debugging and tuning added.
+
+11. **[ ] Evaluation and Tuning:** (Status: **Pending / Next Step - Requires Testing Data**)
+    *   Constants (`ENTITY_WEIGHTS`, `RRF_K`, `VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT`) require tuning.
+
+**Rationale (Revised "Upstream Splitting"):** This approach simplifies the action's responsibility by delegating intent splitting to the GPT. It ensures broad initial data retrieval and uses metadata appropriately for augmentation during re-ranking in the middleware, leading to a cleaner, more robust, and potentially more accurate system.
 
 ---
 
-**Overall Status:** **v1.8 Enhancements Complete.** Date parsing (v1.7.1) and Query Enhancement (v1.8 - RRF + Weighted Re-ranking) logic implemented. Ready for testing and potential tuning.
+**Overall Status:** **v1.8 Enhancements Implemented.** Core logic, stemming, and enhanced logging are complete. Ready for testing and tuning.
 
 ---
 
 ### Post-v1.8 Considerations / Known Issues
 
 *   **Full File Retrieval Limitation:** As implemented, the context returned to the GPT is limited by chunk size (vector) or truncation (FTS, currently 3000 chars). For queries requesting large original documents (like long emails), the full text cannot be retrieved. A future enhancement could add a specific mode or mechanism to retrieve the full `transcript_text` from the `files` table when needed.
-*   **Tuning:** The `RRF_K` and `ENTITY_WEIGHTS` values require evaluation and tuning.
+*   **Tuning:** Constants (`RRF_K`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT`) require evaluation and tuning, facilitated by enhanced logging.

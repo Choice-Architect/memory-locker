@@ -72,9 +72,9 @@
 
 ---
 
-### Phase 5: Enhancements & Optimization (v1.8.0 - Completed)
+### Phase 5: Enhancements & Optimization (v1.8.0 - Completed & Architecturally Revised Post-Testing)
 
-**Objective:** Improve date handling reliability (v1.7.1) and enhance query relevance through hybrid search and weighted re-ranking (v1.8.0).
+**Objective:** Improve date handling reliability (v1.7.1) and enhance query relevance through hybrid search and weighted re-ranking, delegating combined intent handling to the GPT (v1.8).
 
 1.  **(Obsolete) Previous Date Refactoring Attempts:** Versions older than v1.7 involved iterative refinement of pattern-matching within the Netlify function, which proved complex and incomplete. v1.7.1 adopts a new hybrid approach.
 
@@ -96,35 +96,37 @@
     *   **Rationale:** Simplifies the main parsing path, focuses Netlify logic on specific tasks, maintains components needed for query relevance, accepts limitations for ambiguous dates not normalized by GPT.
     *   **Status:** **Completed (v1.7.1).**
 
-5.  **Enhance Query Retrieval & Ranking (v1.8.0 - Completed):**
-    *   **Goal:** Improved query relevance by implementing true hybrid retrieval and weighted re-ranking.
-    *   **Approach (v1.8.0 - Hybrid):** (Ref: `learnings/02_enhancement_plan.md` v1.8 for full details)
-        1.  **Concurrent Search (Completed):** Implemented concurrent Vector Search (`executeVectorSearch`) and FTS search (`executeFtsSearch` on `files` table) using `Promise.allSettled`.
-        2.  **RRF Combination (Completed):** Combined results using Reciprocal Rank Fusion (`applyRRF` function) with `k = 60`.
-        3.  **Weighted Re-ranking (Completed):** Refined `rerankResults` function:
-            *   Used normalized RRF score (min-max scaled) as the base `initial_score`.
-            *   Implemented additive, granular metadata boosts using `ENTITY_WEIGHTS` constant.
-            *   Calculated `final_score = Math.min(1.0, initial_score + metadata_boost_score)`.
-        4.  **Schema/Instructions Update (Completed):** Updated `openapi.json` and `gpt_instructions.md` to use simplified `query_source` ('hybrid', 'none', 'error') and general response phrasing.
-        5.  **Tuning (Pending):** Initial constants (`RRF_K`, `ENTITY_WEIGHTS`) set. Future tuning planned based on evaluation.
-    *   **Rationale:** Leverages both semantic and keyword search upfront via RRF, then applies granular, weighted, metadata-focused re-ranking for improved precision in the journaling context.
-    *   **Status:** **Completed (v1.8.0).**
+5.  **Enhance Query Retrieval & Ranking (v1.8.0 - Architecturally Revised Post-Testing):**
+    *   **Goal:** Improved query relevance and simpler logic by having the GPT handle combined intents (store+query) via sequential calls, removing `combined` mode from middleware, broadening DB retrieval, and using metadata purely for augmentation during re-ranking.
+    *   **Approach (v1.8.0 - "Upstream Splitting"):** (Ref: `learnings/02_enhancement_plan.md` v1.8 Rev for full details)
+        1.  **GPT Instruction Update:** Instructed GPT to recognize dual intent and make sequential `store` then `query` calls.
+        2.  **OpenAPI Schema Update:** Removed `combined` mode from the schema.
+        3.  **Simplified SQL Retrieval:** Modified `search_memory_chunks` and `fts_search_files` to retrieve based **only** on core search logic (vector similarity or FTS match on full query text), removing all metadata filters.
+        4.  **Updated Function Calls:** Calls to SQL functions updated in `memory-action.ts`.
+        5.  **Concurrent Search:** Implemented concurrent Vector Search + FTS search using `Promise.allSettled`.
+        6.  **RRF Combination:** Combined results using Reciprocal Rank Fusion (`applyRRF` function).
+        7.  **Weighted Re-ranking for Augmentation:** Refined `rerankResults` function to use stemming for people/locations/topics boosts.
+        8.  **Removed `combined` Mode Logic:** Simplified middleware handler by removing `combined` mode handling.
+        9.  **Tuning (Pending):** RRF `k`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT` constants require tuning, facilitated by enhanced logging.
+    *   **Rationale (Revised):** Leverages GPT for intent splitting, simplifies middleware, ensures broad initial DB retrieval, and uses metadata purely for augmentation in re-ranking.
+    *   **Status:** **Implemented.** Code implementation and enhanced logging complete. Tuning pending based on testing.
 
 6.  **Future Considerations (Backlog):**
     *   Evaluation and tuning of RRF `k` and `ENTITY_WEIGHTS`.
 
 ---
 
-### Phase 6: Testing & Launch (Pending)
+### Phase 6: Testing & Launch (Pending / Ready to Start)
 
 1.  **Final Checks:** Perform regression testing after v1.8.0 implementation, review security configurations, evaluate query performance.
 
 ---
 
-### Known Limitations / Future Considerations (v1.8.0)
+### Known Limitations / Future Considerations (Post v1.8 Revision)
 
-1.  **Context Size Limit for Large Files:** The current query/combined modes return context based on either individual chunks (vector search) or truncated full transcripts (FTS search, currently limited to 3000 chars). This means for very large original inputs (e.g., long dictated emails), the GPT may not receive the *full* text in the retrieved context and cannot reconstruct it. Future enhancement could involve adding a dedicated retrieval mode (e.g., `retrieve_full_file`) to fetch the complete `transcript_text` when explicitly requested.
-2.  **RRF/Weight Tuning:** Evaluation and tuning of RRF `k` and `ENTITY_WEIGHTS` constants based on real-world usage patterns.
-3.  **Advanced Date/Time Queries:** Handling more complex temporal queries (e.g., recurring events, multi-day ranges beyond simple start date normalization).
+1.  **Context Size Limit for Large Files:** Remains unchanged.
+2.  **RRF/Weight Tuning:** Requires evaluation and tuning based on real-world usage patterns and enhanced logging.
+3.  **Advanced Date/Time Queries:** Remains a future consideration.
+4.  **Enhanced Logging:** (Addressed in v1.8 implementation) Implement detailed logging in `memory-action.ts` to aid debugging and tuning.
 
 --- 

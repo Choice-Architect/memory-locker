@@ -197,105 +197,58 @@ CREATE INDEX IF NOT EXISTS idx_transcript_embeddings_metadata_gin ON public.tran
 -- PART 4: FUNCTIONS
 -- =================================
 
--- Function for vector similarity search on memory chunks with metadata filtering
--- Drop the existing function first
-DROP FUNCTION IF EXISTS public.search_memory_chunks(vector(1536),double precision,integer,TEXT[],TEXT[],TEXT[],TEXT,TEXT,TEXT,TEXT);
-DROP FUNCTION IF EXISTS public.search_memory_chunks(vector(1536),double precision,integer,TEXT[],TEXT[],TEXT[],TEXT,TEXT,JSONB);
-
--- Recreate with updated signature and logic (removing date component filter)
-CREATE OR REPLACE FUNCTION public.search_memory_chunks(
-    query_embedding vector(1536),
-    match_threshold double precision,
-    match_count integer,
-    filter_topics TEXT[] DEFAULT NULL,
-    filter_people TEXT[] DEFAULT NULL,
-    filter_locations TEXT[] DEFAULT NULL,
-    filter_type TEXT DEFAULT NULL,
-    filter_sentiment TEXT DEFAULT NULL
-    -- filter_date_components JSONB DEFAULT NULL -- Parameter REMOVED
+-- Function for vector similarity search on memory chunks
+-- Simplified: Filters only on vector similarity threshold.
+CREATE OR REPLACE FUNCTION public.search_memory_chunks (
+  query_embedding vector(1536),
+  match_threshold float,
+  match_count int
 )
- RETURNS TABLE(
-     id uuid,
-     file_id uuid,
-     content_chunk text,
-     metadata jsonb,
-     similarity double precision,
-     chunk_index integer
- )
- LANGUAGE plpgsql
- -- Explicitly set the search path for security
- SET search_path = 'public', 'extensions'
-AS $function$
-BEGIN
-  RETURN QUERY
+RETURNS TABLE (
+  file_id uuid,
+  content_chunk text,
+  metadata jsonb,
+  similarity float,
+  chunk_index int
+)
+LANGUAGE sql STABLE
+AS $$
   SELECT
-    te.id,
     te.file_id,
     te.content_chunk,
     te.metadata,
-    1 - (te.embedding <=> query_embedding) AS similarity,
-    te.chunk_index
+    1 - (te.embedding <=> query_embedding) as similarity,
+    (te.metadata->>'chunk_index')::int as chunk_index
   FROM transcript_embeddings te
-  WHERE
-    -- Vector similarity check
-    1 - (te.embedding <=> query_embedding) > match_threshold
-
-    -- Standard Metadata Filters
-    AND (filter_topics IS NULL OR (te.metadata -> 'topics')::jsonb @> to_jsonb(filter_topics))
-    AND (filter_people IS NULL OR (te.metadata -> 'people')::jsonb @> to_jsonb(filter_people))
-    AND (filter_locations IS NULL OR (te.metadata -> 'locations')::jsonb @> to_jsonb(filter_locations))
-    AND (filter_type IS NULL OR te.metadata ->> 'type' = filter_type)
-    AND (filter_sentiment IS NULL OR te.metadata ->> 'sentiment' = filter_sentiment)
-
-    -- REMOVED Date Component Filter Logic
-    -- AND (
-    --     filter_date_components IS NULL OR -- Pass if no date filter object provided
-    --     EXISTS ( -- Check if AT LEAST ONE date object in the 'dates' array matches ALL provided components
-    --         SELECT 1
-    --         FROM jsonb_array_elements(te.metadata -> 'dates') AS d
-    --         WHERE
-    --             (filter_date_components ->> 'year' IS NULL OR (d ->> 'year')::int = (filter_date_components ->> 'year')::int)
-    --         AND (filter_date_components ->> 'month' IS NULL OR (d ->> 'month')::int = (filter_date_components ->> 'month')::int)
-    --         AND (filter_date_components ->> 'day' IS NULL OR (d ->> 'day')::int = (filter_date_components ->> 'day')::int)
-    --         AND (filter_date_components ->> 'day_of_week' IS NULL OR (d ->> 'day_of_week')::int = (filter_date_components ->> 'day_of_week')::int)
-    --         AND (filter_date_components ->> 'time_hour' IS NULL OR (d ->> 'time_hour')::int = (filter_date_components ->> 'time_hour')::int)
-    --         -- Add other component checks as needed (e.g., 'period', 'relative_marker')
-    --     )
-    -- )
-
-  ORDER BY similarity DESC
+  WHERE 1 - (te.embedding <=> query_embedding) > match_threshold
+  ORDER BY te.embedding <=> query_embedding
   LIMIT match_count;
-END;
-$function$
-;
+$$;
 
--- Function for Full-Text Search (FTS) on files table, handling ranking internally
--- Returns file data including the calculated rank.
-CREATE OR REPLACE FUNCTION public.fts_search_files(
-    query_string TEXT,
-    match_count INTEGER
+
+-- Function for Full-Text Search (FTS) on files table
+-- Simplified: Filters only on FTS match using websearch_to_tsquery, calculates rank.
+CREATE OR REPLACE FUNCTION public.fts_search_files (
+  query_string text,
+  match_count int
 )
 RETURNS TABLE (
-    id UUID,
-    transcript_text TEXT,
-    created_at TIMESTAMPTZ,
-    file_metadata JSONB,
-    rank REAL -- Use REAL for ts_rank_cd result
+  id uuid,
+  transcript_text text,
+  created_at timestamp with time zone,
+  file_metadata jsonb,
+  rank real -- Changed from float to real to match ts_rank return type
 )
-LANGUAGE sql STABLE -- Use STABLE as it only reads data
-SET search_path = 'public', 'extensions'
+LANGUAGE sql STABLE
 AS $$
-    SELECT
-        f.id,
-        f.transcript_text,
-        f.created_at,
-        f.file_metadata,
-        ts_rank_cd(f.transcript_tsv, websearch_to_tsquery('english', query_string)) AS rank
-    FROM
-        files AS f
-    WHERE
-        f.transcript_tsv @@ websearch_to_tsquery('english', query_string)
-    ORDER BY
-        rank DESC
-    LIMIT match_count;
+  SELECT
+    f.id,
+    f.transcript_text,
+    f.created_at,
+    f.file_metadata,
+    ts_rank(f.transcript_tsv, websearch_to_tsquery('english', query_string)) as rank
+  FROM files f
+  WHERE f.transcript_tsv @@ websearch_to_tsquery('english', query_string)
+  ORDER BY rank DESC
+  LIMIT match_count;
 $$; 

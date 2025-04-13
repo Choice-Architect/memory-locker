@@ -106,7 +106,7 @@ interface ProcessedEntities {
 interface RequestPayload {
     query_text: string;
     extracted_entities: ExtractedEntities; // Input uses the original ExtractedEntities
-    mode: 'store' | 'query' | 'combined';
+    mode: 'store' | 'query';
 }
 
 interface ContextObject {
@@ -243,12 +243,40 @@ const initializeClients = () => {
 // --- Utility Functions ---
 
 /**
- * Checks if there's any overlap between two arrays. Case-insensitive for strings.
+ * Stemmer helper function: Takes a string, splits into words, removes stop words,
+ * stems remaining words, and returns a Set of unique stems.
  */
-function checkOverlap(arr1?: any[], arr2?: any[]): boolean {
-    if (!arr1 || !arr2) return false;
-    const set1 = new Set(arr1.map(item => typeof item === 'string' ? item.toLowerCase() : item));
-    return arr2.some(item => set1.has(typeof item === 'string' ? item.toLowerCase() : item));
+function getStemmedWordSet(text?: string | string[]): Set<string> {
+    const stemmedSet = new Set<string>();
+    if (!text) return stemmedSet;
+
+    const items = Array.isArray(text) ? text : [text];
+
+    items.forEach(item => {
+        if (typeof item === 'string') {
+            const words = item.toLowerCase().split(/\s+/);
+            words.forEach(word => {
+                const cleanWord = word.replace(/[^a-z0-9]/gi, ''); // Remove punctuation
+                if (cleanWord && !STOP_WORDS.has(cleanWord)) {
+                    stemmedSet.add(stemmer(cleanWord));
+                }
+            });
+        }
+    });
+    return stemmedSet;
+}
+
+/**
+ * Checks if there's any overlap between two Sets of strings.
+ */
+function checkSetOverlap(set1: Set<string>, set2: Set<string>): boolean {
+    if (!set1 || !set2 || set1.size === 0 || set2.size === 0) return false;
+    for (const item of set1) {
+        if (set2.has(item)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // --- START: Date Parsing Helper Functions ---
@@ -463,6 +491,17 @@ async function rerankResults(
 
     console.log(`Re-ranking ${candidates.length} candidates...`);
 
+    // --- Pre-calculate stemmed sets for the query metadata --- START
+    const queryPeopleStems = getStemmedWordSet(queryMetadata.people);
+    const queryLocationsStems = getStemmedWordSet(queryMetadata.locations);
+    const queryTopicsStems = getStemmedWordSet(queryMetadata.topics);
+    console.log("Query Stems:", {
+        people: Array.from(queryPeopleStems),
+        locations: Array.from(queryLocationsStems),
+        topics: Array.from(queryTopicsStems)
+    });
+    // --- Pre-calculate stemmed sets for the query metadata --- END
+
     // 1. Normalize RRF Scores (Min-Max Scaling to 0-1)
     let minRrfScore = Infinity;
     let maxRrfScore = -Infinity;
@@ -490,28 +529,34 @@ async function rerankResults(
         let metadata_boost_score = 0.0;
         const candidateEntities = candidate.entities_in_chunk;
 
-        // Check entity overlaps and add weights
-        if (checkOverlap(queryMetadata.people, candidateEntities?.people)) {
+        // --- Calculate stemmed sets for the candidate metadata --- START
+        const candidatePeopleStems = getStemmedWordSet(candidateEntities?.people);
+        const candidateLocationsStems = getStemmedWordSet(candidateEntities?.locations);
+        const candidateTopicsStems = getStemmedWordSet(candidateEntities?.topics);
+        // --- Calculate stemmed sets for the candidate metadata --- END
+
+        // Check entity overlaps using stemmed sets and add weights
+        if (checkSetOverlap(queryPeopleStems, candidatePeopleStems)) {
             metadata_boost_score += ENTITY_WEIGHTS.people;
-            console.log(`Applied boost: +${ENTITY_WEIGHTS.people} (people) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
+            console.log(`Applied boost: +${ENTITY_WEIGHTS.people} (people - stemmed) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
         }
-        if (checkOverlap(queryMetadata.locations, candidateEntities?.locations)) {
+        if (checkSetOverlap(queryLocationsStems, candidateLocationsStems)) {
             metadata_boost_score += ENTITY_WEIGHTS.locations;
-            console.log(`Applied boost: +${ENTITY_WEIGHTS.locations} (locations) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
+            console.log(`Applied boost: +${ENTITY_WEIGHTS.locations} (locations - stemmed) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
         }
-        if (checkOverlap(queryMetadata.topics, candidateEntities?.topics)) {
+        if (checkSetOverlap(queryTopicsStems, candidateTopicsStems)) {
             metadata_boost_score += ENTITY_WEIGHTS.topics;
-            console.log(`Applied boost: +${ENTITY_WEIGHTS.topics} (topics) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
+            console.log(`Applied boost: +${ENTITY_WEIGHTS.topics} (topics - stemmed) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
         }
 
-        // Check for exact match on type
-        if (queryMetadata.type && candidateEntities?.type && queryMetadata.type === candidateEntities.type) {
+        // Check for exact match on type (no stemming needed)
+        if (queryMetadata.type && candidateEntities?.type && queryMetadata.type.toLowerCase() === candidateEntities.type.toLowerCase()) {
             metadata_boost_score += ENTITY_WEIGHTS.type;
             console.log(`Applied boost: +${ENTITY_WEIGHTS.type} (type) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
         }
 
-        // Check for exact match on sentiment
-        if (queryMetadata.sentiment && candidateEntities?.sentiment && queryMetadata.sentiment === candidateEntities.sentiment) {
+        // Check for exact match on sentiment (no stemming needed)
+        if (queryMetadata.sentiment && candidateEntities?.sentiment && queryMetadata.sentiment.toLowerCase() === candidateEntities.sentiment.toLowerCase()) {
             metadata_boost_score += ENTITY_WEIGHTS.sentiment;
             console.log(`Applied boost: +${ENTITY_WEIGHTS.sentiment} (sentiment) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
         }
@@ -629,35 +674,19 @@ async function rerankResults(
 /**
  * Executes the vector search RPC call against Supabase.
  * @param embedding The query embedding vector.
- * @param queryMetadata Processed query entities for filtering.
  * @returns A promise resolving to an array of ContextObjects from vector search, or empty array on error.
  */
 async function executeVectorSearch(
-    embedding: number[],
-    queryMetadata: ProcessedEntities
+    embedding: number[]
 ): Promise<ContextObject[]> {
     console.log("Executing Vector Search...");
     try {
-        // Add logging for filters being sent
-        console.log(`  -> Vector search filters: ${JSON.stringify({
-            filter_topics: queryMetadata.topics || null,
-            filter_people: queryMetadata.people || null,
-            filter_locations: queryMetadata.locations || null,
-            filter_type: queryMetadata.type || null,
-            filter_sentiment: queryMetadata.sentiment || null,
-        })}`);
-
         const { data: searchResults, error: searchError } = await supabase.rpc(
             'search_memory_chunks',
-            { // Use named parameters matching the SQL function definition
+            { // Use named parameters matching the simplified SQL function definition
                 query_embedding: embedding,
                 match_threshold: VECTOR_MATCH_THRESHOLD,
-                match_count: VECTOR_MATCH_COUNT, // Get more results initially for RRF
-                filter_topics: queryMetadata.topics || null,
-                filter_people: queryMetadata.people || null,
-                filter_locations: queryMetadata.locations || null,
-                filter_type: queryMetadata.type || null,
-                filter_sentiment: queryMetadata.sentiment || null,
+                match_count: VECTOR_MATCH_COUNT // Get more results initially for RRF
             }
         );
 
@@ -696,49 +725,21 @@ async function executeVectorSearch(
 
 /**
  * Executes the Full-Text Search (FTS) query against the 'files' table.
- * @param queryMetadata Processed query entities.
- * @param originalQueryEntities Original entities from the request (needed for raw date strings).
+ * @param queryText The original user query text for FTS.
  * @returns A promise resolving to an array of ContextObjects from FTS search, or empty array on error.
  */
 async function executeFtsSearch(
-    queryMetadata: ProcessedEntities,
-    originalQueryEntities: ExtractedEntities
+    queryText: string
 ): Promise<ContextObject[]> {
     console.log("Executing FTS Search...");
     try {
-        // 1. Gather entities for FTS (include ORIGINAL date strings from input)
-        const entityValues: string[] = [];
-        // Use originalQueryEntities to get raw date strings
-        if (originalQueryEntities.dates) {
-            originalQueryEntities.dates.forEach(dateInput => {
-                if (typeof dateInput === 'string') {
-                    entityValues.push(dateInput);
-                } else if (typeof dateInput === 'object' && dateInput.original) {
-                    entityValues.push(dateInput.original); // Use original string from object
-                }
-            });
-        }
-        // Use processedMetadata for other entities
-        (queryMetadata.people || []).forEach(p => entityValues.push(p));
-        (queryMetadata.locations || []).forEach(l => entityValues.push(l));
-        (queryMetadata.topics || []).forEach(t => entityValues.push(t));
-        if (queryMetadata.type) entityValues.push(queryMetadata.type);
-        if (queryMetadata.sentiment) entityValues.push(queryMetadata.sentiment);
-        // DO NOT include queryMetadata.language
-
-        // Remove duplicates and empty strings
-        const uniqueEntities = [...new Set(entityValues)].filter(e => e && e.trim() !== '');
-
-        if (uniqueEntities.length === 0) {
-            console.log("No valid non-language entities found for FTS query.");
+        // 1. Use the raw queryText directly for FTS
+        if (!queryText || queryText.trim() === '') {
+            console.log("No valid query text provided for FTS query.");
             return [];
         }
 
-        // 2. Construct the FTS query string
-        const ftsQueryString = uniqueEntities
-            .map(term => term.replace(/['&|!():*]/g, '')) // Basic escaping
-            .filter(term => term.trim() !== '')
-            .join(' | ');
+        const ftsQueryString = queryText; // Use the full query text
 
         console.log(`FTS Search: Using query string: "${ftsQueryString}"`);
 
@@ -746,7 +747,7 @@ async function executeFtsSearch(
         const { data: ftsResults, error: ftsError } = await supabase.rpc(
             'fts_search_files',
             {
-                query_string: ftsQueryString,
+                query_string: ftsQueryString, // Pass the original query text
                 match_count: FALLBACK_MATCH_COUNT // Pass the desired match count
             }
         );
@@ -940,12 +941,12 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         console.log("Final Processed Metadata:", JSON.stringify(processedMetadata));
         // --- END: Date Processing ---
 
-        // Mode handling: store, query, combined
-        const mode = payload.mode;
+        // Mode handling: store or query
+        const mode = payload.mode; // mode is now only 'store' or 'query'
         let queryEmbedding: number[] | null = null; // Initialize query embedding
 
         // 2. Process based on mode
-        if (payload.mode === 'store' || payload.mode === 'combined') {
+        if (payload.mode === 'store') {
             console.log("Processing 'store' mode...");
             const textToStore = payload.query_text;
 
@@ -1049,7 +1050,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             }
         }
 
-        if (payload.mode === 'query' || payload.mode === 'combined') {
+        if (payload.mode === 'query') {
             console.log("Processing 'query' mode...");
             const queryText = payload.query_text;
             // Use processedMetadata which has EnhancedNormalizedDate[]
@@ -1085,15 +1086,16 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             let vectorResults: ContextObject[] = [];
             let ftsResults: ContextObject[] = [];
 
+            console.log("--- Starting Concurrent Search ---");
             // Only run vector search if embedding was successful
             const searchPromises: Promise<ContextObject[]>[] = [];
             if (queryEmbedding) {
-                searchPromises.push(executeVectorSearch(queryEmbedding, queryMetadata));
+                searchPromises.push(executeVectorSearch(queryEmbedding));
             } else {
                  searchPromises.push(Promise.resolve([])); // Add placeholder if embedding failed
             }
             // Always run FTS search
-            searchPromises.push(executeFtsSearch(queryMetadata, originalQueryEntities));
+            searchPromises.push(executeFtsSearch(queryText));
 
 
             const searchResultsSettled = await Promise.allSettled(searchPromises);
@@ -1114,15 +1116,21 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                   query_source = 'error';
             }
 
-            console.log(`Concurrent searches finished. Vector: ${vectorResults.length}, FTS: ${ftsResults.length}`);
+            console.log(`--- Concurrent Search Finished ---`);
+            console.log(`Raw Counts - Vector: ${vectorResults.length}, FTS: ${ftsResults.length}`);
 
             // c. Apply RRF
+            console.log("--- Starting RRF Combination ---");
             let combinedResults: ContextObject[] = [];
             if (vectorResults.length > 0 || ftsResults.length > 0) {
                  combinedResults = applyRRF(vectorResults, ftsResults);
+                // Log RRF scores before normalization (already logged in applyRRF)
+                // Cast to any for logging the internal rrf_score property
+                console.log("Combined results after RRF (before re-ranking):", combinedResults.map(c => ({ file_id: c.file_id, chunk_index: c.chunk_index, source: c.source, rrf_score: (c as any).rrf_score?.toFixed(4) })) );
             } else {
                  console.log("No results from either vector or FTS search before RRF.");
             }
+            console.log("--- Finished RRF Combination ---");
 
 
             // d. Determine Query Source (based on results *before* re-ranking)
@@ -1146,6 +1154,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
 
             // e. Apply Re-ranking
+            console.log("--- Starting Re-ranking ---");
             if (combinedResults.length > 0) {
                  console.log(`Calling rerankResults for ${combinedResults.length} candidates from source: ${query_source}...`);
                  // Pass the RRF results (with rrf_score) to the new rerankResults
@@ -1161,8 +1170,9 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                  console.log("Skipping re-ranking as there are no combined results.");
                  retrieved_context = []; // Ensure context is empty
             }
+            console.log("--- Finished Re-ranking ---");
 
-        } // End of 'query'/'combined' block
+        } // End of 'query' block
 
 
         // --- Final Response Construction ---

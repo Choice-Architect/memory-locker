@@ -105,10 +105,9 @@
             "type": "string",
             "enum": [
               "store",
-              "query",
-              "combined"
+              "query"
             ],
-            "description": "Operation mode: 'store' only saves, 'query' only searches, 'combined' does both."
+            "description": "Operation mode: 'store' only saves, 'query' only searches. Combined intents are handled by sequential store/query calls."
           }
         }
       },
