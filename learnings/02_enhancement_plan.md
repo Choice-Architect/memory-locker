@@ -83,7 +83,7 @@
 
 Building upon the completed v1.7.1 date handling, the query retrieval process was fundamentally revised based on testing and a strategic shift:
 
-**Goal:** Improve relevance and simplify logic by having the GPT handle combined intents (making separate store/query calls), removing the `combined` mode, broadening database retrieval, and using metadata (including `organizations`) purely for augmentation during middleware re-ranking.
+**Goal:** Improve relevance and simplify logic by having the GPT handle combined intents (making separate store/query calls), removing the `combined` mode, broadening database retrieval, and using metadata (including the now-integrated `organizations`) purely for augmentation during middleware re-ranking.
 
 **Implementation Steps (`memory-action.ts`, `sql/schema.sql`, `gpt_instructions.md`, `openapi.json`) - Revised**
 
@@ -114,6 +114,8 @@ Building upon the completed v1.7.1 date handling, the query retrieval process wa
 8.  **[x] Refine `rerankResults` with Stemming & Weighting (`memory-action.ts` - Revision):**
     *   Implemented **stemming** for people/locations/topics (and planned `organizations`) comparison.
     *   Boosts applied based on stemmed overlap and date component matching using `ENTITY_WEIGHTS`.
+    *   Implemented **stemming** for `people`/`locations`/`topics`/`organizations` comparison.
+    *   Boosts applied based on stemmed overlap and date component matching using `ENTITY_WEIGHTS`.
 
 9.  **[x] Remove `combined` Mode Logic (`memory-action.ts` - Revision):**
     *   Removed conditional handling for the obsolete `combined` mode.
@@ -129,7 +131,7 @@ Building upon the completed v1.7.1 date handling, the query retrieval process wa
 
 ---
 
-**Overall Status:** **v1.8 Enhancements Implemented.** Core logic, stemming, enhanced logging, and code cleanup/refactoring are complete. Ready for testing and tuning.
+**Overall Status:** **v1.8 Enhancements (incl. `organizations` fix) Implemented.** Core logic, stemming, enhanced logging, and code cleanup/refactoring are complete. Ready for testing and tuning.
 
 ---
 
@@ -140,11 +142,10 @@ Building upon the completed v1.7.1 date handling, the query retrieval process wa
 
 ---
 
-### Next Steps (Post-v1.8 Implementation & `organizations` Correction Plan)
+### Next Steps (Post v1.8.1 - `organizations` fix complete)
 
-1.  **Implement `organizations` Correction Plan:** Execute the steps outlined in `learnings/03_fixes.md` to add `organizations` support to the schema, interfaces, and re-ranking logic.
-2.  **Testing:** Perform comprehensive testing (direct API & Custom GPT) focusing on previous failure points, the new sequential call logic for combined intents, and specific tests for `organizations` handling.
-3.  **Analysis & Tuning:** Analyze test results and logs. Tune constants (`VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`, `RRF_K`, `ENTITY_WEIGHTS` including `organizations`) iteratively based on performance and result quality.
-4.  **Discussion Points for Next Session:**
+1.  **Testing:** Perform comprehensive testing (direct API & Custom GPT) focusing on previous failure points, the new sequential call logic for combined intents, and specific tests for `organizations` handling.
+2.  **Analysis & Tuning:** Analyze test results and logs. Tune constants (`VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`, `RRF_K`, `ENTITY_WEIGHTS`) iteratively based on performance and result quality.
+3.  **Discussion Points for Next Session:**
     *   Review potential improvements for the Stop Words list (`memory-action.ts`).
     *   Review the complexity and logic of the `rerankResults` function (`memory-action.ts`) after `organizations` integration.

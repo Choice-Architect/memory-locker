@@ -80,6 +80,7 @@ interface ExtractedEntities { // Kept for Request Payload structure
     priority?: number;
     conversation_id?: string;
     thread_id?: string;
+    organizations?: string[]; // Added organizations
     [key: string]: any; // Allow flexible entity types
 }
 
@@ -90,6 +91,7 @@ interface ProcessedEntities {
     dates?: EnhancedNormalizedDate[]; // Use the enhanced structure
     locations?: string[];
     topics?: string[];
+    organizations?: string[]; // Added organizations
     type?: string;
     sentiment?: string;
     priority?: number;
@@ -176,6 +178,7 @@ const ENTITY_WEIGHTS = {
     people: 0.10,
     locations: 0.10,
     topics: 0.05,
+    organizations: 0.10, // Added organizations weight
     type: 0.05,
     sentiment: 0.05,
     date_day: 0.15,     // Highest date precision
@@ -484,6 +487,7 @@ function mapDbMetadataToProcessedEntities(metadata: any): ProcessedEntities {
         dates: Array.isArray(metadata.dates) ? metadata.dates as EnhancedNormalizedDate[] : [],
         locations: metadata.locations || [],
         topics: metadata.topics || [],
+        organizations: metadata.organizations || [], // Added organizations mapping
         type: metadata.type || undefined,
         sentiment: metadata.sentiment || undefined,
         priority: metadata.priority || undefined,
@@ -555,10 +559,12 @@ async function rerankResults(
     const queryPeopleStems = getStemmedWordSet(queryMetadata.people);
     const queryLocationsStems = getStemmedWordSet(queryMetadata.locations);
     const queryTopicsStems = getStemmedWordSet(queryMetadata.topics);
+    const queryOrganizationsStems = getStemmedWordSet(queryMetadata.organizations); // Added organizations stems
     console.log("Query Stems:", {
         people: Array.from(queryPeopleStems),
         locations: Array.from(queryLocationsStems),
-        topics: Array.from(queryTopicsStems)
+        topics: Array.from(queryTopicsStems),
+        organizations: Array.from(queryOrganizationsStems) // Added logging
     });
     // --- Pre-calculate stemmed sets for the query metadata --- END
 
@@ -593,6 +599,7 @@ async function rerankResults(
         const candidatePeopleStems = getStemmedWordSet(candidateEntities?.people);
         const candidateLocationsStems = getStemmedWordSet(candidateEntities?.locations);
         const candidateTopicsStems = getStemmedWordSet(candidateEntities?.topics);
+        const candidateOrganizationsStems = getStemmedWordSet(candidateEntities?.organizations); // Added organizations stems
         // --- Calculate stemmed sets for the candidate metadata --- END
 
         // Check entity overlaps using stemmed sets and add weights
@@ -607,6 +614,10 @@ async function rerankResults(
         if (checkSetOverlap(queryTopicsStems, candidateTopicsStems)) {
             metadata_boost_score += ENTITY_WEIGHTS.topics;
             console.log(`Applied boost: +${ENTITY_WEIGHTS.topics} (topics - stemmed) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
+        }
+        if (checkSetOverlap(queryOrganizationsStems, candidateOrganizationsStems)) { // Added organizations check
+            metadata_boost_score += ENTITY_WEIGHTS.organizations;
+            console.log(`Applied boost: +${ENTITY_WEIGHTS.organizations} (organizations - stemmed) for candidate ${candidate.file_id} chunk ${candidate.chunk_index}`);
         }
 
         // Check for exact match on type (no stemming needed)
@@ -945,6 +956,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         const processedMetadata: ProcessedEntities = {
              // Spread other entities first
             ...(payload.extracted_entities as Omit<ExtractedEntities, 'dates'>), // Cast to omit dates for type safety
+            organizations: payload.extracted_entities.organizations || [], // Added organizations
             dates: successfullyParsedDates // Assign the processed dates array
         };
         // Remove language if present, as per instructions (though we decided to ignore the field overall later)
@@ -968,6 +980,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
                  people: processedMetadata.people,
                  locations: processedMetadata.locations,
                  topics: processedMetadata.topics,
+                 organizations: processedMetadata.organizations, // Added organizations
                  type: processedMetadata.type,
                  sentiment: processedMetadata.sentiment,
                  priority: processedMetadata.priority,

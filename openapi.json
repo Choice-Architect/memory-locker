@@ -185,6 +185,13 @@
           "language": {
             "type": "string",
             "description": "Detected language of the query_text (e.g., 'en', 'fr'). Used for FTS config, excluded from FTS query terms & metadata boost."
+          },
+          "organizations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Extracted organization names."
           }
         },
         "additionalProperties": true
@@ -216,6 +223,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "organizations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Extracted organization names."
           },
           "type": {
             "type": "string"
@@ -287,6 +301,13 @@
               "Night"
             ],
             "description": "Inferred period of day (Morning, Afternoon, Evening, Night)."
+          },
+          "organizations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Extracted organization names."
           }
         }
       },
