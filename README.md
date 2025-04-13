@@ -2,7 +2,7 @@
 
 ## Overview
 
-Memory Locker Action serves as the backend for the "Memory Locker" Custom GPT. It provides a secure interface for storing and retrieving personal notes, memories, and information using natural language. The system leverages a sophisticated pipeline involving entity extraction, hybrid date parsing, vector search, full-text search (FTS), Reciprocal Rank Fusion (RRF), and metadata-based re-ranking to ensure relevant and accurate memory recall.
+Memory Locker Action serves as the backend for the "Memory Locker" Custom GPT. It provides a secure interface for storing and retrieving personal notes, memories, and reminders using natural language. The system involves: entity extraction, hybrid date parsing, vector search, full-text search (FTS), Reciprocal Rank Fusion (RRF), and metadata-based re-ranking to ensure relevant and accurate memory recall.
 
 ## Tech Stack
 
@@ -25,6 +25,10 @@ Memory Locker Action serves as the backend for the "Memory Locker" Custom GPT. I
     *   **Reciprocal Rank Fusion (RRF):** Combines the ranked lists from vector and FTS searches using RRF to leverage the strengths of both methods.
     *   **Weighted Re-ranking:** Further refines the RRF results by applying weighted boosts based on stemmed matches between query entities and stored metadata (people, locations, topics, organizations), granular date component matches, and FTS date range matches. Entity weights are configurable (`ENTITY_WEIGHTS`).
 *   **Text Chunking:** Splits text into manageable chunks (`CHUNK_SIZE=1000`, `CHUNK_OVERLAP=200`) for embedding and vector storage.
+*   **Code Structure:** Adheres to DRY (Don't Repeat Yourself) principles, promoting maintainability and reducing redundancy. This is achieved through:
+    *   **Modular Functions:** Encapsulating specific logic units like date processing (`processInputDates`), embedding generation (`generateEmbeddings`), search execution (`executeVectorSearch`, `executeFtsSearch`), and re-ranking (`rerankResults`).
+    *   **Constants:** Defining configuration values (e.g., `CHUNK_SIZE`, `ENTITY_WEIGHTS`) in one place for easy modification.
+    *   **Helper Utilities:** Using smaller, focused functions (e.g., `extractTimeInfo`, `mapDbMetadataToProcessedEntities`) for reusable tasks.
 
 
 ## How it Works (Interaction Flow)
@@ -48,14 +52,14 @@ Entities extracted from user input are crucial for both storing meta data contex
 
 **1. Custom GPT Layer:**
 
-*   **Input:** Raw user text or voice.
+*   **Input:** Raw user text (or transcribed voice).
 *   **Processing:**
     *   Identifies and extracts entities: `people`, `locations`, `organizations`, `topics`, `dates`, and potentially inferred `type`, `sentiment`, or `priority`.
     *   Translates the main `query_text` and any extracted `dates` strings to English.
     *   **Date Handling:** Attempts to normalize extracted date expressions.
         *   If successful (for the date part), it provides `{"original": "full original phrase", "normalized": "Month DD, YYYY"}`.
         *   If normalization fails, it passes the original (English translated) date string.
-*   **Output:** Sends the `mode`, English `query_text`, and the `extracted_entities` object (containing strings and potentially the structured date objects) to the Netlify Function via the Action call.
+*   **Output:** Sends the `mode`, English `query_text`, and the `extracted_entities` object (containing strings and structured date objects) to the Netlify Function via the Action call.
 
 **2. Middleware Layer (Netlify Function - `memory-action.ts`):**
 
