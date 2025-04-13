@@ -111,13 +111,12 @@ interface RequestPayload {
 interface ContextObject {
     chunk: string;
     timestamp: string; // ISO 8601 format
-    entities_in_chunk: ProcessedEntities; // Output uses ProcessedEntities with v1.7 EnhancedNormalizedDate
+    entities_in_chunk: ProcessedEntities; // Output uses ProcessedEntities with EnhancedNormalizedDate
     file_id: string; // UUID as string - Now guaranteed for both sources
     chunk_id?: string; // UUID as string (from vector search)
     chunk_index?: number; // (from vector search)
     similarity?: number; // Raw vector similarity
     rank?: number; // Raw FTS rank
-    // v1.8 additions
     source?: 'vector' | 'fts'; // Source of this specific context object before RRF
 }
 
@@ -348,8 +347,6 @@ function extractTimeInfo(originalString: string): Partial<EnhancedNormalizedDate
          components.period = 'Afternoon'; // Or Evening? Afternoon is safer default.
     }
 
-    // Remove chrono-node usage as it's not needed for period-only extraction
-    // console.log(`     -> Final time components extracted: ${JSON.stringify(components)}`);
     return components;
 }
 
@@ -998,8 +995,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             organizations: payload.extracted_entities.organizations || [], // Added organizations
             dates: successfullyParsedDates // Assign the processed dates array
         };
-        // Remove language if present, as per instructions (though we decided to ignore the field overall later)
-        // delete processedMetadata.language;
+        // Remove language if present
 
         console.log("Final Processed Metadata (excluding language):", JSON.stringify(processedMetadata));
         // --- END: Date Processing ---
