@@ -19,4 +19,9 @@
 [[redirects]]
   from = "/memory-action"
   to = "/.netlify/functions/memory-action"
-  status = 200 # Rewrite rule (acts like a proxy) 
+  status = 200 # Rewrite rule (acts like a proxy)
+
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Access-Control-Allow-Headers = "x-api-key" 

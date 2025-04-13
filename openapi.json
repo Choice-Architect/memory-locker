@@ -5,6 +5,14 @@
     "version": "1.5",
     "description": "Stores or retrieves text memories with extracted entities, using vector search, FTS fallback, and application-layer re-ranking. Date handling focuses on extracting components."
   },
+  "x-oai-openapi": "1.0",
+  "x-oai-openai-integration": {
+    "authentication": {
+      "type": "api_key",
+      "key_name": "x-api-key",
+      "location": "header"
+    }
+  },
   "servers": [
     {
       "url": "https://memory-locker-gpt.netlify.app",
@@ -68,23 +76,11 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "apiKey": []
-          }
-        ]
+        }
       }
     }
   },
   "components": {
-    "securitySchemes": {
-      "apiKey": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "x-api-key"
-      }
-    },
     "schemas": {
       "RequestPayload": {
         "type": "object",
