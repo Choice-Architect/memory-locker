@@ -1,6 +1,6 @@
-## Memory Locker: Custom GPT Product Development Roadmap (v1.8.0)
+## Memory Locker: Custom GPT Product Development Roadmap (Final)
 
-**Goal:** Create a Custom GPT within the official ChatGPT application that allows a user to store and retrieve personal memories, notes, and information using natural language, voice, and potentially file uploads. The GPT will leverage Actions to interact with a Supabase backend via a Netlify Function.
+**Goal:** Create a Custom GPT within the official ChatGPT application that allows a user to store and retrieve personal memories, notes, and information using natural language. The GPT leverages an Action (`memory-action`) to interact with a Supabase backend via a Netlify Function.
 
 **Core Technologies:**
 
@@ -32,112 +32,82 @@
 
 ---
 
-### Phase 2: Core Action Development (Netlify Function - Completed Pre-v1.7)
+### Phase 2: Core Action Development (Netlify Function - Completed)
 
-**Objective:** Built the `memory-action` serverless function (`memory-action.ts`) bridging the GPT Action and Supabase, including initial Storage and Query logic.
+**Objective:** Built the `memory-action` serverless function (`memory-action.ts`) bridging the GPT Action and Supabase.
 
-1.  **API Endpoint Design:** Defined a single endpoint (`/.netlify/functions/memory-action`) using POST, managed by the `mode` parameter (`store`, `query`, `combined`). API contract specified in `openapi.json`. Authentication uses `x-api-key`. *(Note: `combined` mode was removed in v1.8)*
-    *   **Standard Authentication Method (v1.8 onwards):** The function code explicitly checks for a secret key provided in the `x-api-key` request header. The OpenAPI specification (`openapi.json`) uses the `x-oai-openai-integration` block at the root level to define this `api_key` authentication method for seamless integration with ChatGPT Actions. Configuration in `netlify.toml` ensures this header is passed through.
+1.  **API Endpoint Design:** Defined a single endpoint (`/.netlify/functions/memory-action`) using POST, managed by the `mode` parameter (`store` or `query`). The `combined` mode is **not** supported. API contract specified in `openapi.json`. Authentication uses `x-api-key`.
+    *   **Authentication Method:** The function code checks for a secret key in the `x-api-key` header. The OpenAPI spec (`openapi.json`) uses `x-oai-openai-integration` to define this `api_key` method for ChatGPT Action integration.
 2.  **Supabase Integration:** Implemented client initialization and secure connection using environment variables and the service role key (bypassing RLS).
-3.  **Core Function Logic (Pre-v1.7):**
-    *   **Storage (`store`/`combined`):**
-        *   Generated `text-embedding-3-small` embeddings for text chunks.
-        *   Stored file info and `file_metadata` in the `files` table.
-        *   Stored chunks, embeddings, `chunk_index`, and chunk-level `metadata` in `transcript_embeddings`.
-        *   **Date Handling (Iterative Refinement):** Initial versions used `chrono-node` and increasingly complex pattern-matching (`date-fns`) in `parseDateStringToEnhanced` to extract structured date components (`year`, `month`, `day`, `period`, etc.). This approach faced persistent challenges with reliability and edge cases (Ref: v1.4, v1.5, v1.6 plans/analyses).
-    *   **Query (`query`/`combined`):** Foundational logic for retrieving stored memories was established. *(Note: The specific retrieval and ranking strategy was significantly redesigned in Phase 5 - see Item 5 below for the current plan)*.
-4.  **Error Handling & Logging:** Implemented try/catch blocks, basic logging.
-5.  **Deployment & Initial Testing:** Function deployed and tested.
+3.  **Core Function Logic (`store` mode):**
+    *   Generates `text-embedding-3-small` embeddings for text chunks.
+    *   Stores file info and extracted `file_metadata` (including simplified date components and period) in the `files` table.
+    *   Stores chunks, embeddings, `chunk_index`, and chunk-level `metadata` in `transcript_embeddings`.
+    *   **Date Handling (Current):** Employs a hybrid approach. Relies on upstream GPT instructions to provide normalized `"Month DD, YYYY"` dates when possible. The function parses these, or attempts to parse original strings using `date-fns`. Only extracts the `period` (e.g., 'Morning') using keywords, not specific times. Stores structured date components.
+4.  **Core Function Logic (`query` mode - Hybrid Search Pipeline):**
+    *   Generates query embedding.
+    *   Performs concurrent Vector Search (semantic) and FTS Search (keyword, using `ts_rank > 0.05` filtering).
+    *   Combines results using Reciprocal Rank Fusion (RRF).
+    *   Applies weighted re-ranking using stemmed entity matches (`people`, `locations`, `topics`, `organizations`) and date component matching against metadata.
+    *   Returns the final ranked context to the GPT.
+5.  **Error Handling & Logging:** Implemented try/catch blocks and enhanced logging for debugging/tuning.
+6.  **Deployment & Initial Testing:** Function deployed and tested.
 
 ---
 
-### Phase 3: Custom GPT Configuration & Action Schema (v1.7.1 Update Completed)
+### Phase 3: Custom GPT Configuration & Action Schema (Completed)
 
 **Objective:** Configured the Custom GPT, including instructions and Action definition.
 
 1.  **Custom GPT Creation:** Created GPT shell (name, description, etc.).
-2.  **Instruction Authoring (`learnings/02_gpt_instructions.md`):** Defined persona, purpose, behavior. Key instructions included entity extraction.
-    *   **v1.7 Update Completed:** Modified instructions to ask the GPT to provide *both* original date strings and normalized `"Month DD, YYYY"` versions where possible, using the *start date* for ranges/seasons. (Ref: `learnings/02_enhancement_plan.md` v1.7.1).
-3.  **Action Schema Definition (`openapi.json`):** Created OpenAPI spec.
-    *   **v1.7.1 Update Completed:** Modified the `entities.dates` input schema to accept `string | {original: string, normalized?: string}`. Updated the `EnhancedNormalizedDate` *response/storage* schema to only include date components (`year`, `month`, `day`, `day_of_week`, `week_number`) plus `period`. Removed specific time components (`time_hour`, `time_minute`, `time_second`), `original`, and `note`. (Ref: `learnings/02_enhancement_plan.md` v1.7.1).
-4.  **Action Configuration:** Configured API key authentication.
+2.  **Instruction Authoring (`learnings/02_gpt_instructions.md`):** Defined persona, purpose, behavior. Key instructions include:
+    *   Entity extraction rules (people, locations, orgs, topics, type, sentiment, priority).
+    *   Hybrid date handling (requesting original + normalized `"Month DD, YYYY"`).
+    *   **Explicit handling for combined inputs:** Instructs GPT to make sequential `store` then `query` calls within a single turn.
+3.  **Action Schema Definition (`openapi.json`):** Created OpenAPI spec defining `store` and `query` modes, expected entities (including hybrid date format and simplified date storage), and authentication.
+4.  **Action Configuration:** Configured API key authentication using `x-oai-openai-integration`.
 
 ---
 
-### Phase 4: Integration Testing & Refinement (Completed Pre-v1.7)
+### Phase 4: Integration Testing & Refinement (Completed)
 
 **Objective:** Tested the end-to-end flow and refined implementation based on results.
 
-1.  **End-to-End Testing:** Performed various tests.
-2.  **Refinement & Bug Fixing:** Addressed initial issues.
+1.  **End-to-End Testing:** Performed various tests (`store`, `query`, combined intents).
+2.  **Refinement & Bug Fixing:** Addressed issues, notably correcting FTS logic (rank-based filtering) and refining GPT instructions for combined intents.
 
 ---
 
-### Phase 5: Enhancements & Optimization (v1.8.0 - Completed & Architecturally Revised Post-Testing)
+### Phase 5: Enhancements & Optimization (Completed)
 
-**Objective:** Improve date handling reliability (v1.7.1) and enhance query relevance through hybrid search and weighted re-ranking, delegating combined intent handling to the GPT (v1.8).
+**Objective:** Improve date handling reliability and enhance query relevance through hybrid search, RRF, weighted re-ranking, and refined GPT instruction-based intent handling.
 
-1.  **(Obsolete) Previous Date Refactoring Attempts:** Versions older than v1.7 involved iterative refinement of pattern-matching within the Netlify function, which proved complex and incomplete. v1.7.1 adopts a new hybrid approach.
-
-2.  **(Obsolete) Relevance Boosting (v1.3 - Superseded):** The original relevance boosting from v1.3, which relied solely on hierarchical date/period matching after vector search, has been superseded by the v1.8 hybrid search and weighted re-ranking approach.
-
-3.  **Non-Date Entity Extraction (Completed & Stable):**
-    *   **Status:** Stable baseline. Extraction of `people`, `locations`, `topics`, `type`, `sentiment`, `priority` (and intended `organizations`) established and integrated into re-ranking.
-
-4.  **Refactor Date Parsing (Hybrid Approach - v1.7.1 - Completed):**
-    *   **Goal:** Achieved reliable date/time component extraction by leveraging upstream GPT normalization and targeted Netlify function logic.
-    *   **Approach (v1.7.1 - Hybrid):** (Ref: `learnings/02_enhancement_plan.md` v1.8)
-        1.  **GPT Task (Completed):** Updated GPT instructions (`02_gpt_instructions.md`) to request normalized `\"Month DD, YYYY\"` dates alongside original strings when possible.
-        2.  **Schema Update (Completed):** Updated `openapi.json` to handle the new input date format and the simplified `EnhancedNormalizedDate` output format (only date components + `period`).
-        3.  **Netlify Function (`memory-action.ts`) (Completed):**
-            *   Refactored date processing to prioritize parsing the GPT-provided `normalized` date (`\"Month DD, YYYY\"`) using `date-fns` (`parseNormalizedDate`).
-            *   **Simplified** `extractTimeInfo` to use only keyword matching (on original string) to extract the `period` ('Morning', 'Afternoon', etc.). **Removed** parsing of specific hours/minutes/seconds.
-            *   Implemented a new, clean function (`parseOriginalStringDate`) using only `date-fns` to attempt parsing dates the GPT couldn't normalize.
-            *   Ensured only structured date components (`year`, `month`, `day`, `day_of_week`, `week_number`) and the extracted `period` are stored in metadata.
-    *   **Rationale:** Simplifies the main parsing path, focuses Netlify logic on specific tasks, maintains components needed for query relevance, accepts limitations for ambiguous dates not normalized by GPT.
-    *   **Status:** **Completed (v1.7.1).**
-
-5.  **Enhance Query Retrieval & Ranking (v1.8.0 - Architecturally Revised Post-Testing):**
-    *   **Goal:** Improved query relevance and simpler logic by having the GPT handle combined intents (store+query) via sequential calls, removing `combined` mode from middleware, broadening DB retrieval, and using metadata purely for augmentation during re-ranking.
-    *   **Approach (v1.8.0 - "Upstream Splitting"):** (Ref: `learnings/02_enhancement_plan.md` v1.8 Rev for full details)
-        1.  **[x] GPT Instruction Update:** Instructed GPT to recognize dual intent and make sequential `store` then `query` calls.
-        2.  **[x] OpenAPI Schema Update:** Removed `combined` mode from the schema.
-        3.  **[x] Simplified SQL Retrieval:** Modified `search_memory_chunks` and `fts_search_files` to retrieve based **only** on core search logic (vector similarity or FTS match on full query text), removing all metadata filters.
-        4.  **[x] Updated Function Calls:** Calls to SQL functions updated in `memory-action.ts`.
-        5.  **[x] Concurrent Search:** Implemented concurrent Vector Search + FTS search using `Promise.allSettled`.
-        6.  **[x] RRF Combination:** Combined results using Reciprocal Rank Fusion (`applyRRF` function).
-        7.  **[x] Weighted Re-ranking for Augmentation:** Refined `rerankResults` function to use stemming for `people`/`locations`/`topics`/`organizations` boosts.
-        8.  **[x] Removed `combined` Mode Logic:** Simplified middleware handler by removing `combined` mode handling.
-        9.  **[x] Enhanced Logging:** Implemented enhanced logging to facilitate tuning.
-        10. [ ] Tuning (Pending): RRF `k`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT`, **FTS Rank Threshold** constants require tuning, facilitated by enhanced logging. Initial tests (`testing/tests-results-4.csv`) showed good performance, but FTS failed due to logical flaw.
-        11. [x] FTS Logic Correction (Completed): FTS logic using strict `@@` matching corrected to use rank-based filtering (`ts_rank > 0.05`). Change applied to `sql/schema.sql` and Supabase function.
-    *   Rationale (Revised): Leverages GPT for intent splitting, simplifies middleware, ensures broad initial DB retrieval, and uses metadata purely for augmentation in re-ranking. FTS logic corrected.
-    *   Status: Implemented & Initial Testing Positive (Vector/RRF). Core logic including `organizations` integration and upstream splitting is complete and functions correctly. FTS logic **corrected** and awaiting testing before proceeding with full hybrid testing and tuning.
-
-6.  **Future Considerations (Backlog):**
-    *   Evaluation and tuning of RRF `k`, `ENTITY_WEIGHTS`, and **FTS Rank Threshold** after testing.
-    *   Investigation into FTS performance/configuration after logical correction and tuning.
+1.  **Date Parsing (Hybrid Approach - Implemented):**
+    *   **Status:** Completed. Leverages GPT normalization and focused function logic (`date-fns` for parsing, keyword matching for period). See Phase 2 description.
+2.  **Query Retrieval & Ranking (Hybrid Pipeline - Implemented):**
+    *   **Status:** Completed. Includes concurrent Vector + FTS (rank-filtered), RRF combination, and weighted re-ranking with stemming. See Phase 2 description.
+3.  **Combined Intent Handling (GPT Instructions - Implemented):**
+    *   **Status:** Completed. Instructions updated to guide sequential `store`/`query` calls. `combined` mode removed from Action.
+4.  **`organizations` Entity Integration (Completed):**
+    *   **Status:** Completed. Fully integrated into storage and re-ranking.
+5.  **Enhanced Logging (Completed):**
+    *   **Status:** Completed. Aids debugging and tuning.
 
 ---
 
-### Phase 6: Testing & Launch (Underway)
+### Phase 6: Current Status & Next Steps
 
-1.  **Initial Checks:** Performed initial regression testing after v1.8.0 / `organizations` implementation (`testing/tests-results-4.csv`). Reviewed security configurations. Initial query performance and relevance are good via vector search.
-2.  **Next Steps:** Perform comprehensive hybrid search testing (including corrected FTS logic) and tune parameters (`ENTITY_WEIGHTS`, `RRF_K`, **FTS Rank Threshold**, etc.).
-
----
-
-### Known Limitations / Future Considerations (Post v1.8 Revision)
-
-1.  **Context Size Limit for Large Files:** Remains unchanged.
-2.  **RRF/Weight/Threshold Tuning:** Requires evaluation and tuning based on real-world usage patterns and enhanced logging (pending testing).
-3.  **FTS Logic:** (Corrected) Initial FTS implementation used strict `@@` matching. Now corrected to use rank-based filtering (`ts_rank > 0.05`). Awaiting testing and tuning.
-4.  **Advanced Date/Time Queries:** Remains a future consideration.
-5.  **Enhanced Logging:** (Completed in v1.8 implementation) Detailed logging in `memory-action.ts` aids debugging and tuning.
+1.  **Deployment Ready:** Core functionality is implemented and tested. Documentation is updated.
+2.  **Tuning Required:** Retrieval parameters (`ENTITY_WEIGHTS`, `RRF_K`, FTS Rank Threshold, etc.) have baseline values and require ongoing monitoring and tuning based on real-world usage.
+3.  **Known Limitations / Future Considerations:**
+    *   **Context Size:** Limited context for large files.
+    *   **Combined Intent Reliability:** Success depends on GPT consistently following instructions; requires monitoring.
+    *   **GPT Trust UI:** Missing "Always allow" checkbox needs investigation.
+    *   **Advanced Date/Time Queries:** Not supported currently.
 
 ---
 
-### Post-MVP Enhancements (Future Considerations)
+### Post-Launch Enhancements (Future Considerations)
 
 *(The following items are outside the scope of the current MVP but represent potential future directions for enhancement based on user feedback and further development)*
 

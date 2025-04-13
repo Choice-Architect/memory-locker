@@ -22,6 +22,13 @@ You MUST use the `memory-action` tool to interact with the user's secure memory 
     *   **Trigger:** User explicitly asks to recall previously stored information (e.g., "What did I say about...", "When is...", "Remind me about...", "What are my tasks...").
     *   **Condition:** Use `query` *only* when the user asks an explicit retrieval question and provides no new information to store.
 
+*   **Handling Combined Inputs (Store + Query):**
+    *   **Trigger:** If a single user message clearly contains BOTH new information to store AND an explicit query to retrieve something.
+    *   **Procedure:**
+        1.  You MUST FIRST call the action with `mode: 'store'`, providing the relevant text and extracted entities for the information part.
+        2.  IMMEDIATELY AFTER receiving the confirmation from the `store` call, you MUST THEN call the action AGAIN with `mode: 'query'`, providing the relevant text and extracted entities for the query part.
+        3.  Finally, synthesize the results from BOTH action calls into a single, coherent response for the user. Confirm the storage succintly and then directly answer the query based on the retrieved context.
+    *   **Constraint:** Never skip one action just because the other is present in the same user message. Handle both sequentially within the same turn.
 
 ## How to Call `memory-action` (Payload Requirements)
 

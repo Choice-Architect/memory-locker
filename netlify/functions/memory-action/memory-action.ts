@@ -71,7 +71,7 @@ export interface EnhancedNormalizedDate {
 
 interface ExtractedEntities { // Kept for Request Payload structure
     people?: string[];
-    // v1.7: Input uses flexible date types
+    // Input uses flexible date types (string | {original: string, normalized?: string})
     dates?: InputDateEntity[];
     locations?: string[];
     topics?: string[];
@@ -82,6 +82,7 @@ interface ExtractedEntities { // Kept for Request Payload structure
     thread_id?: string;
     organizations?: string[]; // Added organizations
     [key: string]: any; // Allow flexible entity types
+    source?: 'vector' | 'fts'; // Source of this specific context object before RRF
 }
 
 // Interface for entities AFTER internal processing (using EnhancedNormalizedDate)
@@ -124,10 +125,11 @@ interface ContextObject {
 interface SuccessResponse {
     retrieved_context: ContextObject[]; // Will contain cleaned ContextObjects (no internal scores)
     storage_status: string;
-    // Updated enum to match openapi.json (Removed old values)
-    query_source: 'hybrid' | 'none' | 'error';
+    // Final query source determination
+    query_source: 'hybrid' | 'vector' | 'fts' | 'none' | 'error'; // Added vector/fts
     message_for_gpt?: string;
     error: null;
+    rank?: number;
 }
 
 interface ErrorResponse {
@@ -915,6 +917,38 @@ function applyRRF(
 // --- Main Handler Function ---
 const handler: Handler = async (event: HandlerEvent, context: HandlerContext): Promise<{ statusCode: number; body: string; headers?: { [key: string]: string } }> => {
     const headers = { 'Content-Type': 'application/json' };
+
+    // Helper function to determine the final query_source for the response
+    // Defined within handler scope to access handler-scoped variables
+    function determineFinalQuerySource(
+        finalContext: ContextObject[],
+        initialQuerySource: SuccessResponse['query_source'],
+        vectorResults: ContextObject[],
+        ftsResults: ContextObject[]
+    ): SuccessResponse['query_source'] {
+        if (initialQuerySource === 'error') {
+            return 'error'; // Preserve error state
+        }
+        if (finalContext.length === 0) {
+            return 'none'; // No results after re-ranking
+        }
+
+        // Check sources present in the final context
+        const hasVector = finalContext.some(c => c.source === 'vector');
+        const hasFts = finalContext.some(c => c.source === 'fts');
+
+        if (hasVector && hasFts) {
+            return 'hybrid';
+        } else if (hasVector) {
+            return 'vector';
+        } else if (hasFts) {
+            return 'fts';
+        } else {
+            console.warn("Final context not empty, but no vector or fts source detected. Returning 'none'.");
+            return 'none';
+        }
+    }
+
     try {
         initializeClients(); // Initialize Supabase and OpenAI clients
 
@@ -946,6 +980,11 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
         // Default query source to 'none', will be updated based on search results
         let query_source: SuccessResponse['query_source'] = 'none';
         let message_for_gpt: string = ""; // Initialize message for GPT
+
+        // --- Declare result arrays here to ensure scope --- START
+        let vectorResults: ContextObject[] = [];
+        let ftsResults: ContextObject[] = [];
+        // --- Declare result arrays here to ensure scope --- END
 
         // --- Date Processing ---
         // Encapsulated date processing logic
@@ -1080,7 +1119,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             const queryText = payload.query_text;
             // Use processedMetadata which has EnhancedNormalizedDate[]
             const queryMetadata = processedMetadata;
-             // Use original entities for FTS query construction (raw date strings)
+             // FTS uses the full query_text from the payload
             const originalQueryEntities = payload.extracted_entities;
 
             if (!queryText) {
@@ -1108,9 +1147,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
 
             // b. Execute Concurrent Searches (Vector + FTS)
-            let vectorResults: ContextObject[] = [];
-            let ftsResults: ContextObject[] = [];
-
             console.log("--- Starting Concurrent Search ---");
             // Only run vector search if embedding was successful
             const searchPromises: Promise<ContextObject[]>[] = [];
@@ -1149,7 +1185,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
             let combinedResults: ContextObject[] = [];
             if (vectorResults.length > 0 || ftsResults.length > 0) {
                  combinedResults = applyRRF(vectorResults, ftsResults);
-                // Log RRF scores before normalization
                 console.log("Combined results after RRF (before re-ranking):", combinedResults.map(c => ({ file_id: c.file_id, chunk_index: c.chunk_index, source: c.source, rrf_score: (c as any).rrf_score?.toFixed(4) })) );
             } else {
                  console.log("No results from either vector or FTS search before RRF.");
@@ -1198,17 +1233,19 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext): P
 
         } // End of 'query' block
 
-
         // --- Final Response Construction ---
         console.log(`Final retrieved_context count: ${retrieved_context.length}, final query_source: ${query_source}`);
 
+        // Determine the final source using the helper defined at the start of the handler
+        const finalQuerySource = determineFinalQuerySource(retrieved_context, query_source, vectorResults, ftsResults);
+
         const successResponse: SuccessResponse = {
-            retrieved_context: retrieved_context, // Contains cleaned ContextObjects after re-ranking
+            retrieved_context: retrieved_context,
             storage_status: storage_status,
-            // Ensure query_source reflects the final state (e.g., 'none' if re-ranking removed all)
-            query_source: retrieved_context.length > 0 ? query_source : (query_source === 'error' ? 'error' : 'none'),
-            message_for_gpt: message_for_gpt || (query_source === 'none' ? "No relevant information found." : ""), // Provide default 'none' message if empty
+            query_source: finalQuerySource,
+            message_for_gpt: message_for_gpt || (finalQuerySource === 'none' ? "No relevant information found." : ""),
             error: null,
+            rank: undefined,
         };
 
         return {
