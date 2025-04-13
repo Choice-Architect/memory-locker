@@ -108,30 +108,29 @@
         7.  **[x] Weighted Re-ranking for Augmentation:** Refined `rerankResults` function to use stemming for `people`/`locations`/`topics`/`organizations` boosts.
         8.  **[x] Removed `combined` Mode Logic:** Simplified middleware handler by removing `combined` mode handling.
         9.  **[x] Enhanced Logging:** Implemented enhanced logging to facilitate tuning.
-        10. **[~] Tuning (Pending):** RRF `k`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT` constants require tuning, facilitated by enhanced logging. Initial tests (`testing/tests-results-4.csv`) show good performance, but FTS yielded no results, requiring investigation.
-        11. **[~] FTS Logic Correction (Identified):** Realized FTS logic using strict `@@` matching was flawed, discarding partial matches. Plan revised to use rank-based filtering (See `03_fixes.md`).
-    *   **Rationale (Revised):** Leverages GPT for intent splitting, simplifies middleware, ensures broad initial DB retrieval, and uses metadata purely for augmentation in re-ranking. FTS logic to be corrected for relevance.
-    *   **Status:** Implemented & Initial Testing Positive (Vector/RRF). Core logic including `organizations` integration and upstream splitting is complete and functions correctly in initial tests. **FTS logic requires correction** (rank-based filtering) before proceeding with full hybrid testing and tuning.
+        10. [ ] Tuning (Pending): RRF `k`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT`, **FTS Rank Threshold** constants require tuning, facilitated by enhanced logging. Initial tests (`testing/tests-results-4.csv`) showed good performance, but FTS failed due to logical flaw.
+        11. [x] FTS Logic Correction (Completed): FTS logic using strict `@@` matching corrected to use rank-based filtering (`ts_rank > 0.05`). Change applied to `sql/schema.sql` and Supabase function.
+    *   Rationale (Revised): Leverages GPT for intent splitting, simplifies middleware, ensures broad initial DB retrieval, and uses metadata purely for augmentation in re-ranking. FTS logic corrected.
+    *   Status: Implemented & Initial Testing Positive (Vector/RRF). Core logic including `organizations` integration and upstream splitting is complete and functions correctly. FTS logic **corrected** and awaiting testing before proceeding with full hybrid testing and tuning.
 
 6.  **Future Considerations (Backlog):**
-    *   Implementation of corrected FTS logic (rank-based filtering).
-    *   Evaluation and tuning of RRF `k` and `ENTITY_WEIGHTS` after FTS correction.
-    *   Investigation into FTS performance/configuration after logical correction.
+    *   Evaluation and tuning of RRF `k`, `ENTITY_WEIGHTS`, and **FTS Rank Threshold** after testing.
+    *   Investigation into FTS performance/configuration after logical correction and tuning.
 
 ---
 
 ### Phase 6: Testing & Launch (Underway)
 
 1.  **Initial Checks:** Performed initial regression testing after v1.8.0 / `organizations` implementation (`testing/tests-results-4.csv`). Reviewed security configurations. Initial query performance and relevance are good via vector search.
-2.  **Next Steps:** Correct FTS logic (rank-based filtering). Perform comprehensive hybrid search testing and tune parameters (`ENTITY_WEIGHTS`, `RRF_K`, etc.).
+2.  **Next Steps:** Perform comprehensive hybrid search testing (including corrected FTS logic) and tune parameters (`ENTITY_WEIGHTS`, `RRF_K`, **FTS Rank Threshold**, etc.).
 
 ---
 
 ### Known Limitations / Future Considerations (Post v1.8 Revision)
 
 1.  **Context Size Limit for Large Files:** Remains unchanged.
-2.  **RRF/Weight Tuning:** Requires evaluation and tuning based on real-world usage patterns and enhanced logging (pending FTS correction).
-3.  **FTS Logic:** Initial FTS implementation used strict `@@` matching, incorrectly discarding partial matches. Awaiting correction to use rank-based filtering.
+2.  **RRF/Weight/Threshold Tuning:** Requires evaluation and tuning based on real-world usage patterns and enhanced logging (pending testing).
+3.  **FTS Logic:** (Corrected) Initial FTS implementation used strict `@@` matching. Now corrected to use rank-based filtering (`ts_rank > 0.05`). Awaiting testing and tuning.
 4.  **Advanced Date/Time Queries:** Remains a future consideration.
 5.  **Enhanced Logging:** (Completed in v1.8 implementation) Detailed logging in `memory-action.ts` aids debugging and tuning.
 

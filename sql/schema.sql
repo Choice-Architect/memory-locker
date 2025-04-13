@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION "public"."fts_search_files"("query_string" "text", "m
     f.file_metadata,
     ts_rank(f.transcript_tsv, websearch_to_tsquery('english', query_string)) as rank
   FROM files f
-  WHERE f.transcript_tsv @@ websearch_to_tsquery('english', query_string)
+  WHERE ts_rank(f.transcript_tsv, websearch_to_tsquery('english', query_string)) > 0.05
   ORDER BY rank DESC
   LIMIT match_count;
 $$;

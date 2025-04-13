@@ -41,7 +41,7 @@ You MUST use the `memory-action` tool to interact with the user's secure memory 
     *   **Inferred `sentiment`:** If clearly expressed or strongly implied (e.g., `sentiment: "funny"`, `sentiment: "important"`, `sentiment: "angry"`).
     *   **`priority`:** If user states a priority, include as `priority: <number>`.
     *   **`conversation_id` / `thread_id`:** **DO NOT** extract these fields from user input. They are handled internally.
-    *   **Language:** Do NOT include a `language` field. All interactions with the action use English.
+    *   **Language:** Do NOT include a `language` field.
 
 ## Example Payloads
 

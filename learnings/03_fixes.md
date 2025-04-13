@@ -31,12 +31,12 @@ Based on challenges with query filtering and combined intent handling, the v1.8 
 
 **Revised Plan:**
 
-1.  **[ ] Modify `fts_search_files` SQL Function:**
+1.  [x] **Modify `fts_search_files` SQL Function:** (Completed)
     *   Remove the strict `WHERE f.transcript_tsv @@ websearch_to_tsquery(...)` clause.
-    *   Add a rank-based filtering clause, e.g., `WHERE ts_rank(f.transcript_tsv, websearch_to_tsquery('english', query_string)) > 0.01`. This threshold ensures a baseline level of relevance and allows documents with partial term matches to be included.
+    *   Add a rank-based filtering clause: `WHERE ts_rank(f.transcript_tsv, websearch_to_tsquery('english', query_string)) > 0.05`. (Threshold set to 0.05 as baseline)
     *   Retain `ORDER BY rank DESC` and `LIMIT match_count` to return the top-ranked results.
-2.  **[ ] Apply Changes:** Update the function definition in `sql/schema.sql` locally and apply the `CREATE OR REPLACE FUNCTION` statement in the Supabase SQL Editor.
-3.  **[ ] Re-Test:** Re-run previous FTS test cases (e.g., Q1) to verify that the function now returns relevant rows, including those with partial matches.
-4.  **[ ] Integrate & Tune:** Once FTS returns ranked results correctly, proceed with broader testing and tuning of RRF/weights as previously planned.
+2.  [x] **Apply Changes:** (Completed) Updated the function definition locally in `sql/schema.sql` and applied via `CREATE OR REPLACE FUNCTION` statement in Supabase SQL Editor.
+3.  [ ] **Re-Test:** (Next Step) Re-run previous FTS test cases (e.g., Q1) to verify that the function now returns relevant rows, including those with partial matches.
+4.  [ ] **Integrate & Tune:** (Following successful tests) Once FTS returns ranked results correctly, proceed with broader testing and tuning of RRF/weights and the FTS rank threshold as previously planned.
 
 **Rationale:** Shifting from strict `@@` matching to rank-based filtering allows the FTS component to function as intended – identifying potentially relevant documents based on shared keywords and letting the ranking mechanism determine the best matches. This fixes the core logical flaw where partially relevant documents were being incorrectly excluded. 

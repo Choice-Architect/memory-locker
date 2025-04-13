@@ -124,29 +124,28 @@ Building upon the completed v1.7.1 date handling, the query retrieval process wa
     *   Detailed logging for debugging and tuning added.
     *   Cleanup of unnecessary comments completed.
 
-11. **[ ] Evaluation and Tuning:** (Status: **Initial Testing Done; FTS Failed; Tuning Pending**)
-    *   Constants (`ENTITY_WEIGHTS` including `organizations`, `RRF_K`, `VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`) require tuning.
-    *   Initial test run (`testing/tests-results-4.csv`) shows core logic is working, but FTS yielded no results, requiring investigation before full tuning.
-    *   **FTS Logical Flaw:** FTS implementation used strict `@@` matching, incorrectly filtering out partial matches. Requires correction to use rank-based filtering (see `03_fixes.md`).
+11. **[x] Evaluation and Tuning:** (Status: **Initial Testing Done; FTS Corrected; Tuning Pending**)
+    *   Constants (`ENTITY_WEIGHTS` including `organizations`, `RRF_K`, `VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`, **FTS Rank Threshold**) require tuning.
+    *   Initial test run (`testing/tests-results-4.csv`) showed core logic working, but FTS yielded no results due to logical flaw.
+    *   **FTS Logical Flaw Corrected:** FTS implementation now uses rank-based filtering (`ts_rank > 0.05`) instead of strict `@@` matching. Awaiting testing and potential tuning of the threshold.
 
-**Rationale (Revised "Upstream Splitting"):** This approach simplifies the action's responsibility by delegating intent splitting to the GPT. It ensures broad initial data retrieval and uses metadata appropriately for augmentation during re-ranking in the middleware, leading to a cleaner, more robust, and potentially more accurate system. The FTS component logic needs correction.
+**Rationale (Revised "Upstream Splitting"):** This approach simplifies the action's responsibility by delegating intent splitting to the GPT. It ensures broad initial data retrieval and uses metadata appropriately for augmentation during re-ranking in the middleware, leading to a cleaner, more robust, and potentially more accurate system. The FTS component logic has been corrected and awaits testing.
 
 ---
 
-**Overall Status:** **v1.8 Enhancements (incl. `organizations` fix) Implemented & Initial Testing Positive (Vector/RRF).** Core logic, stemming, enhanced logging, and code cleanup/refactoring are complete. **Requires FTS logical correction (rank-based filtering)** before proceeding with hybrid testing and tuning.
+**Overall Status:** **v1.8 Enhancements (incl. `organizations` fix) Implemented & Initial Testing Positive (Vector/RRF).** Core logic, stemming, enhanced logging, and code cleanup/refactoring are complete. **FTS logical correction (rank-based filtering) completed.** Proceeding with hybrid testing and tuning.
 
 ---
 
 ### Post-v1.8 Considerations / Known Issues
 
-*   **Full File Retrieval Limitation:** As implemented, the context returned to the GPT is limited by chunk size (vector) or truncation (FTS, currently 3000 chars). For queries requesting large original documents (like long emails), the full text cannot be retrieved. A future enhancement could add a specific mode or mechanism to retrieve the full `transcript_text` from the `files` table when needed.
-*   **FTS Logic:** Initial FTS implementation used strict `@@` matching, incorrectly discarding partial matches. Requires correction to use rank-based filtering (see `03_fixes.md`).
-*   **Tuning:** Constants (`RRF_K`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`) require evaluation and tuning, facilitated by enhanced logging (pending FTS correction).
+*   **Full File Retrieval Limitation:** As implemented, the context returned to the GPT is limited by chunk size (vector) or truncation (FTS, 3000 chars). For queries requesting large original documents (like long emails), the full text cannot be retrieved. A future enhancement could add a specific mode or mechanism to retrieve the full `transcript_text` from the `files` table when needed.
+*   **FTS Logic Correction:** (Completed) FTS implementation now uses rank-based filtering (`ts_rank > 0.05`) instead of strict `@@` matching.
+*   **Tuning:** Constants (`RRF_K`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`, **FTS Rank Threshold**) require evaluation and tuning, facilitated by enhanced logging.
 
 ---
 
-### Next Steps (Post v1.8.1 - `organizations` fix complete)
+### Next Steps (Post v1.8.1 - FTS fix complete)
 
-1.  **Correct FTS Logic:** Modify the `fts_search_files` SQL function to remove the strict `@@` match and filter based on `ts_rank` threshold instead (see `03_fixes.md`). Apply change to Supabase.
-2.  **Testing:** Perform comprehensive testing (direct API & Custom GPT) focusing on FTS performance with the corrected logic, previous failure points, sequential calls, and `organizations` handling.
-3.  **Analysis & Tuning:** Analyze test results and logs. Tune constants (`VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`, `RRF_K`, `ENTITY_WEIGHTS`, FTS rank threshold) iteratively based on performance and result quality.
+1.  **Testing:** Perform comprehensive testing (direct API & Custom GPT) focusing on FTS performance with the corrected logic, previous failure points, sequential calls, and `organizations` handling.
+2.  **Analysis & Tuning:** Analyze test results and logs. Tune constants (`VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`, `RRF_K`, `ENTITY_WEIGHTS`, FTS rank threshold) iteratively based on performance and result quality.
