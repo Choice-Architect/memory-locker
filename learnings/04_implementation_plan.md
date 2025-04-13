@@ -49,18 +49,18 @@
 
 **Phase 3: Middleware Refactoring (`netlify/functions/memory-action/memory-action.ts`)**
 
-6.  **Task 3.1: Update `executeVectorSearch` Call** (Status: **Pending**)
+6.  **Task 3.1: Update `executeVectorSearch` Call** (Status: **Completed**)
     *   **Action:** Remove arguments corresponding to the removed metadata filter parameters in the `supabase.rpc('search_memory_chunks', ...)` call.
 
-7.  **Task 3.2: Update `executeFtsSearch` Call** (Status: **Pending**)
+7.  **Task 3.2: Update `executeFtsSearch` Call** (Status: **Completed**)
     *   **Action:** Change the `query_string` argument in the `supabase.rpc('fts_search_files', ...)` call to use `payload.query_text`.
 
-8.  **Task 3.3: Implement Stemming Logic in `rerankResults`** (Status: **Pending**)
+8.  **Task 3.3: Implement Stemming Logic in `rerankResults`** (Status: **Completed**)
     *   **Action:** Before metadata overlap checks (people, locations, topics):
         *   Define/use helper logic to stem words within entity strings for both query and candidate metadata.
         *   Store these stemmed representations (e.g., sets of stemmed words).
 
-9.  **Task 3.4: Refactor Re-ranking Boosts for Stemmed Overlap** (Status: **Pending**)
+9.  **Task 3.4: Refactor Re-ranking Boosts for Stemmed Overlap** (Status: **Completed**)
     *   **Action:** Modify `metadata_boost_score` calculation in `rerankResults`.
     *   Compare stemmed representations (from Task 3.3) for people, locations, topics. Apply `ENTITY_WEIGHTS` boost on intersection.
     *   Keep date component logic as is.
@@ -73,7 +73,7 @@
 
 **Phase 4: Documentation & Testing**
 
-12. **Task 4.1: Update Documentation (`learnings/*.md`)** (Status: **Partially Completed - Current Session**)
+12. **Task 4.1: Update Documentation (`learnings/*.md`)** (Status: **Completed**)
     *   **Action:** Review all learning files (`01`, `02`, `03`, `04`) to ensure consistency with this implemented plan.
     *   Add commit hash(es) to `03_fixes.md`.
 
@@ -82,14 +82,14 @@
     *   Review Netlify logs.
 
 14. **Task 4.3: Analysis & Tuning** (Status: **Pending**)
-    *   **Action:** Analyze results and logs. Tune constants (`VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT`, `RRF_K`, `ENTITY_WEIGHTS`) iteratively.
+    *   **Action:** Analyze results and logs. Tune constants (`VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`, `RRF_K`, `ENTITY_WEIGHTS`) iteratively.
 
 ---
 
 **Next Session Discussion Points:**
 *   Review potential improvements for the Stop Words list (`memory-action.ts`).
 *   Review the complexity and logic of the `rerankResults` function (`memory-action.ts`).
-*   Continue with pending implementation tasks (3.1-3.4, 4.2, 4.3).
+*   Continue with pending implementation tasks (4.2, 4.3).
 
 ---
 

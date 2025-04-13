@@ -123,7 +123,7 @@ Building upon the completed v1.7.1 date handling, the query retrieval process wa
     *   Cleanup of unnecessary comments completed.
 
 11. **[ ] Evaluation and Tuning:** (Status: **Pending / Next Step - Requires Testing Data**)
-    *   Constants (`ENTITY_WEIGHTS`, `RRF_K`, `VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT`) require tuning.
+    *   Constants (`ENTITY_WEIGHTS`, `RRF_K`, `VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`) require tuning.
 
 **Rationale (Revised "Upstream Splitting"):** This approach simplifies the action's responsibility by delegating intent splitting to the GPT. It ensures broad initial data retrieval and uses metadata appropriately for augmentation during re-ranking in the middleware, leading to a cleaner, more robust, and potentially more accurate system.
 
@@ -136,4 +136,4 @@ Building upon the completed v1.7.1 date handling, the query retrieval process wa
 ### Post-v1.8 Considerations / Known Issues
 
 *   **Full File Retrieval Limitation:** As implemented, the context returned to the GPT is limited by chunk size (vector) or truncation (FTS, currently 3000 chars). For queries requesting large original documents (like long emails), the full text cannot be retrieved. A future enhancement could add a specific mode or mechanism to retrieve the full `transcript_text` from the `files` table when needed.
-*   **Tuning:** Constants (`RRF_K`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `_MATCH_COUNT`) require evaluation and tuning, facilitated by enhanced logging.
+*   **Tuning:** Constants (`RRF_K`, `ENTITY_WEIGHTS`, `VECTOR_MATCH_THRESHOLD`, `VECTOR_MATCH_COUNT`, `FALLBACK_MATCH_COUNT`) require evaluation and tuning, facilitated by enhanced logging.

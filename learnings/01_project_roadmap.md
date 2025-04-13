@@ -36,7 +36,7 @@
 
 **Objective:** Built the `memory-action` serverless function (`memory-action.ts`) bridging the GPT Action and Supabase, including initial Storage and Query logic.
 
-1.  **API Endpoint Design:** Defined a single endpoint (`/.netlify/functions/memory-action`) using POST, managed by the `mode` parameter (`store`, `query`, `combined`). API contract specified in `openapi.json`. Authentication uses `x-api-key`.
+1.  **API Endpoint Design:** Defined a single endpoint (`/.netlify/functions/memory-action`) using POST, managed by the `mode` parameter (`store`, `query`, `combined`). API contract specified in `openapi.json`. Authentication uses `x-api-key`. *(Note: `combined` mode was removed in v1.8)*
 2.  **Supabase Integration:** Implemented client initialization and secure connection using environment variables and the service role key (bypassing RLS).
 3.  **Core Function Logic (Pre-v1.7):**
     *   **Storage (`store`/`combined`):**
@@ -128,5 +128,20 @@
 2.  **RRF/Weight Tuning:** Requires evaluation and tuning based on real-world usage patterns and enhanced logging.
 3.  **Advanced Date/Time Queries:** Remains a future consideration.
 4.  **Enhanced Logging:** (Addressed in v1.8 implementation) Implement detailed logging in `memory-action.ts` to aid debugging and tuning.
+
+---
+
+### Post-MVP Enhancements (Future Considerations)
+
+*(The following items are outside the scope of the current MVP but represent potential future directions for enhancement based on user feedback and further development)*
+
+1.  **Advanced Re-ranking Models:** Explore replacing the current weighted boosting with more sophisticated machine learning models (e.g., LambdaMART, cross-encoders) or leveraging LLMs for re-ranking, potentially improving relevance at the cost of complexity/latency.
+2.  **Full Document Retrieval:** Implement a mechanism to retrieve the full text of large documents (`files.transcript_text`) when the context required exceeds chunk/FTS limits.
+3.  **Query Expansion:** Automatically expand user queries with synonyms or related terms to improve search recall.
+4.  **Graph-Based Retrieval:** Investigate representing memories and entities as a knowledge graph to enable more complex relational queries.
+5.  **Personalization:** If user identification is re-introduced, explore personalized re-ranking based on user interaction history.
+6.  **Advanced Date/Time Capabilities:** Enhance date parsing and querying to handle more complex ranges, recurring events, or fuzzy time expressions beyond the current capabilities.
+7.  **UI/Frontend Improvements:** If moving beyond the basic Custom GPT interface, develop a dedicated frontend with richer features for browsing, managing, and visualizing memories.
+8.  **Multi-Modal Support:** Allow storing and potentially searching based on images or other non-textual data associated with memories.
 
 --- 
